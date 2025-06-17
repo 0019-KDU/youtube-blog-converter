@@ -1,5 +1,4 @@
 name: CI/CD for YouTube Blog Converter
-
 on:
   push:
     branches: [main]
@@ -7,125 +6,130 @@ on:
     branches: [main]
 
 jobs:
-  security-scan:
+  lint-and-scan:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y
-          sudo apt-get install -y trivy
-
-      - name: Filesystem Scan with Trivy
-        run: trivy fs --severity HIGH,CRITICAL --exit-code 0 .
-
-      - name: Install Gitleaks
-        run: |
-          wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
-          tar -xzf gitleaks_8.18.2_linux_x64.tar.gz
-          sudo mv gitleaks /usr/local/bin/
-          rm gitleaks_8.18.2_linux_x64.tar.gz
-
-      - name: Secret Detection with Gitleaks
-        run: gitleaks detect --source . --verbose --redact
-
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+        with: python-version: '3.12'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-  docker-build-test:
-    needs: [security-scan, build-and-test]
+      - name: Code lint (flake8)
+        run: flake8 .
+
+      - name: Filesystem scan (Trivy fs)
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          scan-type: fs
+          format: sarif
+          severity: HIGH,CRITICAL
+          exit-code: 0
+          output: trivy-fs-results.sarif
+
+      - name: Secret detection (Gitleaks)
+        run: |
+          wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
+          tar -xzf gitleaks_8.18.2_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+          gitleaks detect --source . --verbose --redact
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with: sarif_file: trivy-fs-results.sarif
+
+  build-test:
+    needs: lint-and-scan
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Install Trivy (for container scanning)
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: python-version: '3.12'
+      - name: Install dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y
-          sudo apt-get install -y trivy
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run tests
+        run: pytest --junitxml=results.xml
+
+  docker-build-scan:
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
-        run: docker build -t youtube-blog-converter:${{ github.sha }} .
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: youtube-blog-converter:${{ github.sha }}
 
-      - name: Container Vulnerability Scan with Trivy
-        run: trivy image --severity HIGH,CRITICAL --exit-code 0 youtube-blog-converter:${{ github.sha }}
+      - name: Scan Docker image
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: youtube-blog-converter:${{ github.sha }}
+          format: sarif
+          severity: HIGH,CRITICAL
+          exit-code: 0
+          output: trivy-image-results.sarif
 
-      - name: Run smoke test
+      - name: Upload image scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with: sarif_file: trivy-image-results.sarif
+
+      - name: Smoke test container
         run: |
-          docker run -d --name smoke-test \
-            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
-            -p 5000:5000 \
-            youtube-blog-converter:${{ github.sha }}
+          docker run -d --name preprod -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} -p 5000:5000 youtube-blog-converter:${{ github.sha }}
           sleep 10
-          docker logs smoke-test
-          curl --retry 5 --retry-delay 5 --retry-all-errors http://localhost:5000
-          docker stop smoke-test
+          curl --fail http://localhost:5000/health || (docker logs preprod && exit 1)
+          docker stop preprod
 
-  build_project_and_sonar_scan:
+  sonar-quality:
+    needs: docker-build-scan
     runs-on: ubuntu-latest
-    needs: docker-build-test
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with: python-version: '3.12'
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v5.2.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
-    - name: SonarQube Scan for Python
-      uses: SonarSource/sonarqube-scan-action@v5.2.0
-      env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        SONAR_HOST_URL: ${{  vars.SONAR_HOST_URL }}
-        
-    - name: SonarQube Quality Gate check
-      id: sonarqube-quality-gate-check
-      uses: sonarsource/sonarqube-quality-gate-action@master
-      with:
-        pollingTimeoutSec: 600
-      env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        SONAR_HOST_URL: ${{  vars.SONAR_HOST_URL }}
+      - name: Quality Gate Check
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        id: quality
+        with:
+          pollingTimeoutSec: 600
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
-  deploy-to-dockerhub:
-    needs: docker-build-test
+  deploy:
+    needs: docker-build-scan
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
+      - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
@@ -134,7 +138,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build & push image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -145,7 +149,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Verify deployment
+      - name: Post-deploy smoke test
         run: |
-          echo "Successfully deployed to Docker Hub!"
-          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+          docker run --rm -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:latest curl --fail http://localhost:5000/health
+
