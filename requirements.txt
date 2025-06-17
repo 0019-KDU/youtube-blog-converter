@@ -1,0 +1,8 @@
+crewai
+crewai-tools
+python-dotenv
+pytube
+youtube-transcript-api
+openai
+fpdf2
+Flask
