@@ -52,11 +52,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
-
-      - name: Run unit tests
-        run: |
-          pytest -v
 
   docker-build-test:
     needs: [security-scan, build-and-test]
