@@ -7,6 +7,36 @@ on:
     branches: [main]
 
 jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for Gitleaks to scan full history
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -y
+          sudo apt-get install -y trivy
+
+      - name: Filesystem Scan with Trivy
+        run: trivy fs --severity HIGH,CRITICAL --exit-code 1 --format table .
+
+      - name: Install Gitleaks
+        run: |
+          wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
+          tar -xzf gitleaks_8.18.2_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+          rm gitleaks_8.18.2_linux_x64.tar.gz
+
+      - name: Secret Detection with Gitleaks
+        run: gitleaks detect --source . --verbose --redact
+
   build-and-test:
     runs-on: ubuntu-latest
     steps:
@@ -23,9 +53,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-
   docker-build-test:
-    needs: build-and-test
+    needs: [security-scan, build-and-test]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -33,6 +62,9 @@ jobs:
         
       - name: Build Docker image
         run: docker build -t youtube-blog-converter:${{ github.sha }} .
+
+      - name: Container Vulnerability Scan with Trivy
+        run: trivy image --severity HIGH,CRITICAL --exit-code 1 youtube-blog-converter:${{ github.sha }}
 
       - name: Run smoke test
         run: |
