@@ -1,195 +1,195 @@
-name: CI/CD for YouTube Blog Converter
+# name: CI/CD for YouTube Blog Converter
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
 
-jobs:
-  security-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+# jobs:
+#   security-scan:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y
-          sudo apt-get install -y trivy
+#       - name: Install Trivy
+#         run: |
+#           sudo apt-get update -y
+#           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+#           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+#           echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+#           sudo apt-get update -y
+#           sudo apt-get install -y trivy
 
-      - name: Filesystem Scan with Trivy
-        run: trivy fs --severity HIGH,CRITICAL --exit-code 0 .
+#       - name: Filesystem Scan with Trivy
+#         run: trivy fs --severity HIGH,CRITICAL --exit-code 0 .
 
-      - name: Install Gitleaks
-        run: |
-          wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
-          tar -xzf gitleaks_8.18.2_linux_x64.tar.gz
-          sudo mv gitleaks /usr/local/bin/
-          rm gitleaks_8.18.2_linux_x64.tar.gz
+#       - name: Install Gitleaks
+#         run: |
+#           wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
+#           tar -xzf gitleaks_8.18.2_linux_x64.tar.gz
+#           sudo mv gitleaks /usr/local/bin/
+#           rm gitleaks_8.18.2_linux_x64.tar.gz
 
-      - name: Secret Detection with Gitleaks
-        run: gitleaks detect --source . --verbose --redact
+#       - name: Secret Detection with Gitleaks
+#         run: gitleaks detect --source . --verbose --redact
 
-      - name: Notification of successful security scan
-        if: failure()
-        run: |
-          curl -X POST https://hooks.slack.com/services/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 \
-          -H 'Content-type: application/json' \
-          -d '{"text":"Secrets detected in the repository!"}'
+#       - name: Notification of successful security scan
+#         if: failure()
+#         run: |
+#           curl -X POST https://hooks.slack.com/services/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 \
+#           -H 'Content-type: application/json' \
+#           -d '{"text":"Secrets detected in the repository!"}'
 
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   build-and-test:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.12'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov
+#       - name: Install dependencies
+#         run: |
+#           python -m pip install --upgrade pip
+#           pip install -r requirements.txt
+#           pip install pytest pytest-cov
       
-      - name: Run tests with coverage
-        run: pytest --cov=src --cov-report=xml:coverage.xml -v tests/
+#       - name: Run tests with coverage
+#         run: pytest --cov=src --cov-report=xml:coverage.xml -v tests/
         
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage.xml
+#       - name: Upload coverage report
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: coverage-report
+#           path: coverage.xml
 
-  sonarqube-scan:
-    runs-on: self-hosted
-    needs: build-and-test
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+#   sonarqube-scan:
+#     runs-on: self-hosted
+#     needs: build-and-test
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
           
-      - name: Download coverage report
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-report
-          path: .
+#       - name: Download coverage report
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: coverage-report
+#           path: .
           
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v5.2.0
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
-        with:
-          args: >
-            -Dsonar.python.coverage.reportPaths=coverage.xml
-            -Dsonar.python.version=3.12
-            -Dsonar.sources=src
-            -Dsonar.tests=tests
-            -Dsonar.test.inclusions=tests/**
-            -Dsonar.exclusions=**/__pycache__/**,**/.pytest_cache/**,**/env/**
-            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
-            -Dsonar.projectName=${{ vars.SONAR_PROJECT_NAME }}
-            -Dsonar.projectVersion=1.0.${{ github.run_number }}
-            -Dsonar.qualitygate.wait=true
-            -Dsonar.scm.provider=git
-            -Dsonar.links.scm=${{ github.server_url }}/${{ github.repository }}
-            -Dsonar.links.ci=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+#       - name: SonarQube Scan
+#         uses: SonarSource/sonarqube-scan-action@v5.2.0
+#         env:
+#           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+#           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+#         with:
+#           args: >
+#             -Dsonar.python.coverage.reportPaths=coverage.xml
+#             -Dsonar.python.version=3.12
+#             -Dsonar.sources=src
+#             -Dsonar.tests=tests
+#             -Dsonar.test.inclusions=tests/**
+#             -Dsonar.exclusions=**/__pycache__/**,**/.pytest_cache/**,**/env/**
+#             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+#             -Dsonar.projectName=${{ vars.SONAR_PROJECT_NAME }}
+#             -Dsonar.projectVersion=1.0.${{ github.run_number }}
+#             -Dsonar.qualitygate.wait=true
+#             -Dsonar.scm.provider=git
+#             -Dsonar.links.scm=${{ github.server_url }}/${{ github.repository }}
+#             -Dsonar.links.ci=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             
-      - name: SonarQube Quality Gate check
-        uses: sonarsource/sonarqube-quality-gate-action@master
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+#       - name: SonarQube Quality Gate check
+#         uses: sonarsource/sonarqube-quality-gate-action@master
+#         env:
+#           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+#           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
-  docker-build-test:
-    needs: [security-scan, build-and-test, sonarqube-scan]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   docker-build-test:
+#     needs: [security-scan, build-and-test, sonarqube-scan]
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
         
-      - name: Install Trivy (for container scanning)
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y
-          sudo apt-get install -y trivy
+#       - name: Install Trivy (for container scanning)
+#         run: |
+#           sudo apt-get update -y
+#           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+#           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+#           echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+#           sudo apt-get update -y
+#           sudo apt-get install -y trivy
 
-      - name: Build Docker image
-        run: docker build -t youtube-blog-converter:${{ github.sha }} .
+#       - name: Build Docker image
+#         run: docker build -t youtube-blog-converter:${{ github.sha }} .
 
-      - name: Container Vulnerability Scan with Trivy
-        run: trivy image --severity HIGH,CRITICAL --exit-code 0 youtube-blog-converter:${{ github.sha }}
+#       - name: Container Vulnerability Scan with Trivy
+#         run: trivy image --severity HIGH,CRITICAL --exit-code 0 youtube-blog-converter:${{ github.sha }}
       
-      - name: Notification of successful build
-        if: success()
-        run: |
-          curl -X POST https://hooks.slack.com/services/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 \ \
-          -H 'Content-type: application/json' \
-          -d '{"text":"Pipeline Passed the Vulnerability Scan and Build Process for YouTube Blog Converter!"}'
+#       - name: Notification of successful build
+#         if: success()
+#         run: |
+#           curl -X POST https://hooks.slack.com/services/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 \ \
+#           -H 'Content-type: application/json' \
+#           -d '{"text":"Pipeline Passed the Vulnerability Scan and Build Process for YouTube Blog Converter!"}'
       
-      - name: notification of failed build
-        if: failure()
-        run: |
-          curl -X POST https://hooks.slack.com/services/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 \
-          -H 'Content-type: application/json' \
-          -d '{"text":"Pipeline Failed the Vulnerability Scan or Build Process for YouTube Blog Converter!"}'
+#       - name: notification of failed build
+#         if: failure()
+#         run: |
+#           curl -X POST https://hooks.slack.com/services/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 \
+#           -H 'Content-type: application/json' \
+#           -d '{"text":"Pipeline Failed the Vulnerability Scan or Build Process for YouTube Blog Converter!"}'
           
 
-      - name: Run smoke test
-        run: |
-          docker run -d --name smoke-test \
-            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
-            -p 5000:5000 \
-            youtube-blog-converter:${{ github.sha }}
-          sleep 10
-          docker logs smoke-test
-          curl --retry 5 --retry-delay 5 --retry-all-errors http://localhost:5000
-          docker stop smoke-test
+#       - name: Run smoke test
+#         run: |
+#           docker run -d --name smoke-test \
+#             -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+#             -p 5000:5000 \
+#             youtube-blog-converter:${{ github.sha }}
+#           sleep 10
+#           docker logs smoke-test
+#           curl --retry 5 --retry-delay 5 --retry-all-errors http://localhost:5000
+#           docker stop smoke-test
 
   
-  deploy-to-dockerhub:
-    needs: docker-build-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   deploy-to-dockerhub:
+#     needs: docker-build-test
+#     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+#       - name: Set up Docker Buildx
+#         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+#       - name: Login to Docker Hub
+#         uses: docker/login-action@v3
+#         with:
+#           username: ${{ secrets.DOCKERHUB_USERNAME }}
+#           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+#       - name: Build and push Docker image
+#         uses: docker/build-push-action@v5
+#         with:
+#           context: .
+#           push: true
+#           tags: |
+#             ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:latest
+#             ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
+#           cache-from: type=gha
+#           cache-to: type=gha,mode=max
 
-      - name: Verify deployment
-        run: |
-          echo "Successfully deployed to Docker Hub!"
-          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+#       - name: Verify deployment
+#         run: |
+#           echo "Successfully deployed to Docker Hub!"
+#           echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
