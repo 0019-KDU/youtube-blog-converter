@@ -126,6 +126,14 @@ jobs:
 
       - name: Container Vulnerability Scan with Trivy
         run: trivy image --severity HIGH,CRITICAL --exit-code 0 youtube-blog-converter:${{ github.sha }}
+      
+      - name: Notification of successful build
+        if: success()
+        run: |
+          curl -X POST https://hooks.slack.com/services/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 \ \
+          -H 'Content-type: application/json' \
+          -d '{"text":"Pipeline Passed the Vulnerability Scan and Build Process for YouTube Blog Converter!"}'
+          
 
       - name: Run smoke test
         run: |
