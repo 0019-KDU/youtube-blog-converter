@@ -52,12 +52,61 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pytest pytest-cov
       
-      - name: Run tests
-        run: pytest -v tests/    
+      - name: Run tests with coverage
+        run: pytest --cov=src --cov-report=xml:coverage.xml -v tests/
+        
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  sonarqube-scan:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: .
+          
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v5.2.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.python.version=3.12
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.test.inclusions=tests/**
+            -Dsonar.exclusions=**/__pycache__/**,**/.pytest_cache/**,**/env/**
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.projectName=${{ vars.SONAR_PROJECT_NAME }}
+            -Dsonar.projectVersion=1.0.${{ github.run_number }}
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.scm.provider=git
+            -Dsonar.links.scm=${{ github.server_url }}/${{ github.repository }}
+            -Dsonar.links.ci=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+      - name: SonarQube Quality Gate check
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
   docker-build-test:
-    needs: [security-scan, build-and-test]
+    needs: [security-scan, build-and-test, sonarqube-scan]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
