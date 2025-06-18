@@ -37,6 +37,13 @@ jobs:
       - name: Secret Detection with Gitleaks
         run: gitleaks detect --source . --verbose --redact
 
+      - name: Notification of successful security scan
+        if: failure()
+        run: |
+          curl -X POST https://hooks.slack.com/services/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 \
+          -H 'Content-type: application/json' \
+          -d '{"text":"Secrets detected in the repository!"}'
+
   build-and-test:
     runs-on: ubuntu-latest
     steps:
@@ -133,6 +140,13 @@ jobs:
           curl -X POST https://hooks.slack.com/services/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 \ \
           -H 'Content-type: application/json' \
           -d '{"text":"Pipeline Passed the Vulnerability Scan and Build Process for YouTube Blog Converter!"}'
+      
+      - name: notification of failed build
+        if: failure()
+        run: |
+          curl -X POST https://hooks.slack.com/services/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 \
+          -H 'Content-type: application/json' \
+          -d '{"text":"Pipeline Failed the Vulnerability Scan or Build Process for YouTube Blog Converter!"}'
           
 
       - name: Run smoke test
