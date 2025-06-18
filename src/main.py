@@ -33,12 +33,15 @@ def generate_blog_from_youtube(youtube_url):
     try:
         # Execute crew
         result = crew.kickoff(inputs={"youtube_url": youtube_url})
+        
+        # Handle possible None output
+        if not blog_task.output:
+            raise RuntimeError("Blog generation failed: no output produced")
+            
+        blog_output = blog_task.output.raw.strip()
     except Exception as e:
         raise RuntimeError(f"Error during Crew execution: {e}")
 
-    # Get blog content
-    blog_output = blog_task.output.raw.strip()
-    
     # Generate PDF
     pdf_path = "blog_article.pdf"
     pdf_tool = PDFTool()

@@ -1,14 +1,12 @@
 import os
 import sys
-from flask import Flask, render_template, request, send_file, redirect, url_for
+from flask import Flask, render_template, request, send_file, redirect, url_for, session
 
 # Add parent directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
 app = Flask(__name__)
-
-# Global variable to store results between requests
-result_data = {}
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersecretkey')
 
 @app.route('/', methods=['GET'])
 def index():
@@ -18,8 +16,6 @@ def index():
 @app.route('/generate', methods=['POST'])
 def generate_blog():
     """Process YouTube URL and generate blog"""
-    global result_data
-    
     youtube_url = request.form['youtube_url']
     
     if not youtube_url:
@@ -30,8 +26,8 @@ def generate_blog():
         from src.main import generate_blog_from_youtube
         blog_content, pdf_path = generate_blog_from_youtube(youtube_url)
         
-        # Store results for display and download
-        result_data = {
+        # Store in session
+        session['result_data'] = {
             'blog_content': blog_content,
             'pdf_path': pdf_path,
             'youtube_url': youtube_url
@@ -45,7 +41,7 @@ def generate_blog():
 @app.route('/results', methods=['GET'])
 def results():
     """Show generated blog content"""
-    global result_data
+    result_data = session.get('result_data', {})
     if not result_data:
         return redirect(url_for('index'))
     
@@ -56,8 +52,8 @@ def results():
 @app.route('/download', methods=['GET'])
 def download_pdf():
     """Download the generated PDF"""
-    global result_data
-    if not result_data or not os.path.exists(result_data['pdf_path']):
+    result_data = session.get('result_data', {})
+    if not result_data or not os.path.exists(result_data.get('pdf_path', '')):
         return redirect(url_for('index'))
     
     return send_file(
@@ -67,4 +63,4 @@ def download_pdf():
     )
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)  # Fixed this line
+    app.run(host='0.0.0.0', port=5000, debug=True)

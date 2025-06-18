@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from pytube import YouTube
 from youtube_transcript_api import YouTubeTranscriptApi
 import openai
-from fpdf import FPDF
+from fpdf import FPDF , FPDF_VERSION
 
 class TranscriptInput(BaseModel):
     """Input schema for YouTube transcript tool."""
@@ -99,7 +99,7 @@ class PDFTool(BaseTool):
         if not content:
             raise RuntimeError("No content provided for PDF generation.")
         
-        # Replace problematic Unicode characters with ASCII equivalents
+        # Replace problematic Unicode characters
         replacements = {
             '\u2019': "'",   # right single quotation mark
             '\u2018': "'",   # left single quotation mark
@@ -115,7 +115,13 @@ class PDFTool(BaseTool):
         
         pdf = FPDF()
         pdf.add_page()
-        pdf.set_font("Arial", size=12)
+        
+        # Use core fonts to avoid warnings
+        if FPDF_VERSION < "2.7.8":
+            pdf.set_font("Arial", size=12)
+        else:
+            # Use standard fonts for newer versions
+            pdf.set_font("helvetica", size=12)
         
         for paragraph in content.split("\n\n"):
             pdf.multi_cell(0, 10, paragraph)
