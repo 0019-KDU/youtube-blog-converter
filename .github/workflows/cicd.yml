@@ -10,6 +10,9 @@ permissions:
   issues: write
   contents: read
 
+env:
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
 jobs:
   security-scan:
     runs-on: ubuntu-latest
@@ -81,6 +84,24 @@ jobs:
               core.setFailed(`Failed to create issue: ${error.message}`);
             }
 
+      - name: Slack Notification on Failure
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "❌ Security Scan Failed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+              {"title": "Job", "value": "${{ github.job }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
   build-and-test:
     runs-on: ubuntu-latest
     steps:
@@ -140,6 +161,24 @@ jobs:
               console.error('Error creating issue:', error);
               core.setFailed(`Failed to create issue: ${error.message}`);
             }
+
+      - name: Slack Notification on Failure
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "❌ Build/Tests Failed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+              {"title": "Job", "value": "${{ github.job }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
   sonarqube-scan:
     runs-on: self-hosted
@@ -217,6 +256,23 @@ jobs:
               core.setFailed(`Failed to create issue: ${error.message}`);
             }
 
+      - name: Slack Notification on Failure
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "❌ SonarQube Scan Failed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+              {"title": "Job", "value": "${{ github.job }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
   docker-build-test:
     needs: [security-scan, build-and-test, sonarqube-scan]
@@ -285,6 +341,23 @@ jobs:
               core.setFailed(`Failed to create issue: ${error.message}`);
             }
 
+      - name: Slack Notification on Failure
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "❌ Docker Build Failed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+              {"title": "Job", "value": "${{ github.job }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
   deploy-to-dockerhub:
     needs: docker-build-test
@@ -353,5 +426,65 @@ jobs:
               core.setFailed(`Failed to create issue: ${error.message}`);
             }
 
+      - name: Slack Notification on Failure
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "❌ Deployment Failed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+              {"title": "Job", "value": "${{ github.job }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
+  # Global Slack notification job
+  notify-on-failure:
+    name: Global Failure Notification
+    if: ${{ always() && failure() }}
+    runs-on: ubuntu-latest
+    needs: 
+      - security-scan
+      - build-and-test
+      - sonarqube-scan
+      - docker-build-test
+      - deploy-to-dockerhub
+    steps:
+      - name: Aggregate failure information
+        id: failures
+        run: |
+          failed_jobs=""
+          if [[ "${{ needs.security-scan.result }}" == 'failure' ]]; then failed_jobs+="Security Scan, "; fi
+          if [[ "${{ needs.build-and-test.result }}" == 'failure' ]]; then failed_jobs+="Build and Test, "; fi
+          if [[ "${{ needs.sonarqube-scan.result }}" == 'failure' ]]; then failed_jobs+="SonarQube Scan, "; fi
+          if [[ "${{ needs.docker-build-test.result }}" == 'failure' ]]; then failed_jobs+="Docker Build, "; fi
+          if [[ "${{ needs.deploy-to-dockerhub.result }}" == 'failure' ]]; then failed_jobs+="Deployment, "; fi
+          
+          # Remove trailing comma
+          failed_jobs=${failed_jobs%, }
+          echo "::set-output name=failed_jobs::$failed_jobs"
+          echo "::set-output name=has_failures::true"
 
+      - name: Send Slack summary
+        if: steps.failures.outputs.has_failures == 'true'
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "❌ Pipeline Failed: ${{ steps.failures.outputs.failed_jobs }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Triggered by", "value": "${{ github.actor }}", "short": true},
+              {"title": "Failed Jobs", "value": "${{ steps.failures.outputs.failed_jobs }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
