@@ -45,27 +45,35 @@ jobs:
           rm gitleaks_8.18.2_linux_x64.tar.gz
 
       - name: Secret Detection with Gitleaks
-        run: gitleaks detect --source . --verbose --redact
+        run: gitleaks detect source . -r gitleaks-report.json -f json
 
       - name: Create issue on failure
         if: ${{ failure() }}
         uses: actions/github-script@v7
         with:
           script: |
-            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Security Scan Failure in ${context.job}`,
-              body: `### ❌ Security Scan Failed\n\n` +
-                    `**Job:** ${context.job}\n` +
-                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                    `**Failed Step:** ${context.job}\n\n` +
-                    `Please investigate the security scan failure.`,
-              assignees: [commitAuthor],
-              labels: ['ci-failure', 'security']
-            })
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Security Scan Failure in ${context.job}`,
+                body: `### ❌ Security Scan Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `Please investigate the security scan failure.`,
+                assignees: [assignee],
+                labels: ['ci-failure', 'security']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
 
   build-and-test:
     runs-on: ubuntu-latest
@@ -104,20 +112,28 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Build/Tests Failed in ${context.job}`,
-              body: `### ❌ Build/Tests Failed\n\n` +
-                    `**Job:** ${context.job}\n` +
-                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                    `**Failed Step:** ${context.job}\n\n` +
-                    `Test failures detected. Please check the build logs.`,
-              assignees: [commitAuthor],
-              labels: ['ci-failure', 'tests']
-            })
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Build/Tests Failed in ${context.job}`,
+                body: `### ❌ Build/Tests Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `Test failures detected. Please check the build logs.`,
+                assignees: [assignee],
+                labels: ['ci-failure', 'tests']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
 
   sonarqube-scan:
     runs-on: self-hosted
@@ -172,20 +188,29 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `SonarQube Failure in ${context.job}`,
-              body: `### ❌ SonarQube Quality Gate Failed\n\n` +
-                    `**Job:** ${context.job}\n` +
-                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                    `**Failed Step:** ${context.job}\n\n` +
-                    `Quality gate check failed. Please review SonarQube analysis.`,
-              assignees: [commitAuthor],
-              labels: ['ci-failure', 'quality']
-            })
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `SonarQube Failure in ${context.job}`,
+                body: `### ❌ SonarQube Quality Gate Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `Quality gate check failed. Please review SonarQube analysis.`,
+                assignees: [assignee],
+                labels: ['ci-failure', 'quality']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
+
 
   docker-build-test:
     needs: [security-scan, build-and-test, sonarqube-scan]
@@ -231,20 +256,29 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Docker Build Failed in ${context.job}`,
-              body: `### ❌ Docker Build/Test Failed\n\n` +
-                    `**Job:** ${context.job}\n` +
-                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                    `**Failed Step:** ${context.job}\n\n` +
-                    `Docker build or smoke test failed. Please check container logs.`,
-              assignees: [commitAuthor],
-              labels: ['ci-failure', 'docker']
-            })
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Docker Build Failed in ${context.job}`,
+                body: `### ❌ Docker Build/Test Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `Docker build or smoke test failed. Please check container logs.`,
+                assignees: [assignee],
+                labels: ['ci-failure', 'docker']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
+
 
   deploy-to-dockerhub:
     needs: docker-build-test
@@ -290,17 +324,28 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Deployment Failed in ${context.job}`,
-              body: `### ❌ Deployment to Docker Hub Failed\n\n` +
-                    `**Job:** ${context.job}\n` +
-                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                    `**Failed Step:** ${context.job}\n\n` +
-                    `Deployment to Docker Hub failed. Please check build logs.`,
-              assignees: [commitAuthor],
-              labels: ['ci-failure', 'deployment']
-            })
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Deployment Failed in ${context.job}`,
+                body: `### ❌ Deployment to Docker Hub Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `Deployment to Docker Hub failed. Please check build logs.`,
+                assignees: [assignee],
+                labels: ['ci-failure', 'deployment']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
+
+
+
