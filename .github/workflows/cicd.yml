@@ -1,195 +1,306 @@
-# name: CI/CD for YouTube Blog Converter
+name: CI/CD for YouTube Blog Converter
 
-# on:
-#   push:
-#     branches: [main]
-#   pull_request:
-#     branches: [main]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-# jobs:
-#   security-scan:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v4
-#         with:
-#           fetch-depth: 0
+permissions:
+  issues: write
+  contents: read
 
-#       - name: Install Trivy
-#         run: |
-#           sudo apt-get update -y
-#           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-#           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-#           echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-#           sudo apt-get update -y
-#           sudo apt-get install -y trivy
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
 
-#       - name: Filesystem Scan with Trivy
-#         run: trivy fs --severity HIGH,CRITICAL --exit-code 0 .
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-#       - name: Install Gitleaks
-#         run: |
-#           wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
-#           tar -xzf gitleaks_8.18.2_linux_x64.tar.gz
-#           sudo mv gitleaks /usr/local/bin/
-#           rm gitleaks_8.18.2_linux_x64.tar.gz
+      - name: Install Trivy
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -y
+          sudo apt-get install -y trivy
 
-#       - name: Secret Detection with Gitleaks
-#         run: gitleaks detect --source . --verbose --redact
+      - name: Filesystem Scan with Trivy
+        run: trivy fs --severity HIGH,CRITICAL --exit-code 0 .
 
-#       - name: Notification of successful security scan
-#         if: failure()
-#         run: |
-#           curl -X POST https://hooks.slack.com/services/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 \
-#           -H 'Content-type: application/json' \
-#           -d '{"text":"Secrets detected in the repository!"}'
+      - name: Install Gitleaks
+        run: |
+          wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
+          tar -xzf gitleaks_8.18.2_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+          rm gitleaks_8.18.2_linux_x64.tar.gz
 
-#   build-and-test:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v4
+      - name: Secret Detection with Gitleaks
+        run: gitleaks detect --source . --verbose --redact
 
-#       - name: Set up Python
-#         uses: actions/setup-python@v5
-#         with:
-#           python-version: '3.12'
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Security Scan Failure in ${context.job}`,
+              body: `### ❌ Security Scan Failed\n\n` +
+                    `**Job:** ${context.job}\n` +
+                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                    `**Failed Step:** ${context.job}\n\n` +
+                    `Please investigate the security scan failure.`,
+              assignees: [commitAuthor],
+              labels: ['ci-failure', 'security']
+            })
 
-#       - name: Install dependencies
-#         run: |
-#           python -m pip install --upgrade pip
-#           pip install -r requirements.txt
-#           pip install pytest pytest-cov
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
       
-#       - name: Run tests with coverage
-#         run: pytest --cov=src --cov-report=xml:coverage.xml -v tests/
+      - name: Run tests with coverage
+        run: pytest --cov=src --cov-report=xml:coverage.xml -v tests/
         
-#       - name: Upload coverage report
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: coverage-report
-#           path: coverage.xml
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
 
-#   sonarqube-scan:
-#     runs-on: self-hosted
-#     needs: build-and-test
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v4
-#         with:
-#           fetch-depth: 0
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Build/Tests Failed in ${context.job}`,
+              body: `### ❌ Build/Tests Failed\n\n` +
+                    `**Job:** ${context.job}\n` +
+                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                    `**Failed Step:** ${context.job}\n\n` +
+                    `Test failures detected. Please check the build logs.`,
+              assignees: [commitAuthor],
+              labels: ['ci-failure', 'tests']
+            })
+
+  sonarqube-scan:
+    runs-on: self-hosted
+    needs: build-and-test
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
           
-#       - name: Download coverage report
-#         uses: actions/download-artifact@v4
-#         with:
-#           name: coverage-report
-#           path: .
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
           
-#       - name: SonarQube Scan
-#         uses: SonarSource/sonarqube-scan-action@v5.2.0
-#         env:
-#           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-#           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
-#         with:
-#           args: >
-#             -Dsonar.python.coverage.reportPaths=coverage.xml
-#             -Dsonar.python.version=3.12
-#             -Dsonar.sources=src
-#             -Dsonar.tests=tests
-#             -Dsonar.test.inclusions=tests/**
-#             -Dsonar.exclusions=**/__pycache__/**,**/.pytest_cache/**,**/env/**
-#             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
-#             -Dsonar.projectName=${{ vars.SONAR_PROJECT_NAME }}
-#             -Dsonar.projectVersion=1.0.${{ github.run_number }}
-#             -Dsonar.qualitygate.wait=true
-#             -Dsonar.scm.provider=git
-#             -Dsonar.links.scm=${{ github.server_url }}/${{ github.repository }}
-#             -Dsonar.links.ci=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: .
+          
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v5.2.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.python.version=3.12
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.test.inclusions=tests/**
+            -Dsonar.exclusions=**/__pycache__/**,**/.pytest_cache/**,**/env/**
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.projectName=${{ vars.SONAR_PROJECT_NAME }}
+            -Dsonar.projectVersion=1.0.${{ github.run_number }}
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.scm.provider=git
+            -Dsonar.links.scm=${{ github.server_url }}/${{ github.repository }}
+            -Dsonar.links.ci=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             
-#       - name: SonarQube Quality Gate check
-#         uses: sonarsource/sonarqube-quality-gate-action@master
-#         env:
-#           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-#           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+      - name: SonarQube Quality Gate check
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
-#   docker-build-test:
-#     needs: [security-scan, build-and-test, sonarqube-scan]
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v4
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `SonarQube Failure in ${context.job}`,
+              body: `### ❌ SonarQube Quality Gate Failed\n\n` +
+                    `**Job:** ${context.job}\n` +
+                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                    `**Failed Step:** ${context.job}\n\n` +
+                    `Quality gate check failed. Please review SonarQube analysis.`,
+              assignees: [commitAuthor],
+              labels: ['ci-failure', 'quality']
+            })
+
+  docker-build-test:
+    needs: [security-scan, build-and-test, sonarqube-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
         
-#       - name: Install Trivy (for container scanning)
-#         run: |
-#           sudo apt-get update -y
-#           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-#           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-#           echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-#           sudo apt-get update -y
-#           sudo apt-get install -y trivy
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install Trivy (for container scanning)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -y
+          sudo apt-get install -y trivy
 
-#       - name: Build Docker image
-#         run: docker build -t youtube-blog-converter:${{ github.sha }} .
+      - name: Build Docker image
+        run: docker build -t youtube-blog-converter:${{ github.sha }} .
 
-#       - name: Container Vulnerability Scan with Trivy
-#         run: trivy image --severity HIGH,CRITICAL --exit-code 0 youtube-blog-converter:${{ github.sha }}
+      - name: Container Vulnerability Scan with Trivy
+        run: trivy image --severity HIGH,CRITICAL --exit-code 0 youtube-blog-converter:${{ github.sha }}
       
-#       - name: Notification of successful build
-#         if: success()
-#         run: |
-#           curl -X POST https://hooks.slack.com/services/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 \ \
-#           -H 'Content-type: application/json' \
-#           -d '{"text":"Pipeline Passed the Vulnerability Scan and Build Process for YouTube Blog Converter!"}'
-      
-#       - name: notification of failed build
-#         if: failure()
-#         run: |
-#           curl -X POST https://hooks.slack.com/services/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 \
-#           -H 'Content-type: application/json' \
-#           -d '{"text":"Pipeline Failed the Vulnerability Scan or Build Process for YouTube Blog Converter!"}'
-          
+      - name: Run smoke test
+        run: |
+          docker run -d --name smoke-test \
+            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            -p 5000:5000 \
+            youtube-blog-converter:${{ github.sha }}
+          sleep 10
+          docker logs smoke-test
+          curl --retry 5 --retry-delay 5 --retry-all-errors http://localhost:5000
+          docker stop smoke-test
 
-#       - name: Run smoke test
-#         run: |
-#           docker run -d --name smoke-test \
-#             -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
-#             -p 5000:5000 \
-#             youtube-blog-converter:${{ github.sha }}
-#           sleep 10
-#           docker logs smoke-test
-#           curl --retry 5 --retry-delay 5 --retry-all-errors http://localhost:5000
-#           docker stop smoke-test
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Docker Build Failed in ${context.job}`,
+              body: `### ❌ Docker Build/Test Failed\n\n` +
+                    `**Job:** ${context.job}\n` +
+                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                    `**Failed Step:** ${context.job}\n\n` +
+                    `Docker build or smoke test failed. Please check container logs.`,
+              assignees: [commitAuthor],
+              labels: ['ci-failure', 'docker']
+            })
 
-  
-#   deploy-to-dockerhub:
-#     needs: docker-build-test
-#     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v4
+  deploy-to-dockerhub:
+    needs: docker-build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
 
-#       - name: Set up Docker Buildx
-#         uses: docker/setup-buildx-action@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-#       - name: Login to Docker Hub
-#         uses: docker/login-action@v3
-#         with:
-#           username: ${{ secrets.DOCKERHUB_USERNAME }}
-#           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-#       - name: Build and push Docker image
-#         uses: docker/build-push-action@v5
-#         with:
-#           context: .
-#           push: true
-#           tags: |
-#             ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:latest
-#             ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
-#           cache-from: type=gha
-#           cache-to: type=gha,mode=max
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-#       - name: Verify deployment
-#         run: |
-#           echo "Successfully deployed to Docker Hub!"
-#           echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify deployment
+        run: |
+          echo "Successfully deployed to Docker Hub!"
+          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitAuthor = "${{ github.event.head_commit.author.name || github.actor }}";
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Deployment Failed in ${context.job}`,
+              body: `### ❌ Deployment to Docker Hub Failed\n\n` +
+                    `**Job:** ${context.job}\n` +
+                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                    `**Failed Step:** ${context.job}\n\n` +
+                    `Deployment to Docker Hub failed. Please check build logs.`,
+              assignees: [commitAuthor],
+              labels: ['ci-failure', 'deployment']
+            })
