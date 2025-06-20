@@ -1,0 +1,132 @@
+name: Auto PR Generation Pipeline
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+
+jobs:
+  auto-pr-generation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Configure Git remote
+      run: |
+        git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+        git fetch --all
+
+    - name: Determine default branch
+      id: default-branch
+      run: |
+        # Simple and reliable method
+        default_branch=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+        if [ -z "$default_branch" ]; then
+          default_branch="main"
+        fi
+        echo "default_branch=$default_branch" >> $GITHUB_OUTPUT
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Python dependencies
+      run: pip install openai
+
+    - name: Generate PR description
+      id: pr-body
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        BASE_BRANCH: origin/${{ steps.default-branch.outputs.default_branch }}
+      run: |
+        # Run PR generator and capture output
+        pr_body=$(python utils/pr_generator.py)
+        
+        # Properly format for GitHub output
+        pr_body="${pr_body//'%'/'%25'}"
+        pr_body="${pr_body//$'\n'/'%0A'}"
+        pr_body="${pr_body//$'\r'/'%0D'}"
+        
+        echo "pr_body=$pr_body" >> $GITHUB_OUTPUT
+
+    - name: Create automated pull request
+      id: create-pr
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        title: "Feature: ${{ github.ref_name }}"
+        base: ${{ steps.default-branch.outputs.default_branch }}
+        body: ${{ steps.pr-body.outputs.pr_body }}
+        branch: ${{ github.ref_name }}
+
+    - name: Apply 'auto-generated' label
+      if: ${{ success() && steps.create-pr.outputs.pull-request-number }}
+      uses: actions/github-script@v6
+      with:
+        script: |
+          try {
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.create-pr.outputs.pull-request-number }},
+              labels: ['auto-generated']
+            })
+            console.log('Added auto-generated label to PR')
+          } catch (error) {
+            console.log('Could not add label:', error.message)
+          }
+
+    - name: Close GitHub UI duplicates
+      if: ${{ success() && steps.create-pr.outputs.pull-request-number }}
+      uses: actions/github-script@v6
+      with:
+        script: |
+          try {
+            const ourPrNumber = ${{ steps.create-pr.outputs.pull-request-number }};
+            console.log(`Our PR number: ${ourPrNumber}`);
+            
+            // Find all open PRs for this branch
+            const { data: pulls } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${context.ref.replace('refs/heads/', '')}`,
+              state: 'open'
+            });
+            
+            console.log(`Found ${pulls.length} open PRs for this branch`);
+            
+            // Close duplicates not created by us
+            for (const pr of pulls) {
+              console.log(`Checking PR #${pr.number} (created by ${pr.user.login})`);
+              if (pr.number !== ourPrNumber) {
+                console.log(`Closing duplicate PR #${pr.number}`);
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  state: 'closed'
+                });
+                // Add a comment to explain why it was closed
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: "This pull request was closed automatically because an AI-generated pull request already exists for this branch."
+                });
+              } else {
+                console.log(`Skipping our own PR #${pr.number}`);
+              }
+            }
+          } catch (error) {
+            console.log('Error closing duplicates:', error.message)
+          }
