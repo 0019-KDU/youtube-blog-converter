@@ -11,6 +11,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write  # Required for label operations
 
     steps:
     - name: Checkout code
@@ -57,11 +58,27 @@ jobs:
         echo "pr_body=$body_content" >> $GITHUB_OUTPUT
 
     - name: Create Pull Request
+      id: create-pr
       uses: peter-evans/create-pull-request@v5
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         title: "Feature: ${{ github.ref_name }}"
         base: ${{ steps.default-branch.outputs.default_branch }}
         body: ${{ steps.pr-body.outputs.pr_body }}
-        labels: auto-generated  # Will work if label pre-created
         branch: pr-${{ github.ref_name }}
+        
+    - name: Add label to PR
+      if: ${{ success() && steps.create-pr.outputs.pull-request-number }}
+      uses: actions/github-script@v6
+      with:
+        script: |
+          try {
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.create-pr.outputs.pull-request-number }},
+              labels: ['auto-generated']
+            })
+          } catch (error) {
+            console.log('Label not added (might not exist):', error.message)
+          }
