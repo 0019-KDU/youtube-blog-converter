@@ -1,0 +1,44 @@
+name: Auto PR Generation
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+
+jobs:
+  generate-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: pip install openai
+
+    - name: Generate PR Body
+      id: pr-body
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        BASE_BRANCH: origin/${{ github.event.repository.default_branch }}
+      run: |
+        python utils/pr_generator.py > pr_body.txt
+        echo "pr_body=$(cat pr_body.txt)" >> $GITHUB_OUTPUT
+
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v5
+      with:
+        title: "Feature: ${{ github.ref_name }}"
+        branch: ${{ github.event.repository.default_branch }}
+        body: ${{ steps.pr-body.outputs.pr_body }}
+        labels: auto-generated
