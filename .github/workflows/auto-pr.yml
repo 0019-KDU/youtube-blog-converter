@@ -17,6 +17,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup remote
       run: |
@@ -58,8 +59,9 @@ jobs:
     - name: Create Pull Request
       uses: peter-evans/create-pull-request@v5
       with:
+        token: ${{ secrets.GITHUB_TOKEN }}
         title: "Feature: ${{ github.ref_name }}"
         base: ${{ steps.default-branch.outputs.default_branch }}
         body: ${{ steps.pr-body.outputs.pr_body }}
-        labels: auto-generated
+        labels: auto-generated  # Will work if label pre-created
         branch: pr-${{ github.ref_name }}
