@@ -1,6 +1,6 @@
 import os
 import subprocess
-import openai
+from openai import OpenAI
 import sys
 
 def generate_pr_body():
@@ -20,9 +20,20 @@ def generate_pr_body():
     
     # Get code diff with safe exclusions
     try:
+        # Build exclusion patterns
+        exclude_patterns = [
+            "venv/",
+            "__pycache__/",
+            "*.log",
+            "config.yaml"
+        ]
+        
+        command = ["git", "diff", base_branch, "--"]
+        for pattern in exclude_patterns:
+            command.extend([":(exclude)", pattern])
+        
         diff = subprocess.check_output(
-            ["git", "diff", base_branch, "--", 
-             ":!venv/", ":!__pycache__/", ":!*.log", ":!config.yaml"],
+            command,
             text=True,
             stderr=subprocess.STDOUT
         )
@@ -37,11 +48,12 @@ def generate_pr_body():
     # Truncate large diffs
     truncated_diff = diff[:8000] + ("..." if len(diff) > 8000 else "")
     
-    # Initialize OpenAI
-    openai.api_key = os.getenv("OPENAI_API_KEY")
+    # Initialize OpenAI client
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     try:
-        response = openai.ChatCompletion.create(
+        # Generate PR body using AI
+        response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
                 {

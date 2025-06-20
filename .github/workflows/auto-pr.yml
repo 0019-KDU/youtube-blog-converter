@@ -20,8 +20,18 @@ jobs:
 
     - name: Get default branch
       id: default-branch
-      run: echo "default_branch=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')" >> $GITHUB_OUTPUT
-
+      run: |
+        # Try multiple methods to get default branch
+        if [ -f .git/refs/remotes/origin/HEAD ]; then
+          default_branch=$(awk -F'/' '{print $3}' .git/refs/remotes/origin/HEAD)
+        else
+          default_branch=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+        fi
+        # Fallback to main if still not found
+        if [ -z "$default_branch" ]; then
+          default_branch="main"
+        fi
+        echo "default_branch=$default_branch" >> $GITHUB_OUTPUT
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -46,7 +56,7 @@ jobs:
       uses: peter-evans/create-pull-request@v5
       with:
         title: "Feature: ${{ github.ref_name }}"
-        base: ${{ steps.default-branch.outputs.default_branch }}
-        branch: ${{ steps.default-branch.outputs.default_branch }}
+        base: ${{ steps.default-branch.outputs.default_branch }}  # Target branch (main)
+        # Remove the 'branch' parameter completely
         body: ${{ steps.pr-body.outputs.pr_body }}
         labels: auto-generated
