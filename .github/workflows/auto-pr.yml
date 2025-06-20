@@ -16,7 +16,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
+        fetch-depth: 0  # Get full history
+
+    - name: Get default branch
+      id: default-branch
+      run: echo "default_branch=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')" >> $GITHUB_OUTPUT
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -30,15 +34,19 @@ jobs:
       id: pr-body
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        BASE_BRANCH: origin/${{ github.event.repository.default_branch }}
+        BASE_BRANCH: origin/${{ steps.default-branch.outputs.default_branch }}
+        GITHUB_DEFAULT_BRANCH: ${{ steps.default-branch.outputs.default_branch }}
       run: |
         python utils/pr_generator.py > pr_body.txt
-        echo "pr_body=$(cat pr_body.txt)" >> $GITHUB_OUTPUT
+        echo "pr_body<<EOF" >> $GITHUB_OUTPUT
+        cat pr_body.txt >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
 
     - name: Create Pull Request
       uses: peter-evans/create-pull-request@v5
       with:
         title: "Feature: ${{ github.ref_name }}"
-        branch: ${{ github.event.repository.default_branch }}
+        base: ${{ steps.default-branch.outputs.default_branch }}
+        branch: ${{ steps.default-branch.outputs.default_branch }}
         body: ${{ steps.pr-body.outputs.pr_body }}
         labels: auto-generated
