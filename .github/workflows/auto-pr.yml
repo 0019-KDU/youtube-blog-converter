@@ -20,19 +20,37 @@ jobs:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Debug - Print branch info
+      run: |
+        echo "Current branch: ${{ github.ref }}"
+        echo "Branch name: ${{ github.ref_name }}"
+        echo "Default branch: ${{ github.event.repository.default_branch }}"
+
     - name: Configure Git remote
       run: |
         git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
-        git fetch --all
+        git fetch origin
+        git branch -a
 
     - name: Determine default branch
       id: default-branch
       run: |
-        # Simple and reliable method
-        default_branch=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+        # Try multiple detection methods
+        if [ -f .git/refs/remotes/origin/HEAD ]; then
+          default_branch=$(awk -F'/' '{print $3}' .git/refs/remotes/origin/HEAD)
+        else
+          default_branch=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+        fi
+        
+        if [ -z "$default_branch" ]; then
+          default_branch=$(git rev-parse --abbrev-ref origin/HEAD | sed 's@origin/@@')
+        fi
+        
         if [ -z "$default_branch" ]; then
           default_branch="main"
         fi
+        
+        echo "Detected default branch: $default_branch"
         echo "default_branch=$default_branch" >> $GITHUB_OUTPUT
 
     - name: Set up Python
@@ -50,14 +68,21 @@ jobs:
         BASE_BRANCH: origin/${{ steps.default-branch.outputs.default_branch }}
       run: |
         # Run PR generator and capture output
-        pr_body=$(python utils/pr_generator.py)
+        echo "Generating PR body..."
+        python utils/pr_generator.py > pr_body.txt
+        echo "PR body generated successfully"
+        
+        # Print first 200 chars for debugging
+        head -c 200 pr_body.txt
+        echo ""
         
         # Properly format for GitHub output
-        pr_body="${pr_body//'%'/'%25'}"
-        pr_body="${pr_body//$'\n'/'%0A'}"
-        pr_body="${pr_body//$'\r'/'%0D'}"
+        body_content=$(cat pr_body.txt)
+        body_content="${body_content//'%'/'%25'}"
+        body_content="${body_content//$'\n'/'%0A'}"
+        body_content="${body_content//$'\r'/'%0D'}"
         
-        echo "pr_body=$pr_body" >> $GITHUB_OUTPUT
+        echo "pr_body=$body_content" >> $GITHUB_OUTPUT
 
     - name: Create automated pull request
       id: create-pr
@@ -69,12 +94,18 @@ jobs:
         body: ${{ steps.pr-body.outputs.pr_body }}
         branch: ${{ github.ref_name }}
 
+    - name: Debug - Print PR result
+      run: |
+        echo "PR creation status: ${{ steps.create-pr.conclusion }}"
+        echo "PR number: ${{ steps.create-pr.outputs.pull-request-number }}"
+
     - name: Apply 'auto-generated' label
       if: ${{ success() && steps.create-pr.outputs.pull-request-number }}
       uses: actions/github-script@v6
       with:
         script: |
           try {
+            console.log('Adding label to PR #${{ steps.create-pr.outputs.pull-request-number }}')
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -84,49 +115,4 @@ jobs:
             console.log('Added auto-generated label to PR')
           } catch (error) {
             console.log('Could not add label:', error.message)
-          }
-
-    - name: Close GitHub UI duplicates
-      if: ${{ success() && steps.create-pr.outputs.pull-request-number }}
-      uses: actions/github-script@v6
-      with:
-        script: |
-          try {
-            const ourPrNumber = ${{ steps.create-pr.outputs.pull-request-number }};
-            console.log(`Our PR number: ${ourPrNumber}`);
-            
-            // Find all open PRs for this branch
-            const { data: pulls } = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              head: `${context.repo.owner}:${context.ref.replace('refs/heads/', '')}`,
-              state: 'open'
-            });
-            
-            console.log(`Found ${pulls.length} open PRs for this branch`);
-            
-            // Close duplicates not created by us
-            for (const pr of pulls) {
-              console.log(`Checking PR #${pr.number} (created by ${pr.user.login})`);
-              if (pr.number !== ourPrNumber) {
-                console.log(`Closing duplicate PR #${pr.number}`);
-                await github.rest.pulls.update({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: pr.number,
-                  state: 'closed'
-                });
-                // Add a comment to explain why it was closed
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: pr.number,
-                  body: "This pull request was closed automatically because an AI-generated pull request already exists for this branch."
-                });
-              } else {
-                console.log(`Skipping our own PR #${pr.number}`);
-              }
-            }
-          } catch (error) {
-            console.log('Error closing duplicates:', error.message)
           }
