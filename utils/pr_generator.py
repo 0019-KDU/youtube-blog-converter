@@ -6,16 +6,17 @@ import sys
 def generate_pr_body():
     # Get base branch from environment or use default
     default_branch = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
-    base_branch = os.getenv("BASE_BRANCH", f"origin/{default_branch}")
+    base_branch_ref = f"origin/{default_branch}"
     
     # Verify if base branch exists
     try:
         subprocess.check_output(
-            ["git", "show-ref", "--verify", f"refs/remotes/{base_branch}"],
+            ["git", "show-ref", "--verify", f"refs/remotes/{base_branch_ref}"],
             stderr=subprocess.STDOUT
         )
+        base_branch = base_branch_ref
     except subprocess.CalledProcessError:
-        print(f"Base branch {base_branch} not found. Using HEAD~1 instead")
+        print(f"Base branch {base_branch_ref} not found. Using HEAD~1 instead")
         base_branch = "HEAD~1"  # Fallback to previous commit
     
     # Get code diff with safe exclusions
