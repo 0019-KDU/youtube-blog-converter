@@ -1,9 +1,8 @@
 from src.task import create_tasks
 from crewai import Agent
-from unittest.mock import MagicMock
 
 def test_task_creation():
-    # Create proper Agent instances instead of MagicMock
+    # Create proper Agent instances
     transcriber = Agent(
         role='Test Transcriber',
         goal='Test goal',
@@ -20,8 +19,14 @@ def test_task_creation():
         verbose=True
     )
     
-    transcript_task, blog_task = create_tasks(transcriber, writer)
+    # Provide dummy values for new parameters
+    youtube_url = "https://youtu.be/dQw4w9WgXcQ"
+    language = "en"
     
-    assert "youtube_url" in transcript_task.description
+    transcript_task, blog_task = create_tasks(transcriber, writer, youtube_url, language)
+    
+    # Updated assertions to check for actual values in description
+    assert youtube_url in transcript_task.description
+    assert language in transcript_task.description
     assert transcript_task.agent == transcriber
     assert blog_task.context == [transcript_task]
