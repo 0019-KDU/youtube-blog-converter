@@ -1,7 +1,10 @@
-from unittest.mock import patch, MagicMock , call
 import pytest
-from src.main import generate_blog_from_youtube
+from unittest.mock import patch, MagicMock, call
+import os
 import logging
+
+# Import the function to test
+from src.main import generate_blog_from_youtube
 
 @patch('src.main.Crew')
 @patch('src.main.create_agents')
@@ -26,11 +29,15 @@ def test_generate_blog_success(mock_tasks, mock_agents, mock_crew):
     blog_content = generate_blog_from_youtube("https://youtube.com/test", "en")
     assert blog_content == "Generated blog content"
 
-def test_missing_api_key(monkeypatch):
+def test_missing_api_key_logging(monkeypatch, caplog):
+    """Test API key missing logs correctly"""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(RuntimeError) as excinfo:
-        generate_blog_from_youtube("https://youtube.com/test", "en")
-    assert "OpenAI API key not found" in str(excinfo.value)
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(RuntimeError):
+            generate_blog_from_youtube("https://youtube.com/test", "en")
+    
+    # Verify log
+    assert "OpenAI API key not found" in caplog.text
 
 @patch('src.main.Crew')
 @patch('src.main.create_agents')
@@ -69,13 +76,12 @@ def test_generate_blog_crew_exception(mock_tasks, mock_agents, mock_crew):
 
     with pytest.raises(RuntimeError) as excinfo:
         generate_blog_from_youtube("https://youtube.com/test", "en")
-    # Update the assertion to match the actual error message
-    assert "Error during blog generation" in str(excinfo.value)  # Changed this line
+    assert "Error during blog generation" in str(excinfo.value)
 
 def test_generate_blog_invalid_url():
     with pytest.raises(ValueError) as excinfo:
         generate_blog_from_youtube("invalid_url", "en")
-    assert "Invalid YouTube URL" in str(excinfo.value)    
+    assert "Invalid YouTube URL" in str(excinfo.value)
 
 @patch('src.main.logger')
 @patch('src.main.Crew')
@@ -92,7 +98,7 @@ def test_generate_blog_success_logging(mock_tasks, mock_agents, mock_crew, mock_
     mock_crew.return_value = mock_crew_instance
 
     # Call function
-    generate_blog_from_youtube("https://youtube.com/test", "en")
+    blog_content = generate_blog_from_youtube("https://youtube.com/test", "en")
     
     # Verify logs
     expected_calls = [
@@ -123,4 +129,14 @@ def test_generate_blog_failure_logging(mock_tasks, mock_agents, mock_crew, mock_
         call.info("Starting blog generation for: https://youtube.com/test"),
         call.error("Blog generation failed for https://youtube.com/test: Test error")
     ]
-    mock_logger.assert_has_calls(expected_calls)    
+    mock_logger.assert_has_calls(expected_calls)
+
+def test_missing_api_key_logging(monkeypatch, caplog):
+    """Test API key missing logs correctly"""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(RuntimeError):
+            generate_blog_from_youtube("https://youtube.com/test", "en")
+    
+    # Verify log
+    assert "OpenAI API key not found" in caplog.text

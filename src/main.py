@@ -1,31 +1,32 @@
 import os
-from dotenv import load_dotenv
-from crewai import Crew, Process
 import logging
+from dotenv import load_dotenv
+from crewai import Crew
+from src.agent import create_agents
+from src.task import create_tasks
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
-# Use absolute imports
-from src.agent import create_agents
-from src.task import create_tasks
-
 def generate_blog_from_youtube(youtube_url: str, language: str) -> str:
+    """Generate a blog article from a YouTube video URL"""
     # Check for OpenAI API key
     if not os.getenv("OPENAI_API_KEY"):
+        logger.error("OpenAI API key not found")  # Add logging here
         raise RuntimeError("OpenAI API key not found")
     
     # Input validation
     if not youtube_url or "youtube.com" not in youtube_url:
         raise ValueError("Invalid YouTube URL provided")
     
-    logger.info(f"Starting blog generation for: {youtube_url}")  # Needs test coverage
+    logger.info(f"Starting blog generation for: {youtube_url}")
     
     try:
         # Create agents and tasks
-        transcriber, writer = create_agents(language)
-        transcript_task, blog_task = create_tasks(youtube_url, transcriber, writer, language)
+        transcriber, writer = create_agents()
+        transcript_task, blog_task = create_tasks(youtube_url, language)
         
         # Form the crew
         crew = Crew(
@@ -42,20 +43,21 @@ def generate_blog_from_youtube(youtube_url: str, language: str) -> str:
             raise RuntimeError("Blog task completed but no output produced")
         
         blog_content = blog_task.output.raw
-        logger.info(f"Successfully generated blog for: {youtube_url}")  # Needs test coverage
+        logger.info(f"Successfully generated blog for: {youtube_url}")
         return blog_content
         
     except Exception as e:
         logger.error(f"Blog generation failed for {youtube_url}: {str(e)}")
         raise RuntimeError(f"Error during blog generation: {str(e)}")
-# Original CLI main function
+
 def cli_main():
     """Command line interface for the application"""
     # Get user inputs
     youtube_url = input("Enter YouTube video URL: ").strip()
+    language = input("Enter language code (e.g., 'en'): ").strip() or "en"
 
     try:
-        blog_output = generate_blog_from_youtube(youtube_url)
+        blog_output = generate_blog_from_youtube(youtube_url, language)
         
         print("\nGenerated blog article:")
         print(blog_output[:200] + "...\n")
