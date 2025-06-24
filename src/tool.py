@@ -47,22 +47,23 @@ class YouTubeTranscriptTool(BaseTool):
             return self._manual_transcript_fallback(video_id, language)
     
     def _get_auto_transcript(self, video_id):
-        """Get first available transcript if specific language fails"""
-        try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            
-            # Try to find an English transcript first
-            for transcript in transcript_list:
-                if transcript.language_code.startswith('en'):
-                    return self._format_transcript(transcript.fetch())
-            
-            # Otherwise, take the first available
-            for transcript in transcript_list:
-                return self._format_transcript(transcript.fetch())
+            """Get first available transcript if specific language fails"""
+            try:
+                # Replace deprecated list_transcripts() with list()
+                transcript_list = YouTubeTranscriptApi.list(video_id)
                 
-            raise RuntimeError("No transcripts found for this video")
-        except Exception as e:
-            return self._manual_transcript_fallback(video_id)
+                # Try to find an English transcript first
+                for transcript in transcript_list:
+                    if transcript.language_code.startswith('en'):
+                        return self._format_transcript(transcript.fetch())
+                
+                # Otherwise, take the first available
+                for transcript in transcript_list:
+                    return self._format_transcript(transcript.fetch())
+                    
+                raise RuntimeError("No transcripts found for this video")
+            except Exception as e:
+                return self._manual_transcript_fallback(video_id)
     
     def _format_transcript(self, transcript_data):
         """Convert transcript data to text"""

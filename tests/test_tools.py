@@ -19,10 +19,10 @@ def test_youtube_transcript_tool_success():
         result = tool._run("https://youtube.com/watch?v=test123", "en")
         assert result == "Hello World"
 
-def test_youtube_transcript_tool_auto_fallback():
+def test_youtube_transcript_tool_auto_fallback():  # Fixed indentation
     tool = YouTubeTranscriptTool()
     with patch('src.tool.YouTube') as mock_yt, \
-         patch('src.tool.YouTubeTranscriptApi.list_transcripts') as mock_list:
+         patch('src.tool.YouTubeTranscriptApi.list') as mock_list:  # Added missing colon
         # Mock YouTube object
         mock_yt_instance = MagicMock()
         mock_yt_instance.video_id = "test123"
