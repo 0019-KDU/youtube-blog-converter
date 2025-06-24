@@ -4,71 +4,219 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generated Blog Article</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #333;
-            margin-top: 0;
-        }
-        .article-container {
-            margin-top: 20px;
-            padding: 20px;
-            border: 1px solid #eee;
-            border-radius: 4px;
-            background-color: #fafafa;
-            max-height: 500px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-        }
-        .actions {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: url('https://images.unsplash.com/photo-1668853853625-d38dbc599001?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D') no-repeat center center fixed;
+            background-size: cover;
             display: flex;
-            gap: 10px;
-            margin-top: 20px;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
         }
-        .btn {
-            padding: 10px 15px;
-            border-radius: 4px;
-            text-decoration: none;
-            font-weight: bold;
-            text-align: center;
-            flex: 1;
-        }
-        .btn-download {
-            background-color: #4285f4;
+
+        .container {
+            background: rgba(255, 255, 255, 0.25);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 40px;
+            width: 90%;
+            max-width: 800px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
             color: white;
         }
-        .btn-back {
-            background-color: #f1f1f1;
-            color: #333;
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
         }
-        .btn:hover {
-            opacity: 0.9;
+
+        h1 {
+            font-size: 2.2rem;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
+
         .source {
-            margin-top: 10px;
-            font-size: 14px;
-            color: #666;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+
+        .source a {
+            color: #a8d8ff;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .source a:hover {
+            color: #4facfe;
+            text-decoration: underline;
+        }
+
+        .article-container {
+            background: rgba(0, 0, 0, 0.15);
+            border-radius: 12px;
+            padding: 25px;
+            max-height: 50vh;
+            overflow-y: auto;
+            line-height: 1.7;
+            font-size: 1.05rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 30px;
+            box-shadow: inset 0 4px 20px rgba(0, 0, 0, 0.1);
+            white-space: pre-wrap;
+        }
+
+        .article-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .article-container::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+        }
+
+        .article-container::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 14px 25px;
+            font-size: 1.05rem;
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            min-width: 180px;
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .btn-back {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-back:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .btn-download {
+            background: linear-gradient(to right, #4facfe, #00f2fe);
+        }
+
+        .btn-download:hover {
+            background: linear-gradient(to right, #00f2fe, #4facfe);
+        }
+
+        /* Loading spinner */
+        .loader {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #4facfe;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .container {
+                padding: 25px;
+            }
+            
+            .header {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .actions {
+                flex-direction: column;
+            }
+            
+            .btn {
+                width: 100%;
+            }
+            
+            h1 {
+                font-size: 1.8rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 1.6rem;
+            }
+            
+            .article-container {
+                padding: 18px;
+                font-size: 1rem;
+            }
+        }
+          /* Add disabled state for button */
+        .btn.disabled {
+            opacity: 0.7;
+            pointer-events: none;
+            background: linear-gradient(to right, #9acffe, #80e2fe);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Generated Blog Article</h1>
-        
-        <div class="source">
-            Source: <a href="{{ youtube_url }}" target="_blank">{{ youtube_url }}</a>
+        <div class="header">
+            <h1><i class="fas fa-blog"></i> Generated Blog Article</h1>
+            <div class="source">
+                Source: <a href="{{ youtube_url }}" target="_blank">{{ youtube_url }}</a>
+            </div>
         </div>
         
         <div class="article-container">
@@ -76,9 +224,50 @@
         </div>
         
         <div class="actions">
-            <a href="/" class="btn btn-back">Back to Start</a>
-            <a href="/download" class="btn btn-download">Download PDF</a>
+            <a href="/" class="btn btn-back">
+                <i class="fas fa-arrow-left"></i> Back to Start
+            </a>
+            <a href="/download" class="btn btn-download" id="download-btn">
+                <i class="fas fa-download"></i> Download PDF
+            </a>
+        </div>
+        
+        <div class="loader" id="loader">
+            <div class="spinner"></div>
+            <p>Generating PDF...</p>
         </div>
     </div>
+    </div>
+
+      <script>
+        document.getElementById('download-btn').addEventListener('click', function(e) {
+            const btn = this;
+            const loader = document.getElementById('loader');
+            
+            // Show loading spinner
+            loader.style.display = 'block';
+            
+            // Disable button during processing
+            btn.classList.add('disabled');
+            
+            // Create a hidden iframe to handle the download
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = '/download';
+            
+            // When download completes, hide loader
+            iframe.onload = function() {
+                // Hide loader after a short delay to ensure download started
+                setTimeout(() => {
+                    loader.style.display = 'none';
+                    btn.classList.remove('disabled');
+                    document.body.removeChild(iframe);
+                }, 2000);
+            };
+            
+            // Add to body and trigger download
+            document.body.appendChild(iframe);
+        });
+    </script>
 </body>
 </html>

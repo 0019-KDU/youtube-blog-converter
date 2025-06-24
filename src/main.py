@@ -8,9 +8,8 @@ load_dotenv()
 # Use absolute imports
 from src.agent import create_agents
 from src.task import create_tasks
-from src.tool import PDFTool
 
-def generate_blog_from_youtube(youtube_url):
+def generate_blog_from_youtube(youtube_url, language='en'):
     """Generate blog article from YouTube video URL"""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -31,8 +30,11 @@ def generate_blog_from_youtube(youtube_url):
     )
 
     try:
-        # Execute crew
-        result = crew.kickoff(inputs={"youtube_url": youtube_url})
+        # Execute crew with both inputs
+        result = crew.kickoff(inputs={
+            "youtube_url": youtube_url,
+            "language": language
+        })
         
         # Handle possible None output
         if not blog_task.output:
@@ -42,15 +44,7 @@ def generate_blog_from_youtube(youtube_url):
     except Exception as e:
         raise RuntimeError(f"Error during Crew execution: {e}")
 
-    # Generate PDF
-    pdf_path = "blog_article.pdf"
-    pdf_tool = PDFTool()
-    try:
-        pdf_tool._run(content=blog_output, output_path=pdf_path)
-    except Exception as e:
-        print(f"PDF generation warning: {e}")
-    
-    return blog_output, pdf_path
+    return blog_output
 
 # Original CLI main function
 def cli_main():
@@ -59,11 +53,10 @@ def cli_main():
     youtube_url = input("Enter YouTube video URL: ").strip()
 
     try:
-        blog_output, pdf_path = generate_blog_from_youtube(youtube_url)
+        blog_output = generate_blog_from_youtube(youtube_url)
         
         print("\nGenerated blog article:")
         print(blog_output[:200] + "...\n")
-        print(f"PDF saved to {pdf_path}")
         
     except Exception as e:
         print(f"Error: {e}")
