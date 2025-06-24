@@ -1,6 +1,7 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock , call
 import pytest
 from src.main import generate_blog_from_youtube
+import logging
 
 @patch('src.main.Crew')
 @patch('src.main.create_agents')
@@ -75,3 +76,51 @@ def test_generate_blog_invalid_url():
     with pytest.raises(ValueError) as excinfo:
         generate_blog_from_youtube("invalid_url", "en")
     assert "Invalid YouTube URL" in str(excinfo.value)    
+
+@patch('src.main.logger')
+@patch('src.main.Crew')
+@patch('src.main.create_agents')
+@patch('src.main.create_tasks')
+def test_generate_blog_success_logging(mock_tasks, mock_agents, mock_crew, mock_logger):
+    """Test that success path logs correctly"""
+    # Setup mocks
+    mock_agents.return_value = (MagicMock(), MagicMock())
+    mock_blog_task = MagicMock()
+    mock_blog_task.output.raw = "Blog content"
+    mock_tasks.return_value = (MagicMock(), mock_blog_task)
+    mock_crew_instance = MagicMock()
+    mock_crew.return_value = mock_crew_instance
+
+    # Call function
+    generate_blog_from_youtube("https://youtube.com/test", "en")
+    
+    # Verify logs
+    expected_calls = [
+        call.info("Starting blog generation for: https://youtube.com/test"),
+        call.info("Successfully generated blog for: https://youtube.com/test")
+    ]
+    mock_logger.assert_has_calls(expected_calls)
+
+@patch('src.main.logger')
+@patch('src.main.Crew')
+@patch('src.main.create_agents')
+@patch('src.main.create_tasks')
+def test_generate_blog_failure_logging(mock_tasks, mock_agents, mock_crew, mock_logger):
+    """Test that exception path logs correctly"""
+    # Setup mocks
+    mock_agents.return_value = (MagicMock(), MagicMock())
+    mock_tasks.return_value = (MagicMock(), MagicMock())
+    mock_crew_instance = MagicMock()
+    mock_crew.return_value = mock_crew_instance
+    mock_crew_instance.kickoff.side_effect = Exception("Test error")
+    
+    # Call function and verify exception
+    with pytest.raises(RuntimeError):
+        generate_blog_from_youtube("https://youtube.com/test", "en")
+    
+    # Verify logs
+    expected_calls = [
+        call.info("Starting blog generation for: https://youtube.com/test"),
+        call.error("Blog generation failed for https://youtube.com/test: Test error")
+    ]
+    mock_logger.assert_has_calls(expected_calls)    
