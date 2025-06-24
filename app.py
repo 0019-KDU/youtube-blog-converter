@@ -1,10 +1,14 @@
 import os
 import sys
+import io
 from flask import Flask, render_template, request, send_file, redirect, url_for, session
-import io  # Add this import
 
 # Add parent directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
+
+# Import application components
+from src.main import generate_blog_from_youtube
+from src.tool import PDFTool
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersecretkey')
@@ -12,20 +16,21 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersecretkey')
 @app.route('/', methods=['GET'])
 def index():
     """Render the main form page"""
+    # Clear any previous session data
+    session.pop('result_data', None)
     return render_template('index.html')
 
 @app.route('/generate', methods=['POST'])
 def generate_blog():
     """Process YouTube URL and generate blog"""
     youtube_url = request.form['youtube_url']
-    language = request.form.get('language', 'en')  # Get language or default to 'en'
+    language = request.form.get('language', 'en')
     
     if not youtube_url:
         return render_template('index.html', error="YouTube URL is required")
     
     try:
-        # Generate blog content only
-        from src.main import generate_blog_from_youtube
+        # Generate blog content
         blog_content = generate_blog_from_youtube(youtube_url, language)
         
         # Store in session
@@ -54,27 +59,29 @@ def results():
 def download_pdf():
     """Generate and download the PDF on demand"""
     result_data = session.get('result_data', {})
-    if not result_data or not result_data.get('blog_content'):
+    
+    # Validate session data
+    if not result_data or 'blog_content' not in result_data or 'youtube_url' not in result_data:
         return redirect(url_for('index'))
     
     try:
-        # Import PDFTool and generate in-memory PDF
-        from src.tool import PDFTool
+        # Generate in-memory PDF
         pdf_tool = PDFTool()
         pdf_bytes = pdf_tool.generate_pdf_bytes(result_data['blog_content'])
         
         # Create in-memory file
-        return send_file(
+        response = send_file(
             io.BytesIO(pdf_bytes),
             as_attachment=True,
             download_name='blog_article.pdf',
             mimetype='application/pdf'
         )
+        
+        # Clear session after download
+        session.pop('result_data', None)
+        return response
+        
     except Exception as e:
-        # Handle specific encoding error
-        if "encode" in str(e).lower():
-            return render_template('error.html', error="PDF format error. Please try again later.")
-        # Handle other errors
         return render_template('error.html', error=f"PDF generation failed: {str(e)}")
 
 if __name__ == '__main__':
