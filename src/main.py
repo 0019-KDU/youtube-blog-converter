@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv
 from crewai import Crew, Process
+import logging
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -11,6 +13,10 @@ from src.task import create_tasks
 
 def generate_blog_from_youtube(youtube_url, language='en'):
     """Generate blog article from YouTube video URL"""
+    # Input validation
+    if not youtube_url or "youtube.com" not in youtube_url:
+        raise ValueError("Invalid YouTube URL provided")
+    
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OpenAI API key not found. Please set OPENAI_API_KEY in .env file")
@@ -30,8 +36,10 @@ def generate_blog_from_youtube(youtube_url, language='en'):
     )
 
     try:
-        # Execute crew with both inputs
-        result = crew.kickoff(inputs={
+        logger.info(f"Starting blog generation for: {youtube_url}")
+        
+        # Execute crew
+        crew.kickoff(inputs={
             "youtube_url": youtube_url,
             "language": language
         })
@@ -41,11 +49,16 @@ def generate_blog_from_youtube(youtube_url, language='en'):
             raise RuntimeError("Blog generation failed: no output produced")
             
         blog_output = blog_task.output.raw.strip()
+        logger.info(f"Successfully generated blog for: {youtube_url}")
+        
     except Exception as e:
-        raise RuntimeError(f"Error during Crew execution: {e}")
+        logger.error(f"Blog generation failed for {youtube_url}: {str(e)}")
+        raise RuntimeError(f"Error during blog generation: {str(e)}")
+    finally:
+        # Clean up resources
+        del transcriber, writer, transcript_task, blog_task
 
     return blog_output
-
 # Original CLI main function
 def cli_main():
     """Command line interface for the application"""
