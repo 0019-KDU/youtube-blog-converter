@@ -1,0 +1,10 @@
+[run]
+source = src
+omit = 
+    src/__init__.py
+    src/tool.py:279-282  # Omit version-specific FPDF code
+    src/main.py:30-32    # Omit logging setup
+
+[report]
+show_missing = True
+skip_covered = False

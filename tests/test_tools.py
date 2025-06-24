@@ -19,10 +19,10 @@ def test_youtube_transcript_tool_success():
         result = tool._run("https://youtube.com/watch?v=test123", "en")
         assert result == "Hello World"
 
-def test_youtube_transcript_tool_auto_fallback():
+def test_youtube_transcript_tool_auto_fallback():  # Fixed indentation
     tool = YouTubeTranscriptTool()
     with patch('src.tool.YouTube') as mock_yt, \
-         patch('src.tool.YouTubeTranscriptApi.list_transcripts') as mock_list:
+         patch('src.tool.YouTubeTranscriptApi.list') as mock_list:  # Added missing colon
         # Mock YouTube object
         mock_yt_instance = MagicMock()
         mock_yt_instance.video_id = "test123"
@@ -57,6 +57,23 @@ def test_youtube_transcript_tool_manual_fallback():
         result = tool._run("https://youtube.com/watch?v=test123", "en")
         assert "Fallback content" in result
 
+def test_youtube_transcript_tool_translation_fallback():
+    tool = YouTubeTranscriptTool()
+    with patch('src.tool.YouTube') as mock_yt, \
+         patch('src.tool.YouTubeTranscriptApi.get_transcript') as mock_get_transcript:
+        # Mock YouTube object
+        mock_yt_instance = MagicMock()
+        mock_yt_instance.video_id = "test123"
+        mock_yt.return_value = mock_yt_instance
+        
+        # Simulate language fallback scenario
+        mock_get_transcript.side_effect = [
+            Exception("Language not found"),
+            [{'text': 'Hello'}, {'text': 'World'}]
+        ]
+        
+        result = tool._run("https://youtube.com/watch?v=test123", "fr")
+        assert result == "Hello World"
 def test_blog_generator_tool():
     tool = BlogGeneratorTool()
     with patch('openai.OpenAI') as mock_openai:
@@ -86,11 +103,12 @@ def test_pdf_tool(tmp_path):
     result = tool._run(content, str(output_path))
     assert output_path.exists()
     assert "PDF saved" in result
+    assert output_path.stat().st_size > 1000  # Verify non-empty PDF
     
     # Test in-memory generation
     pdf_bytes = tool.generate_pdf_bytes(content)
     assert isinstance(pdf_bytes, bytes)
-    assert len(pdf_bytes) > 1000  # Ensure reasonable PDF size
+    assert len(pdf_bytes) > 1000
 
 def test_pdf_content_cleaning():
     tool = PDFTool()
@@ -130,3 +148,32 @@ def test_pdf_tool_empty_content():
     with pytest.raises(RuntimeError) as excinfo:
         tool.generate_pdf_bytes("")
     assert "No content provided" in str(excinfo.value)
+    
+def test_blog_generator_tool_api_error():
+    tool = BlogGeneratorTool()
+    with patch('openai.OpenAI') as mock_openai:
+        # Mock API failure
+        mock_openai.return_value.chat.completions.create.side_effect = Exception("API Error")
+        
+        with pytest.raises(RuntimeError) as excinfo:
+            tool._run("Sample transcript")
+        assert "OpenAI API call failed" in str(excinfo.value)
+
+def test_pdf_tool_long_content():
+    tool = PDFTool()
+    # Generate very long content
+    content = "# Long Article\n\n" + "This is a test paragraph. " * 500
+    
+    # Test in-memory generation
+    pdf_bytes = tool.generate_pdf_bytes(content)
+    assert isinstance(pdf_bytes, bytes)
+    assert len(pdf_bytes) > 1000
+
+def test_pdf_tool_special_characters():
+    tool = PDFTool()
+    content = "Special characters: \u2022 \u2013 \u2014 \u00e9 \u00e0 \u00f1"
+    
+    # Test in-memory generation
+    pdf_bytes = tool.generate_pdf_bytes(content)
+    assert isinstance(pdf_bytes, bytes)
+    assert len(pdf_bytes) > 1000    
