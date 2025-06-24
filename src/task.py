@@ -4,10 +4,14 @@ from src.tool import YouTubeTranscriptTool, BlogGeneratorTool
 def create_tasks(transcriber, writer):
     """Create and return task instances"""
     transcript_task = Task(
-        description='Retrieve the full transcript from the YouTube video at {youtube_url}',
+        description='Retrieve the full transcript from the YouTube video at {youtube_url} in language {language}',
         expected_output='A single string containing the entire video transcript.',
         agent=transcriber,
-        tools=[YouTubeTranscriptTool()]
+        tools=[YouTubeTranscriptTool()],
+        inputs={
+            "youtube_url": "{youtube_url}",
+            "language": "{language}"
+        }
     )
 
     blog_task = Task(

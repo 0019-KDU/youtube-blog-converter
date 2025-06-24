@@ -1,6 +1,7 @@
 import os
 import sys
 from flask import Flask, render_template, request, send_file, redirect, url_for, session
+import io  # Add this import
 
 # Add parent directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
@@ -17,19 +18,19 @@ def index():
 def generate_blog():
     """Process YouTube URL and generate blog"""
     youtube_url = request.form['youtube_url']
+    language = request.form.get('language', 'en')  # Get language or default to 'en'
     
     if not youtube_url:
         return render_template('index.html', error="YouTube URL is required")
     
     try:
-        # Generate blog content and PDF
+        # Generate blog content only
         from src.main import generate_blog_from_youtube
-        blog_content, pdf_path = generate_blog_from_youtube(youtube_url)
+        blog_content = generate_blog_from_youtube(youtube_url, language)
         
         # Store in session
         session['result_data'] = {
             'blog_content': blog_content,
-            'pdf_path': pdf_path,
             'youtube_url': youtube_url
         }
         
@@ -51,16 +52,30 @@ def results():
 
 @app.route('/download', methods=['GET'])
 def download_pdf():
-    """Download the generated PDF"""
+    """Generate and download the PDF on demand"""
     result_data = session.get('result_data', {})
-    if not result_data or not os.path.exists(result_data.get('pdf_path', '')):
+    if not result_data or not result_data.get('blog_content'):
         return redirect(url_for('index'))
     
-    return send_file(
-        result_data['pdf_path'],
-        as_attachment=True,
-        download_name='blog_article.pdf'
-    )
+    try:
+        # Import PDFTool and generate in-memory PDF
+        from src.tool import PDFTool
+        pdf_tool = PDFTool()
+        pdf_bytes = pdf_tool.generate_pdf_bytes(result_data['blog_content'])
+        
+        # Create in-memory file
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            as_attachment=True,
+            download_name='blog_article.pdf',
+            mimetype='application/pdf'
+        )
+    except Exception as e:
+        # Handle specific encoding error
+        if "encode" in str(e).lower():
+            return render_template('error.html', error="PDF format error. Please try again later.")
+        # Handle other errors
+        return render_template('error.html', error=f"PDF generation failed: {str(e)}")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
