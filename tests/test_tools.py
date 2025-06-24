@@ -84,8 +84,10 @@ def test_pdf_tool(tmp_path):
     
     # Test file generation
     result = tool._run(content, str(output_path))
+    
+    # Verify PDF file was created
     assert output_path.exists()
-    assert "PDF saved" in result
+    assert output_path.stat().st_size > 1000
     
     # Test in-memory generation
     pdf_bytes = tool.generate_pdf_bytes(content)
