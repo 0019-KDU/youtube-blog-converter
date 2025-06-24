@@ -1,17 +1,13 @@
 from crewai import Task
 from src.tool import YouTubeTranscriptTool, BlogGeneratorTool
 
-def create_tasks(transcriber, writer):
+def create_tasks(transcriber, writer, youtube_url, language):
     """Create and return task instances"""
     transcript_task = Task(
-        description='Retrieve the full transcript from the YouTube video at {youtube_url} in language {language}',
+        description=f'Retrieve the full transcript from the YouTube video at {youtube_url} in language {language}',
         expected_output='A single string containing the entire video transcript.',
         agent=transcriber,
-        tools=[YouTubeTranscriptTool()],
-        inputs={
-            "youtube_url": "{youtube_url}",
-            "language": "{language}"
-        }
+        tools=[YouTubeTranscriptTool()]
     )
 
     blog_task = Task(

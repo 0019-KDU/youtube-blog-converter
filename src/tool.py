@@ -125,9 +125,26 @@ class BlogGeneratorTool(BaseTool):
         client = openai.OpenAI(api_key=api_key)
         
         prompt = (
-            "Write a detailed, well-structured blog article based on the following video transcript:\n\n"
-            f"{transcript}"
-        )
+        "As an expert content writer, create a comprehensive, well-structured blog article based on the video transcript below. "
+        "Follow these guidelines:\n\n"
+        "1. Structure: Use clear headings and subheadings (H2, H3) to organize content\n"
+        "2. Introduction: Start with an engaging overview that summarizes the key topic\n"
+        "3. Content Body:\n"
+        "   - Break down complex ideas into digestible sections\n"
+        "   - Include bullet points for key takeaways\n"
+        "   - Add relevant examples where appropriate\n"
+        "4. Tone: Maintain a professional yet conversational style\n"
+        "5. SEO Optimization:\n"
+        "   - Naturally incorporate relevant keywords\n"
+        "   - Include meta description at the end\n"
+        "6. Formatting: Use Markdown for headings, lists, and emphasis\n"
+        "7. Conclusion: End with a summary and thought-provoking question\n"
+        "8. Additional Elements:\n"
+        "   - Create 3-5 FAQ questions based on content\n"
+        "   - Suggest 3 related topics for further reading\n\n"
+        "Video Transcript:\n"
+        f"{transcript}"
+       )
         try:
             # Use a valid model name
             response = client.chat.completions.create(

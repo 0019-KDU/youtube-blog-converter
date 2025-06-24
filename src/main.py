@@ -14,19 +14,19 @@ def generate_blog_from_youtube(youtube_url: str, language: str) -> str:
     """Generate a blog article from a YouTube video URL"""
     # Check for OpenAI API key
     if not os.getenv("OPENAI_API_KEY"):
-        logger.error("OpenAI API key not found")  # Add logging here
+        logger.error("OpenAI API key not found")
         raise RuntimeError("OpenAI API key not found")
     
-    # Input validation
-    if not youtube_url or "youtube.com" not in youtube_url:
-        raise ValueError("Invalid YouTube URL provided")
+    # Updated input validation to support both youtube.com and youtu.be formats
+    if not youtube_url or not ("youtube.com" in youtube_url or "youtu.be" in youtube_url):
+        raise ValueError("Invalid YouTube URL provided. Must be a YouTube URL.")
     
     logger.info(f"Starting blog generation for: {youtube_url}")
     
     try:
         # Create agents and tasks
         transcriber, writer = create_agents()
-        transcript_task, blog_task = create_tasks(youtube_url, language)
+        transcript_task, blog_task = create_tasks(transcriber, writer, youtube_url, language)  # Fixed to pass agents
         
         # Form the crew
         crew = Crew(
