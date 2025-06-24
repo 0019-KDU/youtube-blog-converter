@@ -86,11 +86,12 @@ def test_pdf_tool(tmp_path):
     result = tool._run(content, str(output_path))
     assert output_path.exists()
     assert "PDF saved" in result
+    assert output_path.stat().st_size > 1000  # Verify non-empty PDF
     
     # Test in-memory generation
     pdf_bytes = tool.generate_pdf_bytes(content)
     assert isinstance(pdf_bytes, bytes)
-    assert len(pdf_bytes) > 1000  # Ensure reasonable PDF size
+    assert len(pdf_bytes) > 1000
 
 def test_pdf_content_cleaning():
     tool = PDFTool()
