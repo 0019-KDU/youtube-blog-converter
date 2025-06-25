@@ -49,23 +49,34 @@ jobs:
 
       - name: Secret Detection with Gitleaks
         run: |
-          # Use the correct base branch reference
-          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
-          echo "Base branch: $BASE_BRANCH"
-          
-          # Fetch the base branch with sufficient depth
-          git fetch origin "$BASE_BRANCH" --depth=100
-          
-          # Calculate the common ancestor commit
-          BASE_COMMIT=$(git merge-base "origin/$BASE_BRANCH" HEAD)
-          echo "Base commit: $BASE_COMMIT"
-          
-          # Scan only new commits in the PR
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PR event - scan new commits in the PR
+            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+            echo "Scanning PR commits against base branch: $BASE_BRANCH"
+            git fetch origin "$BASE_BRANCH" --depth=100
+            BASE_COMMIT=$(git merge-base "origin/$BASE_BRANCH" HEAD)
+            RANGE="$BASE_COMMIT..HEAD"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # Push event - scan all commits in this push
+            echo "Scanning push event commits"
+            if [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+              # Normal push with previous history
+              RANGE="${{ github.event.before }}..${{ github.event.after }}"
+            else
+              # Initial push to new branch/repo
+              RANGE="${{ github.event.after }}"
+            fi
+          else
+            echo "Unsupported event type: ${{ github.event_name }}"
+            exit 1
+          fi
+
+          echo "Scanning commit range: $RANGE"
           gitleaks detect \
             --source . \
             --report-format json \
             --report-path gitleaks-report.json \
-            --log-opts "$BASE_COMMIT..HEAD"
+            --log-opts "$RANGE"
 
       - name: Create issue on failure
         if: ${{ failure() }}
