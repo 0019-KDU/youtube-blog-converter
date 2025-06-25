@@ -148,13 +148,13 @@ class BlogGeneratorTool(BaseTool):
         try:
             # Use a valid model name
             response = client.chat.completions.create(
-                model="gpt-4-turbo",  # Valid current model
+                model="gpt-4.1-nano-2025-04-14",  # Valid current model
                 messages=[
                     {"role": "system", "content": "You are an expert content writer."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=2000
+                max_tokens=4096
             )
             blog_text = response.choices[0].message.content.strip()
             return blog_text

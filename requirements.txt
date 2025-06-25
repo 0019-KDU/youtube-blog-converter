@@ -11,3 +11,5 @@ pytest-mock
 requests-mock
 pytest-flask
 mock
+Flask-Session
+uuid
