@@ -49,12 +49,18 @@ jobs:
 
       - name: Secret Detection with Gitleaks
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
+          # Fetch the latest base branch state
+          git fetch origin ${{ github.base_ref }} --depth=100
+          
+          # Calculate new commits using merge base
+          BASE_COMMIT=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          
+          # Scan only new commits in the PR
           gitleaks detect \
             --source . \
             --report-format json \
             --report-path gitleaks-report.json \
-            --log-opts "$(git merge-base origin/${{ github.base_ref }} HEAD)..HEAD"
+            --log-opts "$BASE_COMMIT..HEAD"
 
       - name: Create issue on failure
         if: ${{ failure() }}
