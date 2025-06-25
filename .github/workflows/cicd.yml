@@ -49,11 +49,16 @@ jobs:
 
       - name: Secret Detection with Gitleaks
         run: |
-          # Fetch the latest base branch state
-          git fetch origin ${{ github.base_ref }} --depth=100
+          # Use the correct base branch reference
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          echo "Base branch: $BASE_BRANCH"
           
-          # Calculate new commits using merge base
-          BASE_COMMIT=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          # Fetch the base branch with sufficient depth
+          git fetch origin "$BASE_BRANCH" --depth=100
+          
+          # Calculate the common ancestor commit
+          BASE_COMMIT=$(git merge-base "origin/$BASE_BRANCH" HEAD)
+          echo "Base commit: $BASE_COMMIT"
           
           # Scan only new commits in the PR
           gitleaks detect \
