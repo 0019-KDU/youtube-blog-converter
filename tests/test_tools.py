@@ -5,6 +5,8 @@ from src.tool import YouTubeTranscriptTool, BlogGeneratorTool, PDFTool
 import os
 import json
 import re
+import io
+from fpdf import FPDF  # Import FPDF to fix NameError
 
 # Fixtures for common test data
 @pytest.fixture
@@ -74,15 +76,26 @@ def test_extract_video_id_invalid_urls():
         assert tool._extract_video_id(url) is None
 
 @patch('src.tool.requests.get')
-def test_transcript_retry_logic(mock_get):
+def test_transcript_retry_success(mock_get, mock_player_response, mock_captions_xml):
     tool = YouTubeTranscriptTool()
     
-    # First two attempts fail, third succeeds
+    # First attempt fails, second succeeds
     mock_get.side_effect = [
         Exception("First error"),
-        Exception("Second error"),
-        MagicMock(status_code=200, text='<script>var ytInitialPlayerResponse = {}</script>')
+        MagicMock(status_code=200, text=f'<script>var ytInitialPlayerResponse = {json.dumps(mock_player_response)};</script>'),
+        MagicMock(status_code=200, text=mock_captions_xml)
     ]
+    
+    result = tool._run("https://youtube.com/watch?v=test", "en")
+    assert "Hello" in result
+    assert "World" in result
+
+@patch('src.tool.requests.get')
+def test_transcript_retry_failure(mock_get):
+    tool = YouTubeTranscriptTool()
+    
+    # All attempts fail
+    mock_get.side_effect = Exception("Persistent error")
     
     with pytest.raises(RuntimeError) as excinfo:
         tool._run("https://youtube.com/watch?v=test", "en")
@@ -144,17 +157,40 @@ def test_transcript_captions_fetch_failure(mock_get, mock_player_response):
         tool._get_transcript_from_html("test123", "en")
     assert "Failed to fetch captions: HTTP 404" in str(excinfo.value)
 
+@patch('src.tool.requests.get')
+def test_transcript_language_fallback(mock_get, mock_player_response, mock_captions_xml):
+    tool = YouTubeTranscriptTool()
+    
+    # Remove the requested language
+    mock_player_response['captions']['playerCaptionsTracklistRenderer']['captionTracks'][0]['languageCode'] = 'fr'
+    
+    html_response = MagicMock()
+    html_response.status_code = 200
+    html_response.text = f'<script>var ytInitialPlayerResponse = {json.dumps(mock_player_response)};</script>'
+    
+    captions_response = MagicMock()
+    captions_response.status_code = 200
+    captions_response.text = mock_captions_xml
+    
+    mock_get.side_effect = [html_response, captions_response]
+    
+    result = tool._get_transcript_from_html("test123", "en")
+    assert "Hello" in result
+
 # PDFTool Tests
 def test_pdf_clean_content():
     tool = PDFTool()
     
-    content = "Smart quotes: ‘single’ “double” – dash • bullet"
+    content = "Smart quotes: ‘single’ “double” – dash • bullet &amp; &lt; &gt;"
     cleaned = tool.clean_content(content)
     
     assert "'single'" in cleaned
     assert '"double"' in cleaned
     assert "- dash" in cleaned
-    assert "• bullet" in cleaned  # Should remain unchanged
+    assert "&amp;" not in cleaned
+    assert "&lt;" not in cleaned
+    assert "&gt;" not in cleaned
+    assert "• bullet" in cleaned
     assert "\r\n" not in cleaned
 
 def test_pdf_formatting_headings():
@@ -169,7 +205,6 @@ def test_pdf_formatting_bullets():
     pdf_bytes = tool.generate_pdf_bytes(content)
     assert len(pdf_bytes) > 1000
 
-# Fix for test_pdf_formatting_entities
 def test_pdf_formatting_entities():
     tool = PDFTool()
     content = "Ampersand: &amp; Less: &lt; Greater: &gt; Quote: &quot;"
@@ -199,6 +234,20 @@ def test_pdf_encoding_handling():
 
 # BlogGeneratorTool Tests
 @patch('src.tool.openai.OpenAI')
+def test_blog_generator_success(mock_openai):
+    tool = BlogGeneratorTool()
+    mock_response = MagicMock()
+    mock_choice = MagicMock()
+    mock_message = MagicMock()
+    mock_message.content = "Generated blog"
+    mock_choice.message = mock_message
+    mock_response.choices = [mock_choice]
+    mock_openai.return_value.chat.completions.create.return_value = mock_response
+    
+    result = tool._run("Sample transcript")
+    assert "Generated blog" in result
+
+@patch('src.tool.openai.OpenAI')
 def test_blog_generator_dict_inputs(mock_openai):
     tool = BlogGeneratorTool()
     mock_response = MagicMock()
@@ -221,8 +270,6 @@ def test_blog_generator_dict_inputs(mock_openai):
         result = tool._run(data)
         assert "Generated blog" in result
 
-# Fix for test_blog_generator_non_string_inputs
-# Updated test_blog_generator_non_string_inputs
 @patch('src.tool.openai.OpenAI')
 def test_blog_generator_non_string_inputs(mock_openai):
     tool = BlogGeneratorTool()
@@ -247,6 +294,12 @@ def test_blog_generator_non_string_inputs(mock_openai):
         result = tool._run(data)
         assert "Generated blog" in result
 
+def test_blog_generator_empty_transcript():
+    tool = BlogGeneratorTool()
+    with pytest.raises(RuntimeError) as excinfo:
+        tool._run("   ")
+    assert "Transcript is empty" in str(excinfo.value)
+
 def test_blog_generator_missing_api_key(monkeypatch):
     tool = BlogGeneratorTool()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -254,6 +307,15 @@ def test_blog_generator_missing_api_key(monkeypatch):
     with pytest.raises(RuntimeError) as excinfo:
         tool._run("Sample transcript")
     assert "OpenAI API key not provided" in str(excinfo.value)
+
+@patch('src.tool.openai.OpenAI')
+def test_blog_generator_api_error(mock_openai):
+    tool = BlogGeneratorTool()
+    mock_openai.return_value.chat.completions.create.side_effect = Exception("API Error")
+    
+    with pytest.raises(RuntimeError) as excinfo:
+        tool._run("Sample transcript")
+    assert "OpenAI API call failed" in str(excinfo.value)
 
 # Run all tests
 if __name__ == "__main__":
