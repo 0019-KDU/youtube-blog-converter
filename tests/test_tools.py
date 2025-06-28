@@ -1,111 +1,115 @@
+# tests/test_tools.py
 from unittest.mock import patch, MagicMock
 import pytest
 from src.tool import YouTubeTranscriptTool, BlogGeneratorTool, PDFTool
 import os
+import json
 
-def test_youtube_transcript_tool_success():
-    tool = YouTubeTranscriptTool()
-    with patch('src.tool.YouTube') as mock_yt, \
-         patch('src.tool.YouTubeTranscriptApi.get_transcript') as mock_get_transcript:
-        # Mock YouTube object
-        mock_yt_instance = MagicMock()
-        mock_yt_instance.video_id = "test123"
-        mock_yt.return_value = mock_yt_instance
-        
-        # Mock transcript data
-        mock_get_transcript.return_value = [{'text': 'Hello'}, {'text': 'World'}]
-        
-        # Test with language parameter
-        result = tool._run("https://youtube.com/watch?v=test123", "en")
-        assert result == "Hello World"
+@patch('src.tool.requests.get')
+def test_youtube_transcript_tool_success(mock_get, mock_player_response, mock_captions_xml):
+    # Mock the YouTube page response
+    mock_html_response = MagicMock()
+    mock_html_response.status_code = 200
+    mock_html_response.text = f'<script>var ytInitialPlayerResponse = {json.dumps(mock_player_response)};</script>'
+    
+    # Mock the captions response
+    mock_xml_response = MagicMock()
+    mock_xml_response.status_code = 200
+    mock_xml_response.text = mock_captions_xml
+    
+    mock_get.side_effect = [mock_html_response, mock_xml_response]
 
-def test_youtube_transcript_tool_auto_fallback():  # Fixed indentation
     tool = YouTubeTranscriptTool()
-    with patch('src.tool.YouTube') as mock_yt, \
-         patch('src.tool.YouTubeTranscriptApi.list') as mock_list:  # Added missing colon
-        # Mock YouTube object
-        mock_yt_instance = MagicMock()
-        mock_yt_instance.video_id = "test123"
-        mock_yt.return_value = mock_yt_instance
-        
-        # Mock transcript list
-        mock_transcript = MagicMock()
-        mock_transcript.language_code = "en-US"
-        mock_transcript.fetch.return_value = [{'text': 'Auto'}, {'text': 'Detected'}]
-        mock_list.return_value = [mock_transcript]
-        
-        # Test auto language detection
-        result = tool._run("https://youtube.com/watch?v=test123", "auto")
-        assert result == "Auto Detected"
+    result = tool._run("https://youtube.com/watch?v=test123", "en")
+    assert "Hello" in result
+    assert "World" in result
+    assert "test transcript" in result
 
-def test_youtube_transcript_tool_manual_fallback():
-    tool = YouTubeTranscriptTool()
-    with patch('src.tool.YouTube') as mock_yt, \
-         patch('src.tool.YouTubeTranscriptApi.get_transcript') as mock_get_transcript:
-        # Mock YouTube object
-        mock_yt_instance = MagicMock()
-        mock_yt_instance.video_id = "test123"
-        mock_yt.return_value = mock_yt_instance
-        mock_yt_instance.captions = {
-            'en': MagicMock(generate_srt_captions=lambda: "1\n00:00:00,000 --> 00:00:02,000\nFallback content")
-        }
-        
-        # Force failure in standard methods
-        mock_get_transcript.side_effect = Exception("Test error")
-        
-        # Test manual fallback
-        result = tool._run("https://youtube.com/watch?v=test123", "en")
-        assert "Fallback content" in result
+@patch('src.tool.requests.get')
+def test_youtube_transcript_tool_auto_fallback(mock_get, mock_player_response, mock_captions_xml):
+    # Modify response to have multiple languages
+    mock_player_response['captions']['playerCaptionsTracklistRenderer']['captionTracks'].append({
+        "baseUrl": "https://example.com/caption/es",
+        "languageCode": "es"
+    })
+    
+    mock_html_response = MagicMock()
+    mock_html_response.status_code = 200
+    mock_html_response.text = f'<script>var ytInitialPlayerResponse = {json.dumps(mock_player_response)};</script>'
+    
+    mock_xml_response = MagicMock()
+    mock_xml_response.status_code = 200
+    mock_xml_response.text = mock_captions_xml
+    
+    mock_get.side_effect = [mock_html_response, mock_xml_response]
 
-def test_youtube_transcript_tool_translation_fallback():
     tool = YouTubeTranscriptTool()
-    with patch('src.tool.YouTube') as mock_yt, \
-         patch('src.tool.YouTubeTranscriptApi.get_transcript') as mock_get_transcript:
-        # Mock YouTube object
-        mock_yt_instance = MagicMock()
-        mock_yt_instance.video_id = "test123"
-        mock_yt.return_value = mock_yt_instance
-        
-        # Simulate language fallback scenario
-        mock_get_transcript.side_effect = [
-            Exception("Language not found"),
-            [{'text': 'Hello'}, {'text': 'World'}]
-        ]
-        
-        result = tool._run("https://youtube.com/watch?v=test123", "fr")
-        assert result == "Hello World"
-def test_blog_generator_tool():
+    result = tool._run("https://youtube.com/watch?v=test123", "auto")
+    assert "Hello" in result
+    assert "World" in result
+
+@patch('src.tool.requests.get')
+def test_youtube_transcript_tool_manual_fallback(mock_get):
+    # Mock failed HTML response
+    mock_html_response = MagicMock()
+    mock_html_response.status_code = 404
+    
+    mock_get.return_value = mock_html_response
+
+    tool = YouTubeTranscriptTool()
+    with pytest.raises(RuntimeError) as excinfo:
+        tool._run("https://youtube.com/watch?v=test123", "en")
+    assert "Failed to fetch video page" in str(excinfo.value)
+
+@patch('src.tool.requests.get')
+def test_youtube_transcript_tool_translation_fallback(mock_get, mock_player_response, mock_captions_xml):
+    # Remove English track
+    mock_player_response['captions']['playerCaptionsTracklistRenderer']['captionTracks'] = [{
+        "baseUrl": "https://example.com/caption/fr",
+        "languageCode": "fr"
+    }]
+    
+    mock_html_response = MagicMock()
+    mock_html_response.status_code = 200
+    mock_html_response.text = f'<script>var ytInitialPlayerResponse = {json.dumps(mock_player_response)};</script>'
+    
+    mock_xml_response = MagicMock()
+    mock_xml_response.status_code = 200
+    mock_xml_response.text = mock_captions_xml
+    
+    mock_get.side_effect = [mock_html_response, mock_xml_response]
+
+    tool = YouTubeTranscriptTool()
+    result = tool._run("https://youtube.com/watch?v=test123", "en")
+    assert "Hello" in result  # Should still get content
+
+@patch('src.tool.openai.OpenAI')
+def test_blog_generator_tool(mock_openai):
     tool = BlogGeneratorTool()
-    with patch('openai.OpenAI') as mock_openai:
-        # Mock OpenAI response
-        mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_message = MagicMock()
-        mock_message.content = "Generated blog"
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
-        mock_openai.return_value.chat.completions.create.return_value = mock_response
-        
-        # Test with string input
-        result = tool._run("Sample transcript")
-        assert "Generated blog" in result
-        
-        # Test with CrewAI dict input
-        result = tool._run({'raw': 'Sample transcript'})
-        assert "Generated blog" in result
+    mock_response = MagicMock()
+    mock_choice = MagicMock()
+    mock_message = MagicMock()
+    mock_message.content = "Generated blog"
+    mock_choice.message = mock_message
+    mock_response.choices = [mock_choice]
+    mock_openai.return_value.chat.completions.create.return_value = mock_response
+    
+    result = tool._run("Sample transcript")
+    assert "Generated blog" in result
+    
+    result = tool._run({'raw': 'Sample transcript'})
+    assert "Generated blog" in result
 
 def test_pdf_tool(tmp_path):
     tool = PDFTool()
     output_path = tmp_path / "test.pdf"
     content = "# Test Heading\n\nTest paragraph content"
     
-    # Test file generation
     result = tool._run(content, str(output_path))
     assert output_path.exists()
     assert "PDF saved" in result
-    assert output_path.stat().st_size > 1000  # Verify non-empty PDF
+    assert output_path.stat().st_size > 1000
     
-    # Test in-memory generation
     pdf_bytes = tool.generate_pdf_bytes(content)
     assert isinstance(pdf_bytes, bytes)
     assert len(pdf_bytes) > 1000
@@ -117,7 +121,7 @@ def test_pdf_content_cleaning():
     
     assert "'hello'" in cleaned
     assert '"world"' in cleaned
-    assert "- dash" in cleaned  # Fixed to match actual behavior
+    assert "- dash" in cleaned
     assert "\r\n" not in cleaned
 
 def test_pdf_formatting():
@@ -128,14 +132,14 @@ def test_pdf_formatting():
     assert isinstance(pdf_bytes, bytes)
     assert len(pdf_bytes) > 1000
 
-def test_transcript_tool_invalid_url():
+@patch('src.tool.requests.get')
+def test_transcript_tool_invalid_url(mock_get):
     tool = YouTubeTranscriptTool()
+    mock_get.side_effect = Exception("Invalid URL")
     
-    # Mock YouTube to raise exception
-    with patch('src.tool.YouTube', side_effect=Exception("Invalid URL")):
-        with pytest.raises(RuntimeError) as excinfo:
-            tool._run("invalid_url", "en")
-        assert "Invalid YouTube URL" in str(excinfo.value)
+    with pytest.raises(RuntimeError) as excinfo:
+        tool._run("invalid_url", "en")
+    assert "Invalid YouTube URL" in str(excinfo.value)
 
 def test_blog_tool_empty_transcript():
     tool = BlogGeneratorTool()
@@ -149,22 +153,18 @@ def test_pdf_tool_empty_content():
         tool.generate_pdf_bytes("")
     assert "No content provided" in str(excinfo.value)
     
-def test_blog_generator_tool_api_error():
+@patch('src.tool.openai.OpenAI')
+def test_blog_generator_tool_api_error(mock_openai):
     tool = BlogGeneratorTool()
-    with patch('openai.OpenAI') as mock_openai:
-        # Mock API failure
-        mock_openai.return_value.chat.completions.create.side_effect = Exception("API Error")
-        
-        with pytest.raises(RuntimeError) as excinfo:
-            tool._run("Sample transcript")
-        assert "OpenAI API call failed" in str(excinfo.value)
+    mock_openai.return_value.chat.completions.create.side_effect = Exception("API Error")
+    
+    with pytest.raises(RuntimeError) as excinfo:
+        tool._run("Sample transcript")
+    assert "OpenAI API call failed" in str(excinfo.value)
 
 def test_pdf_tool_long_content():
     tool = PDFTool()
-    # Generate very long content
     content = "# Long Article\n\n" + "This is a test paragraph. " * 500
-    
-    # Test in-memory generation
     pdf_bytes = tool.generate_pdf_bytes(content)
     assert isinstance(pdf_bytes, bytes)
     assert len(pdf_bytes) > 1000
@@ -172,8 +172,6 @@ def test_pdf_tool_long_content():
 def test_pdf_tool_special_characters():
     tool = PDFTool()
     content = "Special characters: \u2022 \u2013 \u2014 \u00e9 \u00e0 \u00f1"
-    
-    # Test in-memory generation
     pdf_bytes = tool.generate_pdf_bytes(content)
     assert isinstance(pdf_bytes, bytes)
-    assert len(pdf_bytes) > 1000    
+    assert len(pdf_bytes) > 1000

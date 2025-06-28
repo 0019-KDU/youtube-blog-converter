@@ -13,3 +13,4 @@ pytest-flask
 mock
 Flask-Session
 uuid
+openlit

@@ -5,10 +5,12 @@ from crewai import Crew
 from src.agent import create_agents
 from src.task import create_tasks
 
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
 
 def generate_blog_from_youtube(youtube_url: str, language: str) -> str:
     """Generate a blog article from a YouTube video URL"""
