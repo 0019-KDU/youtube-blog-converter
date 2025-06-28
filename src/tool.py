@@ -1,93 +1,167 @@
 import os
+import time
+import logging
+import random
+import re
+import json
+import requests
 from typing import Type
-from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
-from pytube import YouTube
-from youtube_transcript_api import YouTubeTranscriptApi
 import openai
 from fpdf import FPDF, FPDF_VERSION
+from crewai.tools import BaseTool
+from fpdf.enums import XPos, YPos
+# Set up logging
+logger = logging.getLogger(__name__)
+
+# Set custom headers to mimic a real browser
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Referer": "https://www.google.com/",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 class TranscriptInput(BaseModel):
     """Input schema for YouTube transcript tool."""
     youtube_url: str = Field(..., description="YouTube video URL")
-    language: str = Field("en", description="Language code for transcript (e.g., 'en', 'en-US')")
+    language: str = Field("auto", description="Language code for transcript (e.g., 'en', 'en-US'), or 'auto' for auto-detect")
 
 class YouTubeTranscriptTool(BaseTool):
     name: str = "YouTubeTranscriptTool"
-    description: str = "Retrieve transcript from a YouTube video URL in the specified language"
+    description: str = "Retrieve transcript from a YouTube video URL in the specified language. Use 'auto' for automatic language detection."
     args_schema: Type[TranscriptInput] = TranscriptInput
 
-    def _run(self, youtube_url: str, language: str = "en") -> str:
-        try:
-            yt = YouTube(youtube_url)
-            video_id = yt.video_id
-        except Exception as e:
-            raise RuntimeError(f"Invalid YouTube URL: {e}")
+    def _run(self, youtube_url: str, language: str = "auto") -> str:
+        """Retrieve transcript with retry logic and proper headers"""
+        max_retries = 3
+        backoff_factor = 1
+        transcript = None
         
-        try:
-            # Handle auto language selection
-            if language == "auto":
-                return self._get_auto_transcript(video_id)
-                
-            # First try the exact language
+        for attempt in range(max_retries):
             try:
-                transcript_data = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
-                return self._format_transcript(transcript_data)
-            except:
-                # If that fails, try the base language (without region)
-                base_lang = language.split('-')[0]
-                try:
-                    transcript_data = YouTubeTranscriptApi.get_transcript(video_id, languages=[base_lang])
-                    return self._format_transcript(transcript_data)
-                except:
-                    # Finally fall back to any available transcript
-                    return self._get_auto_transcript(video_id)
-        except Exception as e:
-            # Try manual retrieval as fallback
-            return self._manual_transcript_fallback(video_id, language)
-    
-    def _get_auto_transcript(self, video_id):
-            """Get first available transcript if specific language fails"""
-            try:
-                # Replace deprecated list_transcripts() with list()
-                transcript_list = YouTubeTranscriptApi.list(video_id)
-                
-                # Try to find an English transcript first
-                for transcript in transcript_list:
-                    if transcript.language_code.startswith('en'):
-                        return self._format_transcript(transcript.fetch())
-                
-                # Otherwise, take the first available
-                for transcript in transcript_list:
-                    return self._format_transcript(transcript.fetch())
-                    
-                raise RuntimeError("No transcripts found for this video")
+                transcript = self._get_transcript(youtube_url, language)
+                if transcript:
+                    return transcript
             except Exception as e:
-                return self._manual_transcript_fallback(video_id)
-    
-    def _format_transcript(self, transcript_data):
-        """Convert transcript data to text"""
-        return " ".join(entry['text'] for entry in transcript_data)
-    
-    def _manual_transcript_fallback(self, video_id, language="en"):
-        """Manual transcript retrieval fallback"""
-        try:
-            # Try direct API call as last resort
-            transcript = YouTubeTranscriptApi.get_transcript(
-                video_id,
-                languages=[language, 'en', 'en-US', 'en-GB'],
-                preserve_formatting=True
-            )
-            return self._format_transcript(transcript)
-        except Exception as e:
-            # Final fallback to pytube captions
-            try:
-                yt = YouTube(f'https://www.youtube.com/watch?v={video_id}')
-                caption = yt.captions.get(language, None) or yt.captions.get('en', None) or list(yt.captions.all())[0]
-                return caption.generate_srt_captions()
-            except Exception as fallback_e:
-                raise RuntimeError(f"Transcript retrieval failed: {str(fallback_e)}")
+                logger.warning(f"Attempt {attempt+1} failed: {str(e)}")
+                if attempt == max_retries - 1:
+                    raise RuntimeError(f"Transcript retrieval failed after {max_retries} attempts: {str(e)}")
+                
+                # Exponential backoff with jitter
+                sleep_time = backoff_factor * (2 ** attempt) + random.uniform(0, 1)
+                logger.info(f"Retrying in {sleep_time:.2f} seconds...")
+                time.sleep(sleep_time)
+        
+        return transcript
 
+    def _get_transcript(self, youtube_url: str, language: str) -> str:
+        """Main logic to retrieve transcript"""
+        try:
+            # Extract video ID from URL
+            video_id = self._extract_video_id(youtube_url)
+            if not video_id:
+                raise RuntimeError("Invalid YouTube URL format")
+            
+            logger.info(f"Retrieving transcript for video: {video_id}")
+            
+            # Use the reliable HTML parsing method
+            return self._get_transcript_from_html(video_id, language)
+                
+        except Exception as e:
+            logger.error(f"Transcript retrieval failed: {str(e)}")
+            raise RuntimeError(f"Transcript retrieval failed: {str(e)}")
+
+    def _extract_video_id(self, url: str) -> str:
+        """Extract video ID from YouTube URL"""
+        patterns = [
+            r"youtube\.com/watch\?v=([^&]+)",
+            r"youtu\.be/([^?]+)",
+            r"youtube\.com/embed/([^?]+)",
+            r"youtube\.com/v/([^?]+)"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        
+        # Try to extract from short URL parameters
+        if "youtu.be" in url:
+            path = url.split("youtu.be/")[1].split("?")[0]
+            return path.split("/")[0]
+        
+        return None
+
+    def _get_transcript_from_html(self, video_id: str, language: str) -> str:
+        """Get transcript by parsing YouTube HTML"""
+        try:
+            # Fetch the watch page
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            response = requests.get(url, headers=HEADERS)
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to fetch video page: HTTP {response.status_code}")
+            
+            html = response.text
+            
+            # Find the JSON data in the HTML
+            match = re.search(r'ytInitialPlayerResponse\s*=\s*({.+?});', html)
+            if not match:
+                raise RuntimeError("Could not find player response in HTML")
+            
+            # Parse the JSON data
+            player_response = json.loads(match.group(1))
+            
+            # Find captions in the player response
+            captions = player_response.get('captions', {})
+            caption_tracks = captions.get('playerCaptionsTracklistRenderer', {}).get('captionTracks', [])
+            
+            if not caption_tracks:
+                raise RuntimeError("No caption tracks found")
+            
+            # Find the best matching caption track
+            caption_url = None
+            for track in caption_tracks:
+                if language == "auto" and track.get('languageCode', '').startswith('en'):
+                    caption_url = track.get('baseUrl')
+                    break
+                elif track.get('languageCode', '') == language:
+                    caption_url = track.get('baseUrl')
+                    break
+                elif track.get('languageCode', '').split('-')[0] == language.split('-')[0]:
+                    caption_url = track.get('baseUrl')
+                    break
+            
+            if not caption_url:
+                # Use the first available caption
+                caption_url = caption_tracks[0].get('baseUrl')
+            
+            if not caption_url:
+                raise RuntimeError("No captions URL found")
+            
+            # Fetch the captions XML
+            captions_response = requests.get(caption_url, headers=HEADERS)
+            if captions_response.status_code != 200:
+                raise RuntimeError(f"Failed to fetch captions: HTTP {captions_response.status_code}")
+            
+            # Parse XML to extract text
+            text_lines = []
+            for line in captions_response.text.split('<text '):
+                if 'start=' in line and 'dur=' in line:
+                    text = line.split('>', 1)[1].split('</text>', 1)[0]
+                    # Handle HTML entities
+                    text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
+                    text_lines.append(text)
+            
+            return ' '.join(text_lines)
+            
+        except Exception as e:
+            logger.error(f"HTML transcript retrieval failed: {str(e)}")
+            raise RuntimeError(f"HTML transcript retrieval failed: {str(e)}")
+
+# Rest of the file remains the same...
 class BlogInput(BaseModel):
     """Input schema for blog generation tool."""
     transcript: str = Field(..., description="Video transcript text")
@@ -108,15 +182,15 @@ class BlogGeneratorTool(BaseTool):
             elif 'output' in transcript:
                 transcript = transcript['output']
             else:
-                # Try to convert the dictionary to string
+                # Convert the dictionary to string
                 transcript = str(transcript)
         
+        # Convert to string if it's not already a string
         if not isinstance(transcript, str):
-            raise TypeError(f"Transcript should be a string, got {type(transcript)}")
+            transcript = str(transcript)
         
         if not transcript.strip():
             raise RuntimeError("Transcript is empty; cannot generate blog.")
-            
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OpenAI API key not provided. Set OPENAI_API_KEY.")
@@ -148,7 +222,7 @@ class BlogGeneratorTool(BaseTool):
         try:
             # Use a valid model name
             response = client.chat.completions.create(
-                model="gpt-4.1-nano-2025-04-14",  # Valid current model
+                model="gpt-4-turbo",
                 messages=[
                     {"role": "system", "content": "You are an expert content writer."},
                     {"role": "user", "content": prompt}
@@ -166,6 +240,8 @@ class PDFInput(BaseModel):
     content: str = Field(..., description="Text content to write into PDF")
     output_path: str = Field("blog_article.pdf", description="Output PDF file path")
 
+import io  # Add this import at the top of the file
+
 class PDFTool(BaseTool):
     name: str = "PDFTool"
     description: str = "Generate a PDF file from given content"
@@ -178,34 +254,31 @@ class PDFTool(BaseTool):
             f.write(pdf_bytes)
         return f"PDF saved to {output_path}"
 
+    # In PDFTool class
     def clean_content(self, content: str) -> str:
         """Normalize content formatting"""
-        # Replace problematic characters
-        replacements = {
-            '\u2019': "'",   # right single quotation mark
-            '\u2018': "'",   # left single quotation mark
-            '\u201c': '"',   # left double quotation mark
-            '\u201d': '"',   # right double quotation mark
-            '\u2013': '-',   # en dash
-            '\u2014': '--',  # em dash
-            '\u2026': '...', # ellipsis
-            '\u2022': '-',   # bullet point
-        }
-        for orig, repl in replacements.items():
-            content = content.replace(orig, repl)
+        # Replace smart quotes and dashes
+        content = content.replace('‘', "'").replace('’', "'")
+        content = content.replace('“', '"').replace('”', '"')
+        content = content.replace('\u2013', '-').replace('\u2014', '--')
         
-        # Normalize line breaks
+        # Normalize newlines
         content = content.replace('\r\n', '\n').replace('\r', '\n')
         
-        # Ensure consistent heading spacing
-        content = content.replace('# ', '#').replace(' #', '#')
-        content = content.replace('## ', '##').replace(' ##', '##')
-        content = content.replace('### ', '###').replace(' ###', '###')
-        
-        # Normalize bullet points
-        content = content.replace('• ', '- ').replace('* ', '- ')
+        # Decode HTML entities
+        content = content.replace('&amp;', '&')
+        content = content.replace('&lt;', '<')
+        content = content.replace('&gt;', '>')
+        content = content.replace('&quot;', '"')
         
         return content
+    def generate_pdf_bytes(self, content: str) -> bytes:
+        """Generate PDF in memory with professional formatting"""
+        if not content:
+            raise RuntimeError("No content provided for PDF generation.")
+        
+        # Clean and format content
+        content = self.clean_content(content)
 
     def generate_pdf_bytes(self, content: str) -> bytes:
         """Generate PDF in memory with professional formatting"""
@@ -229,7 +302,7 @@ class PDFTool(BaseTool):
         pdf.set_fill_color(64, 172, 254)  # #4facfe
         pdf.set_text_color(255, 255, 255)
         pdf.set_font_size(18)
-        pdf.cell(0, 15, "Blog Article", ln=1, fill=True, align='C')
+        pdf.cell(0, 15, "Blog Article", fill=True, align='C', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(10)
         
         # Reset font for content
@@ -251,21 +324,21 @@ class PDFTool(BaseTool):
             if line.startswith('# '):
                 pdf.set_font_size(16)
                 pdf.set_text_color(30, 30, 30)
-                pdf.cell(0, 10, line[2:].strip(), ln=1)
+                pdf.cell(0, 10, line[2:].strip(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 pdf.set_font_size(12)
                 pdf.set_text_color(0, 0, 0)
                 pdf.ln(4)
             elif line.startswith('## '):
                 pdf.set_font_size(14)
                 pdf.set_text_color(50, 50, 50)
-                pdf.cell(0, 10, line[3:].strip(), ln=1)
+                pdf.cell(0, 10, line[3:].strip(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 pdf.set_font_size(12)
                 pdf.set_text_color(0, 0, 0)
                 pdf.ln(3)
             elif line.startswith('### '):
                 pdf.set_font(style='B')
                 pdf.set_text_color(70, 70, 70)
-                pdf.cell(0, 10, line[4:].strip(), ln=1)
+                pdf.cell(0, 10, line[4:].strip(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 pdf.set_font(style='')
                 pdf.set_text_color(0, 0, 0)
                 pdf.ln(2)
@@ -274,15 +347,13 @@ class PDFTool(BaseTool):
                 # Handle bullet points
                 if line.startswith('- ') or line.startswith('* '):
                     pdf.set_x(15)
-                    pdf.cell(5, 6, "-", ln=0)  # Use simple dash instead of bullet
+                    pdf.cell(5, 6, "-", new_x=XPos.RIGHT, new_y=YPos.TOP)
                     line = line[2:].strip()
                 
                 # Write the text
                 try:
-                    # Try to write normally
                     pdf.multi_cell(0, 6, line)
                 except:
-                    # Fallback for encoding issues
                     pdf.multi_cell(0, 6, line.encode('latin1', 'replace').decode('latin1'))
             
             pdf.ln(4)  # Space between lines
@@ -291,13 +362,9 @@ class PDFTool(BaseTool):
         pdf.set_y(-15)
         pdf.set_font_size(10)
         pdf.set_text_color(150, 150, 150)
-        pdf.cell(0, 10, "Generated by YouTube to Blog Converter", 0, 0, 'C')
+        pdf.cell(0, 10, "Generated by YouTube to Blog Converter", new_x=XPos.RIGHT, new_y=YPos.TOP)
         
-        # Return as bytes - use 'S' for string then encode
-        pdf_output = pdf.output(dest='S')
-        if isinstance(pdf_output, str):
-            return pdf_output.encode('latin1', 'replace')
-        elif isinstance(pdf_output, bytearray):
-            return bytes(pdf_output)
-        else:
-            return pdf_output
+        # Return as bytes using BytesIO
+        with io.BytesIO() as output_buffer:
+            pdf.output(output_buffer)
+            return output_buffer.getvalue()

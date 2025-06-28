@@ -1,10 +1,9 @@
-# app.py
 import os
 import sys
 import io
 import uuid
 from flask import Flask, render_template, request, send_file, redirect, url_for, session
-from flask_session import Session
+from flask_session import Session  # Updated import
 
 # Add parent directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
@@ -19,14 +18,13 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersecretkey')
 # Configure server-side sessions
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_FILE_DIR'] = './.flask_session/'
-app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_USE_SIGNER'] = False  # Disable signer to avoid bytes issue
-Session(app)
+
+# Initialize Flask-Session extension
+Session(app)  # Proper initialization
 
 @app.route('/', methods=['GET'])
 def index():
     """Render the main form page"""
-    # Clear any previous session data
     session.clear()
     return render_template('index.html')
 
@@ -44,15 +42,13 @@ def generate_blog():
         blog_content = generate_blog_from_youtube(youtube_url, language)
         
         # Generate unique ID for content
-        content_id = str(uuid.uuid4())  # Ensure it's a string
+        content_id = str(uuid.uuid4())
         
-        # Store in server-side session
+        # Store in session
         session[content_id] = {
             'blog_content': blog_content,
             'youtube_url': youtube_url
         }
-        
-        # Store only ID in client-side cookie
         session['content_id'] = content_id
         
         return redirect(url_for('results'))
@@ -66,9 +62,6 @@ def results():
     content_id = session.get('content_id')
     if not content_id:
         return redirect(url_for('index'))
-    
-    # Ensure content_id is string
-    content_id = str(content_id)
     
     result_data = session.get(content_id, {})
     if not result_data:
@@ -85,9 +78,6 @@ def download_pdf():
     if not content_id:
         return redirect(url_for('index'))
     
-    # Ensure content_id is string
-    content_id = str(content_id)
-    
     result_data = session.get(content_id, {})
     if not result_data:
         return redirect(url_for('index'))
@@ -98,17 +88,12 @@ def download_pdf():
         pdf_bytes = pdf_tool.generate_pdf_bytes(result_data['blog_content'])
         
         # Create in-memory file
-        response = send_file(
+        return send_file(
             io.BytesIO(pdf_bytes),
             as_attachment=True,
             download_name='blog_article.pdf',
             mimetype='application/pdf'
         )
-        
-        # Clear session after download
-        session.pop(content_id, None)
-        session.pop('content_id', None)
-        return response
         
     except Exception as e:
         return render_template('error.html', error=f"PDF generation failed: {str(e)}")
