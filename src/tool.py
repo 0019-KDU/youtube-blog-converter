@@ -182,15 +182,15 @@ class BlogGeneratorTool(BaseTool):
             elif 'output' in transcript:
                 transcript = transcript['output']
             else:
-                # Try to convert the dictionary to string
+                # Convert the dictionary to string
                 transcript = str(transcript)
         
+        # Convert to string if it's not already a string
         if not isinstance(transcript, str):
-            raise TypeError(f"Transcript should be a string, got {type(transcript)}")
+            transcript = str(transcript)
         
         if not transcript.strip():
             raise RuntimeError("Transcript is empty; cannot generate blog.")
-            
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OpenAI API key not provided. Set OPENAI_API_KEY.")
@@ -254,6 +254,7 @@ class PDFTool(BaseTool):
             f.write(pdf_bytes)
         return f"PDF saved to {output_path}"
 
+    # In PDFTool class
     def clean_content(self, content: str) -> str:
         """Normalize content formatting"""
         # Replace smart quotes and dashes
@@ -263,8 +264,14 @@ class PDFTool(BaseTool):
         
         # Normalize newlines
         content = content.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # Decode HTML entities
+        content = content.replace('&amp;', '&')
+        content = content.replace('&lt;', '<')
+        content = content.replace('&gt;', '>')
+        content = content.replace('&quot;', '"')
+        
         return content
-
     def generate_pdf_bytes(self, content: str) -> bytes:
         """Generate PDF in memory with professional formatting"""
         if not content:
