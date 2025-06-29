@@ -2,15 +2,32 @@ import os
 import sys
 import io
 import uuid
+import logging
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Set the path to the .env file in the project root
+env_path = Path(__file__).resolve().parent / '.env'
+logger.info(f"Loading environment from: {env_path}")
+
+if env_path.exists():
+    logger.info(".env file found, loading environment variables")
+    load_dotenv(dotenv_path=env_path)
+else:
+    logger.warning(".env file not found, falling back to system environment")
+    load_dotenv()  # Fallback to default loading
+
+# Debug: Check OpenAI API key
+api_key = os.getenv("OPENAI_API_KEY")
+logger.info(f"OPENAI_API_KEY loaded: {'Yes' if api_key else 'No'}")
+
+# Now create the Flask app
 from flask import Flask, render_template, request, send_file, redirect, url_for, session
-from flask_session import Session  # Updated import
-
-# Add parent directory to Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
-
-# Import application components
-from src.main import generate_blog_from_youtube
-from src.tool import PDFTool
+from flask_session import Session
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersecretkey')
@@ -20,7 +37,16 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_FILE_DIR'] = './.flask_session/'
 
 # Initialize Flask-Session extension
-Session(app)  # Proper initialization
+Session(app)
+
+# Import application components after environment is loaded
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    from src.main import generate_blog_from_youtube
+    from src.tool import PDFTool
+except ImportError as e:
+    logger.error(f"Import error: {str(e)}")
+    raise
 
 @app.route('/', methods=['GET'])
 def index():
@@ -54,6 +80,7 @@ def generate_blog():
         return redirect(url_for('results'))
     
     except Exception as e:
+        logger.error(f"Generation error: {str(e)}")
         return render_template('index.html', error=f"Error: {str(e)}")
 
 @app.route('/results', methods=['GET'])
@@ -96,11 +123,14 @@ def download_pdf():
         )
         
     except Exception as e:
+        logger.error(f"PDF generation error: {str(e)}")
         return render_template('error.html', error=f"PDF generation failed: {str(e)}")
 
 if __name__ == '__main__':
     # Create session directory if it doesn't exist
-    if not os.path.exists(app.config['SESSION_FILE_DIR']):
-        os.makedirs(app.config['SESSION_FILE_DIR'])
+    session_dir = app.config['SESSION_FILE_DIR']
+    if not os.path.exists(session_dir):
+        os.makedirs(session_dir)
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)

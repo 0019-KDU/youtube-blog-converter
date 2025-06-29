@@ -222,7 +222,7 @@ class BlogGeneratorTool(BaseTool):
         try:
             # Use a valid model name
             response = client.chat.completions.create(
-                model="gpt-4-turbo",
+                model="gpt-4.1-nano-2025-04-14",
                 messages=[
                     {"role": "system", "content": "You are an expert content writer."},
                     {"role": "user", "content": prompt}

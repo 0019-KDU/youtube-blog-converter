@@ -1,16 +1,28 @@
 import os
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
 from crewai import Crew
 from src.agent import create_agents
 from src.task import create_tasks
 
-
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
+# Get the path to the .env file in the parent directory
+env_path = Path(__file__).resolve().parent.parent / '.env'
+logger.info(f"Loading environment from: {env_path}")
 
+# Load environment variables
+if env_path.exists():
+    logger.info(".env file found, loading environment variables")
+    load_dotenv(dotenv_path=env_path)
+else:
+    logger.warning(".env file not found, falling back to system environment")
+    load_dotenv()  # Fallback to default loading
+
+# Debug: Check if OPENAI_API_KEY is loaded
+api_key = os.getenv("OPENAI_API_KEY")
+logger.info(f"OPENAI_API_KEY loaded: {'Yes' if api_key else 'No'}")
 
 def generate_blog_from_youtube(youtube_url: str, language: str) -> str:
     """Generate a blog article from a YouTube video URL"""
