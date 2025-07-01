@@ -1,36 +1,101 @@
-# .dockerignore
+**
+!app.py
+!requirements.txt
+!src/
+!templates/
+.git*
+.dockerignore
+Dockerfile
+*.md
+LICENSE
+tests/
+env/
+.*
+*.log
+*.tmp
+*.db
+*.sqlite3
+__pycache__
+.pytest_cache
+.flask_session
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
 .env
-.git
-.gitignore
 .venv
 env/
 venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
-Dockerfile
-docker-compose.yml
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Documentation
 README.md
-*.log
-*.db
-*.sqlite3
-*.csv
-*.data
-*.model
-*.h5
-*.pt
-*.bin
-*.tar.gz
-*.zip
-*.jpg
-*.png
-*.jpeg
-*.gif
-*.mp4
-*.mov
-test/
+*.md
+docs/
+
+# Tests
 tests/
-data/
-notebooks/
+test_*.py
+*_test.py
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache/
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Development files
+requirements-dev.txt
+.flake8
+.pre-commit-config.yaml
