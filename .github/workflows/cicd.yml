@@ -260,18 +260,23 @@ jobs:
             const token = '${{ secrets.SONAR_TOKEN }}';
             
             try {
+              // Create Basic Auth header - SonarQube uses token as username with empty password
+              const auth = Buffer.from(`${token}:`).toString('base64');
+              
               // Get project measures from SonarQube API
               const metricsResponse = await fetch(
                 `${sonarUrl}/api/measures/component?component=${projectKey}&metricKeys=bugs,vulnerabilities,security_hotspots,code_smells,coverage,duplicated_lines_density,ncloc,sqale_rating,reliability_rating,security_rating`,
                 {
                   headers: {
-                    'Authorization': `Bearer ${token}`
+                    'Authorization': `Basic ${auth}`,
+                    'Content-Type': 'application/json'
                   }
                 }
               );
               
               if (!metricsResponse.ok) {
-                throw new Error(`SonarQube API error: ${metricsResponse.status}`);
+                const errorText = await metricsResponse.text();
+                throw new Error(`SonarQube API error: ${metricsResponse.status} - ${errorText}`);
               }
               
               const metricsData = await metricsResponse.json();
@@ -282,10 +287,16 @@ jobs:
                 `${sonarUrl}/api/qualitygates/project_status?projectKey=${projectKey}`,
                 {
                   headers: {
-                    'Authorization': `Bearer ${token}`
+                    'Authorization': `Basic ${auth}`,
+                    'Content-Type': 'application/json'
                   }
                 }
               );
+              
+              if (!qualityGateResponse.ok) {
+                const errorText = await qualityGateResponse.text();
+                throw new Error(`SonarQube Quality Gate API error: ${qualityGateResponse.status} - ${errorText}`);
+              }
               
               const qualityGateData = await qualityGateResponse.json();
               const qualityGateStatus = qualityGateData.projectStatus.status;
@@ -363,6 +374,8 @@ jobs:
                 repo: context.repo.repo,
                 body: commentBody
               });
+              
+              console.log('Successfully posted SonarQube analysis results to PR');
               
             } catch (error) {
               console.error('Error creating SonarQube PR comment:', error);
