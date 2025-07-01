@@ -298,7 +298,7 @@ jobs:
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
   sonarqube-pr-comment:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: sonarqube-scan
     if: github.event_name == 'pull_request'
     permissions:
