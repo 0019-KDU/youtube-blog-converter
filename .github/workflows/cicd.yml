@@ -9,6 +9,7 @@ on:
 permissions:
   issues: write
   contents: read
+  pull-requests: write
 
 env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -296,6 +297,217 @@ jobs:
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
+  sonarqube-pr-comment:
+    runs-on: ubuntu-latest
+    needs: sonarqube-scan
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Custom SonarQube Results Table
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const sonarUrl = '${{ vars.SONAR_HOST_URL }}';
+            const projectKey = '${{ vars.SONAR_PROJECT_KEY }}';
+            const sonarToken = '${{ secrets.SONAR_TOKEN }}';
+            const prNumber = ${{ github.event.pull_request.number }};
+            
+            try {
+              // Fetch quality gate status
+              const qualityGateResponse = await fetch(
+                `${sonarUrl}/api/qualitygates/project_status?projectKey=${projectKey}`,
+                {
+                  headers: {
+                    'Authorization': `Bearer ${sonarToken}`
+                  }
+                }
+              );
+              
+              if (!qualityGateResponse.ok) {
+                throw new Error(`Failed to fetch quality gate: ${qualityGateResponse.status}`);
+              }
+              
+              const qualityGateData = await qualityGateResponse.json();
+              
+              // Fetch project measures
+              const measuresResponse = await fetch(
+                `${sonarUrl}/api/measures/component?component=${projectKey}&metricKeys=alert_status,bugs,vulnerabilities,security_hotspots,code_smells,coverage,duplicated_lines_density,ncloc,sqale_rating,reliability_rating,security_rating`,
+                {
+                  headers: {
+                    'Authorization': `Bearer ${sonarToken}`
+                  }
+                }
+              );
+              
+              if (!measuresResponse.ok) {
+                throw new Error(`Failed to fetch measures: ${measuresResponse.status}`);
+              }
+              
+              const measuresData = await measuresResponse.json();
+              
+              // Helper function to get measure value
+              function getMeasureValue(measures, key) {
+                const measure = measures.find(m => m.metric === key);
+                return measure ? measure.value : 'N/A';
+              }
+              
+              // Helper function to get rating emoji
+              function getRatingEmoji(rating) {
+                switch(rating) {
+                  case '1.0': return '🟢 A';
+                  case '2.0': return '🟡 B';
+                  case '3.0': return '🟠 C';
+                  case '4.0': return '🔴 D';
+                  case '5.0': return '⚫ E';
+                  default: return rating || 'N/A';
+                }
+              }
+              
+              // Helper function to get status emoji
+              function getStatusEmoji(status) {
+                return status === 'OK' ? '✅' : '❌';
+              }
+              
+              const measures = measuresData.component.measures;
+              const qualityGateStatus = qualityGateData.projectStatus.status;
+              
+              // Build the comment body
+              const commentBody = `
+            ## 📊 SonarQube Analysis Results
+            
+            ${getStatusEmoji(qualityGateStatus)} **Quality Gate: ${qualityGateStatus}**
+            
+            ### 📈 Code Quality Metrics
+            
+            | Metric | Value | Rating |
+            |--------|-------|--------|
+            | 🐛 **Bugs** | ${getMeasureValue(measures, 'bugs')} | ${getRatingEmoji(getMeasureValue(measures, 'reliability_rating'))} |
+            | 🔒 **Vulnerabilities** | ${getMeasureValue(measures, 'vulnerabilities')} | ${getRatingEmoji(getMeasureValue(measures, 'security_rating'))} |
+            | 🔥 **Security Hotspots** | ${getMeasureValue(measures, 'security_hotspots')} | - |
+            | 💩 **Code Smells** | ${getMeasureValue(measures, 'code_smells')} | ${getRatingEmoji(getMeasureValue(measures, 'sqale_rating'))} |
+            | 📊 **Coverage** | ${getMeasureValue(measures, 'coverage')}% | - |
+            | 📋 **Duplicated Lines** | ${getMeasureValue(measures, 'duplicated_lines_density')}% | - |
+            | 📏 **Lines of Code** | ${getMeasureValue(measures, 'ncloc')} | - |
+            
+            ### 🎯 Quality Gate Conditions
+            `;
+            
+              // Add quality gate conditions if available
+              let conditionsTable = '';
+              if (qualityGateData.projectStatus.conditions) {
+                conditionsTable = `
+            | Condition | Status | Actual | Threshold |
+            |-----------|--------|--------|-----------|`;
+                
+                qualityGateData.projectStatus.conditions.forEach(condition => {
+                  const statusEmoji = condition.status === 'OK' ? '✅' : '❌';
+                  conditionsTable += `
+            | ${condition.metricKey} | ${statusEmoji} ${condition.status} | ${condition.actualValue || 'N/A'} | ${condition.errorThreshold || condition.warningThreshold || 'N/A'} |`;
+                });
+              }
+              
+              const finalComment = commentBody + conditionsTable + `
+            
+            ---
+            📋 **Project:** \`${projectKey}\`  
+            🔗 **View Details:** [SonarQube Dashboard](${sonarUrl}/dashboard?id=${projectKey})  
+            ⏰ **Analysis Time:** ${new Date().toISOString()}
+            `;
+            
+              // Find existing comment to update or create new one
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber
+              });
+              
+              const existingComment = comments.data.find(comment => 
+                comment.body.includes('📊 SonarQube Analysis Results')
+              );
+              
+              if (existingComment) {
+                // Update existing comment
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existingComment.id,
+                  body: finalComment
+                });
+                console.log('Updated existing SonarQube comment');
+              } else {
+                // Create new comment
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: finalComment
+                });
+                console.log('Created new SonarQube comment');
+              }
+              
+            } catch (error) {
+              console.error('Error creating SonarQube comment:', error);
+              
+              // Fallback comment
+              const fallbackComment = `
+            ## 📊 SonarQube Analysis Results
+            
+            ⚠️ **Unable to fetch detailed results**
+            
+            Please check the [SonarQube Dashboard](${sonarUrl}/dashboard?id=${projectKey}) manually.
+            
+            **Error:** ${error.message}
+            `;
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: fallbackComment
+              });
+            }
+
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `SonarQube PR Comment Failed in ${context.job}`,
+                body: `### ❌ SonarQube PR Comment Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `Failed to post SonarQube results to PR.`,
+                assignees: [assignee],
+                labels: ['ci-failure', 'sonarqube']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
+
   docker-build-test:
     needs: [security-scan, build-and-test, sonarqube-scan]
     runs-on: ubuntu-latest
@@ -475,6 +687,7 @@ jobs:
       - security-scan
       - build-and-test
       - sonarqube-scan
+      - sonarqube-pr-comment
       - docker-build-test
       - deploy-to-dockerhub
     steps:
@@ -509,6 +722,14 @@ jobs:
             successful_jobs+="SonarQube Scan, "
           else
             skipped_jobs+="SonarQube Scan, "
+          fi
+
+          if [[ "${{ needs.sonarqube-pr-comment.result }}" == 'failure' ]]; then 
+            failed_jobs+="SonarQube PR Comment, "
+          elif [[ "${{ needs.sonarqube-pr-comment.result }}" == 'success' ]]; then
+            successful_jobs+="SonarQube PR Comment, "
+          else
+            skipped_jobs+="SonarQube PR Comment, "
           fi
 
           if [[ "${{ needs.docker-build-test.result }}" == 'failure' ]]; then 
