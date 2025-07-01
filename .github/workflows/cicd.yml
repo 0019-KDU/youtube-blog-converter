@@ -10,6 +10,7 @@ permissions:
   issues: write
   contents: read
   pull-requests: write
+  checks: write
 
 env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -51,20 +52,16 @@ jobs:
       - name: Secret Detection with Gitleaks
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # PR event - scan new commits in the PR
             BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
             echo "Scanning PR commits against base branch: $BASE_BRANCH"
             git fetch origin "$BASE_BRANCH" --depth=100
             BASE_COMMIT=$(git merge-base "origin/$BASE_BRANCH" HEAD)
             RANGE="$BASE_COMMIT..HEAD"
           elif [ "${{ github.event_name }}" = "push" ]; then
-            # Push event - scan all commits in this push
             echo "Scanning push event commits"
             if [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-              # Normal push with previous history
               RANGE="${{ github.event.before }}..${{ github.event.after }}"
             else
-              # Initial push to new branch/repo
               RANGE="${{ github.event.after }}"
             fi
           else
@@ -225,6 +222,7 @@ jobs:
           path: .
           
       - name: SonarQube Scan
+        id: sonar-scan
         uses: SonarSource/sonarqube-scan-action@v5.2.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -246,10 +244,130 @@ jobs:
             -Dsonar.links.ci=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             
       - name: SonarQube Quality Gate check
+        id: sonar-quality-gate
         uses: sonarsource/sonarqube-quality-gate-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+
+      - name: Create Detailed SonarQube PR Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sonarUrl = '${{ vars.SONAR_HOST_URL }}';
+            const projectKey = '${{ vars.SONAR_PROJECT_KEY }}';
+            const token = '${{ secrets.SONAR_TOKEN }}';
+            
+            try {
+              // Get project measures from SonarQube API
+              const metricsResponse = await fetch(
+                `${sonarUrl}/api/measures/component?component=${projectKey}&metricKeys=bugs,vulnerabilities,security_hotspots,code_smells,coverage,duplicated_lines_density,ncloc,sqale_rating,reliability_rating,security_rating`,
+                {
+                  headers: {
+                    'Authorization': `Bearer ${token}`
+                  }
+                }
+              );
+              
+              if (!metricsResponse.ok) {
+                throw new Error(`SonarQube API error: ${metricsResponse.status}`);
+              }
+              
+              const metricsData = await metricsResponse.json();
+              const measures = metricsData.component.measures;
+              
+              // Get Quality Gate status
+              const qualityGateResponse = await fetch(
+                `${sonarUrl}/api/qualitygates/project_status?projectKey=${projectKey}`,
+                {
+                  headers: {
+                    'Authorization': `Bearer ${token}`
+                  }
+                }
+              );
+              
+              const qualityGateData = await qualityGateResponse.json();
+              const qualityGateStatus = qualityGateData.projectStatus.status;
+              
+              // Helper function to get metric value
+              function getMetricValue(metricKey) {
+                const measure = measures.find(m => m.metric === metricKey);
+                return measure ? measure.value : 'N/A';
+              }
+              
+              // Helper function to get rating emoji
+              function getRatingEmoji(rating) {
+                switch(rating) {
+                  case 'A': return '🟢';
+                  case 'B': return '🟡';
+                  case 'C': return '🟠';
+                  case 'D': return '🔴';
+                  case 'E': return '🔴';
+                  default: return '⚪';
+                }
+              }
+              
+              // Create detailed comment body using string concatenation
+              const statusSection = qualityGateStatus === 'OK' ? '✅ **PASSED**' : '❌ **FAILED**';
+              
+              const metricsTable = [
+                '| Metric | Value | Rating |',
+                '|--------|-------|--------|',
+                `| 🐛 **Bugs** | ${getMetricValue('bugs')} | ${getRatingEmoji(getMetricValue('reliability_rating'))} |`,
+                `| 🔒 **Vulnerabilities** | ${getMetricValue('vulnerabilities')} | ${getRatingEmoji(getMetricValue('security_rating'))} |`,
+                `| 🔥 **Security Hotspots** | ${getMetricValue('security_hotspots')} | - |`,
+                `| 💨 **Code Smells** | ${getMetricValue('code_smells')} | ${getRatingEmoji(getMetricValue('sqale_rating'))} |`,
+                `| 📏 **Lines of Code** | ${getMetricValue('ncloc')} | - |`,
+                `| 🧪 **Coverage** | ${getMetricValue('coverage')}% | - |`,
+                `| 📋 **Duplicated Lines** | ${getMetricValue('duplicated_lines_density')}% | - |`
+              ].join('\n');
+              
+              const linksSection = [
+                '### 🔗 Links',
+                `- [📊 View Full Report](${sonarUrl}/dashboard?id=${projectKey})`,
+                `- [🔍 View Issues](${sonarUrl}/project/issues?resolved=false&id=${projectKey})`,
+                `- [📈 View Measures](${sonarUrl}/component_measures?id=${projectKey})`
+              ].join('\n');
+              
+              const detailsSection = [
+                '### ℹ️ Analysis Details',
+                `- **Project Key**: \`${projectKey}\``,
+                `- **Analysis Date**: ${new Date().toISOString()}`,
+                `- **Commit**: \`${context.sha.substring(0, 7)}\``,
+                `- **Workflow Run**: [#${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+              ].join('\n');
+              
+              const commentBody = [
+                '## 📊 SonarQube Analysis Results',
+                '',
+                '### Quality Gate Status',
+                statusSection,
+                '',
+                '### 📈 Code Quality Metrics',
+                '',
+                metricsTable,
+                '',
+                linksSection,
+                '',
+                detailsSection,
+                '',
+                '---',
+                '*This comment was automatically generated by SonarQube analysis in GitHub Actions*'
+              ].join('\n');
+              
+              // Post comment to PR
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: commentBody
+              });
+              
+            } catch (error) {
+              console.error('Error creating SonarQube PR comment:', error);
+              core.setFailed(`Failed to create PR comment: ${error.message}`);
+            }
 
       - name: Create issue on failure
         if: ${{ failure() }}
@@ -296,217 +414,6 @@ jobs:
               {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
-
-  sonarqube-pr-comment:
-    runs-on: self-hosted
-    needs: sonarqube-scan
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Show commit author
-        run: |
-          echo "Commit by ${{ github.actor }}"
-          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
-          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Custom SonarQube Results Table
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const sonarUrl = '${{ vars.SONAR_HOST_URL }}';
-            const projectKey = '${{ vars.SONAR_PROJECT_KEY }}';
-            const sonarToken = '${{ secrets.SONAR_TOKEN }}';
-            const prNumber = ${{ github.event.pull_request.number }};
-            
-            try {
-              // Fetch quality gate status
-              const qualityGateResponse = await fetch(
-                `${sonarUrl}/api/qualitygates/project_status?projectKey=${projectKey}`,
-                {
-                  headers: {
-                    'Authorization': `Bearer ${sonarToken}`
-                  }
-                }
-              );
-              
-              if (!qualityGateResponse.ok) {
-                throw new Error(`Failed to fetch quality gate: ${qualityGateResponse.status}`);
-              }
-              
-              const qualityGateData = await qualityGateResponse.json();
-              
-              // Fetch project measures
-              const measuresResponse = await fetch(
-                `${sonarUrl}/api/measures/component?component=${projectKey}&metricKeys=alert_status,bugs,vulnerabilities,security_hotspots,code_smells,coverage,duplicated_lines_density,ncloc,sqale_rating,reliability_rating,security_rating`,
-                {
-                  headers: {
-                    'Authorization': `Bearer ${sonarToken}`
-                  }
-                }
-              );
-              
-              if (!measuresResponse.ok) {
-                throw new Error(`Failed to fetch measures: ${measuresResponse.status}`);
-              }
-              
-              const measuresData = await measuresResponse.json();
-              
-              // Helper function to get measure value
-              function getMeasureValue(measures, key) {
-                const measure = measures.find(m => m.metric === key);
-                return measure ? measure.value : 'N/A';
-              }
-              
-              // Helper function to get rating emoji
-              function getRatingEmoji(rating) {
-                switch(rating) {
-                  case '1.0': return '🟢 A';
-                  case '2.0': return '🟡 B';
-                  case '3.0': return '🟠 C';
-                  case '4.0': return '🔴 D';
-                  case '5.0': return '⚫ E';
-                  default: return rating || 'N/A';
-                }
-              }
-              
-              // Helper function to get status emoji
-              function getStatusEmoji(status) {
-                return status === 'OK' ? '✅' : '❌';
-              }
-              
-              const measures = measuresData.component.measures;
-              const qualityGateStatus = qualityGateData.projectStatus.status;
-              
-              // Build the comment body
-              const commentBody = `
-            ## 📊 SonarQube Analysis Results
-            
-            ${getStatusEmoji(qualityGateStatus)} **Quality Gate: ${qualityGateStatus}**
-            
-            ### 📈 Code Quality Metrics
-            
-            | Metric | Value | Rating |
-            |--------|-------|--------|
-            | 🐛 **Bugs** | ${getMeasureValue(measures, 'bugs')} | ${getRatingEmoji(getMeasureValue(measures, 'reliability_rating'))} |
-            | 🔒 **Vulnerabilities** | ${getMeasureValue(measures, 'vulnerabilities')} | ${getRatingEmoji(getMeasureValue(measures, 'security_rating'))} |
-            | 🔥 **Security Hotspots** | ${getMeasureValue(measures, 'security_hotspots')} | - |
-            | 💩 **Code Smells** | ${getMeasureValue(measures, 'code_smells')} | ${getRatingEmoji(getMeasureValue(measures, 'sqale_rating'))} |
-            | 📊 **Coverage** | ${getMeasureValue(measures, 'coverage')}% | - |
-            | 📋 **Duplicated Lines** | ${getMeasureValue(measures, 'duplicated_lines_density')}% | - |
-            | 📏 **Lines of Code** | ${getMeasureValue(measures, 'ncloc')} | - |
-            
-            ### 🎯 Quality Gate Conditions
-            `;
-            
-              // Add quality gate conditions if available
-              let conditionsTable = '';
-              if (qualityGateData.projectStatus.conditions) {
-                conditionsTable = `
-            | Condition | Status | Actual | Threshold |
-            |-----------|--------|--------|-----------|`;
-                
-                qualityGateData.projectStatus.conditions.forEach(condition => {
-                  const statusEmoji = condition.status === 'OK' ? '✅' : '❌';
-                  conditionsTable += `
-            | ${condition.metricKey} | ${statusEmoji} ${condition.status} | ${condition.actualValue || 'N/A'} | ${condition.errorThreshold || condition.warningThreshold || 'N/A'} |`;
-                });
-              }
-              
-              const finalComment = commentBody + conditionsTable + `
-            
-            ---
-            📋 **Project:** \`${projectKey}\`  
-            🔗 **View Details:** [SonarQube Dashboard](${sonarUrl}/dashboard?id=${projectKey})  
-            ⏰ **Analysis Time:** ${new Date().toISOString()}
-            `;
-            
-              // Find existing comment to update or create new one
-              const comments = await github.rest.issues.listComments({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber
-              });
-              
-              const existingComment = comments.data.find(comment => 
-                comment.body.includes('📊 SonarQube Analysis Results')
-              );
-              
-              if (existingComment) {
-                // Update existing comment
-                await github.rest.issues.updateComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: existingComment.id,
-                  body: finalComment
-                });
-                console.log('Updated existing SonarQube comment');
-              } else {
-                // Create new comment
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                  body: finalComment
-                });
-                console.log('Created new SonarQube comment');
-              }
-              
-            } catch (error) {
-              console.error('Error creating SonarQube comment:', error);
-              
-              // Fallback comment
-              const fallbackComment = `
-            ## 📊 SonarQube Analysis Results
-            
-            ⚠️ **Unable to fetch detailed results**
-            
-            Please check the [SonarQube Dashboard](${sonarUrl}/dashboard?id=${projectKey}) manually.
-            
-            **Error:** ${error.message}
-            `;
-              
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: fallbackComment
-              });
-            }
-
-      - name: Create issue on failure
-        if: ${{ failure() }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            try {
-              const assignee = "${{ github.actor }}";
-              const authorName = "${{ github.event.head_commit.author.name }}";
-              const authorEmail = "${{ github.event.head_commit.author.email }}";
-              
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `SonarQube PR Comment Failed in ${context.job}`,
-                body: `### ❌ SonarQube PR Comment Failed\n\n` +
-                      `**Job:** ${context.job}\n` +
-                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
-                      `Failed to post SonarQube results to PR.`,
-                assignees: [assignee],
-                labels: ['ci-failure', 'sonarqube']
-              });
-            } catch (error) {
-              console.error('Error creating issue:', error);
-              core.setFailed(`Failed to create issue: ${error.message}`);
-            }
 
   docker-build-test:
     needs: [security-scan, build-and-test, sonarqube-scan]
@@ -678,7 +585,6 @@ jobs:
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
-  # Global Slack notification job
   notify:
     name: Pipeline Status Notification
     if: always()
@@ -687,19 +593,16 @@ jobs:
       - security-scan
       - build-and-test
       - sonarqube-scan
-      - sonarqube-pr-comment
       - docker-build-test
       - deploy-to-dockerhub
     steps:
       - name: Aggregate job statuses
         id: status
         run: |
-          # Initialize variables
           failed_jobs=""
           successful_jobs=""
           skipped_jobs=""
 
-          # Check each job status
           if [[ "${{ needs.security-scan.result }}" == 'failure' ]]; then 
             failed_jobs+="Security Scan, "
           elif [[ "${{ needs.security-scan.result }}" == 'success' ]]; then
@@ -724,14 +627,6 @@ jobs:
             skipped_jobs+="SonarQube Scan, "
           fi
 
-          if [[ "${{ needs.sonarqube-pr-comment.result }}" == 'failure' ]]; then 
-            failed_jobs+="SonarQube PR Comment, "
-          elif [[ "${{ needs.sonarqube-pr-comment.result }}" == 'success' ]]; then
-            successful_jobs+="SonarQube PR Comment, "
-          else
-            skipped_jobs+="SonarQube PR Comment, "
-          fi
-
           if [[ "${{ needs.docker-build-test.result }}" == 'failure' ]]; then 
             failed_jobs+="Docker Build, "
           elif [[ "${{ needs.docker-build-test.result }}" == 'success' ]]; then
@@ -748,17 +643,14 @@ jobs:
             skipped_jobs+="Deployment, "
           fi
 
-          # Remove trailing commas
           failed_jobs=${failed_jobs%, }
           successful_jobs=${successful_jobs%, }
           skipped_jobs=${skipped_jobs%, }
 
-          # Set outputs
           echo "failed_jobs=$failed_jobs" >> $GITHUB_OUTPUT
           echo "successful_jobs=$successful_jobs" >> $GITHUB_OUTPUT
           echo "skipped_jobs=$skipped_jobs" >> $GITHUB_OUTPUT
           
-          # Set overall status
           if [ -n "$failed_jobs" ]; then
             echo "overall_status=failure" >> $GITHUB_OUTPUT
           elif [ -n "$successful_jobs" ]; then
@@ -772,9 +664,7 @@ jobs:
         with:
           channel: '#githubaction'
           status: ${{ job.status }}
-          # Determine icon based on overall status
           icon_emoji: ${{ steps.status.outputs.overall_status == 'success' && ':white_check_mark:' || ':x:' }}
-          # Custom text based on status
           text: |
             ${{ steps.status.outputs.overall_status == 'success' && '✅ Pipeline Succeeded!' || '❌ Pipeline Failed!' }}
             ${{ steps.status.outputs.overall_status == 'skipped' && '⚠️ Pipeline Skipped!' }}
@@ -785,8 +675,8 @@ jobs:
               {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
               {"title": "Commit", "value": "${{ github.sha }}", "short": true},
               {"title": "Triggered by", "value": "${{ github.actor }}", "short": true},
-              ${{ !steps.status.outputs.successful_jobs == '' && format('{{"title": "Successful Jobs", "value": "{0}", "short": true}},', steps.status.outputs.successful_jobs) }}
-              ${{ !steps.status.outputs.failed_jobs == '' && format('{{"title": "Failed Jobs", "value": "{0}", "short": true}},', steps.status.outputs.failed_jobs) }}
-              ${{ !steps.status.outputs.skipped_jobs == '' && format('{{"title": "Skipped Jobs", "value": "{0}", "short": true}}', steps.status.outputs.skipped_jobs) }}
+              ${{ steps.status.outputs.successful_jobs != '' && format('{{"title": "Successful Jobs", "value": "{0}", "short": true}},', steps.status.outputs.successful_jobs) || '' }}
+              ${{ steps.status.outputs.failed_jobs != '' && format('{{"title": "Failed Jobs", "value": "{0}", "short": true}},', steps.status.outputs.failed_jobs) || '' }}
+              ${{ steps.status.outputs.skipped_jobs != '' && format('{{"title": "Skipped Jobs", "value": "{0}", "short": true}}', steps.status.outputs.skipped_jobs) || '' }}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run Details>"
