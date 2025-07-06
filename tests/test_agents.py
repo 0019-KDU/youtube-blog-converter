@@ -1,80 +1,55 @@
-import pytest
-from unittest.mock import Mock, patch
+import logging
+from unittest.mock import patch
+from crewai import Agent
 from src.agent import create_agents
+from src.tool import YouTubeTranscriptTool, BlogGeneratorTool
 
-class TestCreateAgents:
-    """Test cases for agent creation"""
+
+def test_create_agents_returns_two_agents():
+    """Ensure create_agents returns two Agent instances"""
+    transcriber, writer = create_agents()
+    assert isinstance(transcriber, Agent)
+    assert isinstance(writer, Agent)
+
+
+def test_transcriber_agent_properties():
+    """Check attributes of the transcriber agent"""
+    transcriber, _ = create_agents()
     
-    def test_create_agents_returns_two_agents(self):
-        """Test that create_agents returns transcriber and writer agents"""
-        with patch('src.agent.Agent') as mock_agent:
-            mock_agent_instance = Mock()
-            mock_agent.return_value = mock_agent_instance
-            
-            transcriber, writer = create_agents()
-            
-            assert transcriber is not None
-            assert writer is not None
-            assert mock_agent.call_count == 2
-    
-    def test_transcriber_agent_configuration(self):
-        """Test transcriber agent is configured correctly"""
-        with patch('src.agent.Agent') as mock_agent, \
-             patch('src.agent.YouTubeTranscriptTool') as mock_tool:
-            
-            mock_agent_instance = Mock()
-            mock_agent.return_value = mock_agent_instance
-            mock_tool_instance = Mock()
-            mock_tool.return_value = mock_tool_instance
-            
-            transcriber, writer = create_agents()
-            
-            # Check first call (transcriber)
-            first_call = mock_agent.call_args_list[0]
-            kwargs = first_call[1]
-            
-            assert kwargs['role'] == 'YouTube Video Transcriber'
-            assert 'Extract accurate transcripts' in kwargs['goal']
-            assert 'expert at extracting video transcripts' in kwargs['backstory']
-            assert kwargs['verbose'] is True
-            assert kwargs['memory'] is True
-            assert kwargs['allow_delegation'] is False
-    
-    def test_writer_agent_configuration(self):
-        """Test writer agent is configured correctly"""
-        with patch('src.agent.Agent') as mock_agent, \
-             patch('src.agent.YouTubeTranscriptTool'), \
-             patch('src.agent.BlogGeneratorTool') as mock_blog_tool:
-            
-            mock_agent_instance = Mock()
-            mock_agent.return_value = mock_agent_instance
-            mock_blog_tool_instance = Mock()
-            mock_blog_tool.return_value = mock_blog_tool_instance
-            
-            transcriber, writer = create_agents()
-            
-            # Check second call (writer)
-            second_call = mock_agent.call_args_list[1]
-            kwargs = second_call[1]
-            
-            assert kwargs['role'] == 'Blog Content Writer'
-            assert 'Transform video transcripts' in kwargs['goal']
-            assert 'professional content writer' in kwargs['backstory']
-            assert kwargs['verbose'] is True
-            assert kwargs['memory'] is True
-            assert kwargs['allow_delegation'] is False
-    
-    def test_agents_have_correct_tools(self):
-        """Test that agents are assigned correct tools"""
-        with patch('src.agent.Agent') as mock_agent, \
-             patch('src.agent.YouTubeTranscriptTool') as mock_transcript_tool, \
-             patch('src.agent.BlogGeneratorTool') as mock_blog_tool:
-            
-            mock_agent_instance = Mock()
-            mock_agent.return_value = mock_agent_instance
-            
-            create_agents()
-            
-            # Verify tools were created
-            mock_transcript_tool.assert_called_once()
-            mock_blog_tool.assert_called_once()
+    assert transcriber.role == 'YouTube Technical Content Extractor'
+    assert "capture every specific detail" in transcriber.backstory
+    assert isinstance(transcriber.tools[0], YouTubeTranscriptTool)
+    assert transcriber.verbose is True
+    assert callable(transcriber.step_callback)
+
+
+def test_writer_agent_properties():
+    """Check attributes of the writer agent"""
+    _, writer = create_agents()
+
+    assert writer.role == 'Technical Blog Writer'
+    assert "preserve every tool name" in writer.backstory
+    assert isinstance(writer.tools[0], BlogGeneratorTool)
+    assert writer.verbose is True
+    assert callable(writer.step_callback)
+
+
+def test_step_callbacks_trigger_log_messages(caplog):
+    """Test that step callbacks log messages correctly"""
+    caplog.set_level(logging.INFO)
+
+    transcriber, writer = create_agents()
+
+    # Manually trigger the callbacks
+    transcriber.step_callback("dummy_step_1")
+    writer.step_callback("dummy_step_2")
+
+    assert "Transcriber step completed" in caplog.text
+    assert "Writer step completed" in caplog.text
+
+
+def test_logger_info_called_on_creation():
+    """Verify logger.info is called when agents are created"""
+    with patch('src.agent.logger.info') as mock_log:
+        create_agents()
+        mock_log.assert_called_with("Enhanced agents created successfully")
