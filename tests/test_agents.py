@@ -53,3 +53,13 @@ def test_logger_info_called_on_creation():
     with patch('src.agent.logger.info') as mock_log:
         create_agents()
         mock_log.assert_called_with("Enhanced agents created successfully")
+
+def test_full_logger_coverage():
+    with patch('src.agent.logger.info') as mock_log:
+        transcriber, writer = create_agents()
+        transcriber.step_callback("step_1")
+        writer.step_callback("step_2")
+
+        mock_log.assert_any_call("Enhanced agents created successfully")
+        mock_log.assert_any_call("Transcriber step completed")
+        mock_log.assert_any_call("Writer step completed")

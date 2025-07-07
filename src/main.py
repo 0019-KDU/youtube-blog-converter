@@ -48,9 +48,17 @@ def _clean_final_output(content: str) -> str:
     content = re.sub(r'BlogGeneratorTool', '', content, flags=re.IGNORECASE)
     content = re.sub(r'YouTubeTranscriptTool', '', content, flags=re.IGNORECASE)
     
-    # Remove JSON artifacts
-    content = re.sub(r'\{\s*"[^"]*"\s*:\s*"[^"]*"\s*\}', '', content, flags=re.DOTALL)
-    content = re.sub(r'\{\s*"content"\s*:\s*\{[^}]*\}\s*\}', '', content, flags=re.DOTALL)
+    # Remove JSON artifacts using iterative removal of innermost braces
+    max_passes = 10
+    for _ in range(max_passes):
+        new_content = re.sub(r'\{[^{}]*\}', '', content, flags=re.DOTALL)
+        if new_content == content:
+            break
+        content = new_content
+    
+    # Remove any remaining unmatched braces
+    content = re.sub(r'\{', '', content)
+    content = re.sub(r'\}', '', content)
     
     # Remove markdown artifacts if present
     content = re.sub(r'``````', '', content, flags=re.DOTALL)
@@ -221,9 +229,4 @@ def cli_main():
         logger.error(f"CLI error: {str(e)}", exc_info=True)
 
 if __name__ == "__main__":
-    # Set up logging for CLI usage
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
     cli_main()
