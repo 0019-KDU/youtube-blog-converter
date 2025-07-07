@@ -12,6 +12,10 @@ WORKDIR /app
 # Install minimal build dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+      chromium \
+      chromium-driver \
+      libxml2-dev \
+      libxslt-dev \ 
       build-essential \
       libssl-dev \
       pkg-config \
@@ -39,8 +43,12 @@ WORKDIR /app
 # Install only essential runtime dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+      chromium \
+      chromium-driver \
       libgomp1 \
       libffi8 \
+      libxml2-dev \
+      libxslt-dev \
       ca-certificates && \
     # Clean up aggressively
     apt-get clean && \
