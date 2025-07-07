@@ -143,7 +143,6 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
     """Generate a blog article from a YouTube video URL with comprehensive error handling"""
     start_time = time.time()
     
-    # Validate input
     if not os.getenv("OPENAI_API_KEY"):
         logger.error("OpenAI API key not found")
         return _create_error_response(youtube_url, "OpenAI API key not found in environment variables")
@@ -151,7 +150,6 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
     if not youtube_url or not re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', youtube_url):
         return _create_error_response(youtube_url, "Invalid YouTube URL provided")
     
-    # Validate video ID can be extracted
     video_id = _extract_video_id(youtube_url)
     if not video_id:
         return _create_error_response(youtube_url, "Could not extract valid video ID from URL")
@@ -159,16 +157,15 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
     logger.info(f"Starting blog generation for video ID: {video_id}")
     
     try:
-        # Use the reliable fallback approach directly
         logger.info("Using reliable fallback approach...")
         result_text = test_individual_components(youtube_url, language)
         
         if result_text and len(result_text) > 500:
+            cleaned_output = _clean_final_output(result_text)
             duration = time.time() - start_time
-            logger.info(f"✅ Blog generated successfully in {duration:.2f}s")
-            return result_text
+            logger.info(f"✅ Blog generated successfully in {duration:.2f}s (cleaned length: {len(cleaned_output)})")
+            return cleaned_output
         
-        # Final fallback: Error response
         duration = time.time() - start_time
         logger.error(f"❌ Blog generation failed after {duration:.2f}s")
         return _create_error_response(youtube_url, "Could not generate blog content")
@@ -194,7 +191,6 @@ def cli_main():
     print("=" * 50)
     
     try:
-        # Validate environment first
         validate_environment()
         
         youtube_url = input("Enter YouTube video URL: ").strip()
@@ -216,7 +212,6 @@ def cli_main():
         print("\n" + "=" * 50)
         print(f"Total length: {len(blog_output)} characters")
         
-        # Save to file
         output_file = f"blog_output_{int(time.time())}.txt"
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(blog_output)

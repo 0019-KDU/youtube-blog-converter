@@ -395,3 +395,21 @@ def test_clean_final_output_removes_nested_json():
     assert '"c"' not in cleaned
     assert "Content start" in cleaned
     assert "Content end" in cleaned
+    
+def test_clean_final_output_deep_nested_and_unmatched_json():
+    """Covers iterative brace removal and unmatched braces"""
+    content = """
+    Nested start
+    { "a": { "b": { "c": { "d": "value" } } } }
+    Orphan brace } at end
+    """
+    cleaned = main._clean_final_output(content)
+    
+    # Validate JSON/braces removed
+    assert "{" not in cleaned
+    assert "}" not in cleaned
+    
+    # Validate original text preserved
+    assert "Nested start" in cleaned
+    assert "Orphan brace" in cleaned
+    
