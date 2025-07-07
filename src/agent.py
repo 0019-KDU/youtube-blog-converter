@@ -1,34 +1,45 @@
 from crewai import Agent
 from src.tool import YouTubeTranscriptTool, BlogGeneratorTool
+import logging
+
+logger = logging.getLogger(__name__)
 
 def create_agents():
+    """Create agents with enhanced configuration to prevent tool reuse issues"""
+    
     transcriber = Agent(
-        role='YouTube Video Transcriber',
-        goal='Extract accurate transcripts from YouTube videos using multiple methods',
+        role='YouTube Technical Content Extractor',
+        goal='Extract complete, detailed transcripts preserving all technical terms and specific tool names',
         backstory=(
-            'You are an expert at extracting video transcripts from YouTube videos. '
-            'You use the youtube-transcript-api as your primary method, and you always '
-            'verify that the content you extract is meaningful and related to the video.'
+            'You are an expert at extracting technical content from videos. '
+            'You never generalize or summarize - you capture every specific detail, '
+            'tool name, version number, and technical explanation exactly as mentioned. '
+            'You handle errors gracefully and provide clear feedback when extraction fails.'
         ),
         tools=[YouTubeTranscriptTool()],
         verbose=True,
-        memory=True,
-        allow_delegation=False
+        memory=False,  # Disable memory to prevent input reuse
+        allow_delegation=False,
+        max_retry_limit=1,  # Limit retries to prevent loops
+        step_callback=lambda step: logger.info(f"Transcriber step completed")
     )
 
     writer = Agent(
-        role='Blog Content Writer',
-        goal='Transform video transcripts into engaging, well-structured blog articles',
+        role='Technical Blog Writer',
+        goal='Create detailed technical blog posts that preserve every specific detail from transcripts',
         backstory=(
-            'You are a professional content writer who specializes in creating '
-            'comprehensive blog articles from video transcripts. You ensure that '
-            'your articles are well-structured, engaging, and capture all the key '
-            'insights from the original video content.'
+            'You are a technical writer who specializes in creating comprehensive, '
+            'detailed blog posts from video transcripts. You never generalize or '
+            'create vague content. You preserve every tool name, technical comparison, '
+            'specific recommendation, and detailed explanation from the original content.'
         ),
         tools=[BlogGeneratorTool()],
         verbose=True,
-        memory=True,
-        allow_delegation=False
+        memory=False,  # Disable memory to prevent conflicts
+        allow_delegation=False,
+        max_retry_limit=1,
+        step_callback=lambda step: logger.info(f"Writer step completed")
     )
     
+    logger.info("Enhanced agents created successfully")
     return transcriber, writer

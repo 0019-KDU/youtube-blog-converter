@@ -15,7 +15,8 @@ RUN apt-get update && \
       build-essential \
       libssl-dev \
       pkg-config \
-      cargo && \
+      cargo \
+      libffi-dev && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
@@ -30,14 +31,17 @@ RUN pip install --no-cache-dir --upgrade pip && \
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
 WORKDIR /app
 
 # Install only essential runtime dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      libgomp1 && \
+      libgomp1 \
+      libffi8 \
+      ca-certificates && \
     # Clean up aggressively
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -53,9 +57,24 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.t
         \( -type d -name __pycache__ -o -name '*.pyc' \) -exec rm -rf '{}' + && \
     rm -rf /root/.cache
 
+# Create necessary directories for Flask sessions and logs
+RUN mkdir -p /app/.flask_session /app/logs && \
+    chmod 755 /app/.flask_session /app/logs
+
 # Copy only necessary application files
 COPY . .
 
-EXPOSE 5000
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:5000/health')" || exit 1
+
+# Expose ports for Flask app and Prometheus metrics
+EXPOSE 5000 8000
 
 CMD ["python", "app.py"]

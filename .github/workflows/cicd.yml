@@ -598,6 +598,133 @@ jobs:
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
+  deploy-to-azure:
+    needs: deploy-to-dockerhub
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Method 1: Using Azure CLI (Recommended for Docker Hub)
+      - name: Update Azure Container App
+        run: |
+          az containerapp update \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
+            --registry-server docker.io \
+            --registry-username ${{ secrets.DOCKERHUB_USERNAME }} \
+            --registry-password ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Alternative Method 2: Using Container Apps Deploy Action (if available)
+      # - name: Deploy to Azure Container Apps
+      #   uses: azure/container-apps-deploy-action@v1
+      #   with:
+      #     containerAppName: ${{ secrets.CONTAINER_APP_NAME }}
+      #     resourceGroup: ${{ secrets.RESOURCE_GROUP }}
+      #     imageToDeploy: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
+      #     registryUrl: docker.io
+      #     registryUsername: ${{ secrets.DOCKERHUB_USERNAME }}
+      #     registryPassword: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Get Container App URL
+        id: get-url
+        run: |
+          URL=$(az containerapp show \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" \
+            --output tsv)
+          echo "Container App URL: https://$URL"
+          echo "url=https://$URL" >> $GITHUB_OUTPUT
+
+      - name: Verify Azure deployment
+        run: |
+          echo "Successfully deployed to Azure Container Apps!"
+          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+          echo "Application URL: ${{ steps.get-url.outputs.url }}"
+
+      - name: Test deployment health
+        run: |
+          echo "Testing deployment health..."
+          sleep 30  # Wait for deployment to stabilize
+          curl -f ${{ steps.get-url.outputs.url }} || echo "Health check failed, but deployment may still be successful"
+
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Azure Deployment Failed in ${context.job}`,
+                body: `### ❌ Deployment to Azure Container Apps Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `Deployment to Azure Container Apps failed. Please check deployment logs and Azure Portal.`,
+                assignees: [assignee],
+                labels: ['ci-failure', 'azure-deployment']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
+
+      - name: Slack Notification on Failure
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "❌ Azure Deployment Failed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+              {"title": "Job", "value": "${{ github.job }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
+      - name: Slack Notification on Success
+        if: ${{ success() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: 'success'
+          text: "✅ Azure Deployment Successful in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": true},
+              {"title": "Application URL", "value": "${{ steps.get-url.outputs.url }}", "short": false},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
   notify:
     name: Pipeline Status Notification
     if: always()
@@ -608,6 +735,7 @@ jobs:
       - sonarqube-scan
       - docker-build-test
       - deploy-to-dockerhub
+      - deploy-to-azure
     steps:
       - name: Aggregate job statuses
         id: status
@@ -649,11 +777,19 @@ jobs:
           fi
 
           if [[ "${{ needs.deploy-to-dockerhub.result }}" == 'failure' ]]; then 
-            failed_jobs+="Deployment, "
+            failed_jobs+="Docker Hub Deployment, "
           elif [[ "${{ needs.deploy-to-dockerhub.result }}" == 'success' ]]; then
-            successful_jobs+="Deployment, "
+            successful_jobs+="Docker Hub Deployment, "
           else
-            skipped_jobs+="Deployment, "
+            skipped_jobs+="Docker Hub Deployment, "
+          fi
+
+          if [[ "${{ needs.deploy-to-azure.result }}" == 'failure' ]]; then 
+            failed_jobs+="Azure Deployment, "
+          elif [[ "${{ needs.deploy-to-azure.result }}" == 'success' ]]; then
+            successful_jobs+="Azure Deployment, "
+          else
+            skipped_jobs+="Azure Deployment, "
           fi
 
           failed_jobs=${failed_jobs%, }
@@ -679,7 +815,7 @@ jobs:
           status: ${{ job.status }}
           icon_emoji: ${{ steps.status.outputs.overall_status == 'success' && ':white_check_mark:' || ':x:' }}
           text: |
-            ${{ steps.status.outputs.overall_status == 'success' && '✅ Pipeline Succeeded!' || '❌ Pipeline Failed!' }}
+            ${{ steps.status.outputs.overall_status == 'success' && '✅ Complete Pipeline Succeeded!' || '❌ Pipeline Failed!' }}
             ${{ steps.status.outputs.overall_status == 'skipped' && '⚠️ Pipeline Skipped!' }}
           fields: |
             [

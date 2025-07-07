@@ -1,4 +1,3 @@
-# app.py
 import os
 import re
 import sys
@@ -8,26 +7,14 @@ import logging
 import time
 from pathlib import Path
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, send_file, redirect, url_for, session
+from flask import Flask, render_template, request, send_file, redirect, url_for, session, jsonify
 from flask_session import Session
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-
-# OpenTelemetry Imports
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from prometheus_client import start_http_server, Counter, Histogram
-from opentelemetry._logs import set_logger_provider
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.sdk.resources import Resource
 
 # Initialize logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -36,104 +23,33 @@ if env_path.exists():
     load_dotenv(dotenv_path=env_path)
     logger.info("Loaded environment variables from .env file")
 else:
-    logger.warning(".env file not found, using system environment variables")
+    load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersecretkey')
+
+def get_secret_key():
+    """Get Flask secret key from environment"""
+    secret_key = os.getenv('FLASK_SECRET_KEY')
+    
+    if not secret_key:
+        logger.warning("No Flask secret key found in environment variables!")
+        import secrets
+        secret_key = secrets.token_hex(32)
+        logger.warning(f"Generated temporary key for session")
+    
+    return secret_key
+
+app.secret_key = get_secret_key()
 
 # Configure server-side sessions
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_FILE_DIR'] = './.flask_session/'
+app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_USE_SIGNER'] = True
 Session(app)
 
-# Global variables for metrics
-REQUEST_COUNT = None
-REQUEST_LATENCY = None
-
-# OpenTelemetry Initialization
-def init_telemetry(app):
-    """Initialize OpenTelemetry with proper error handling"""
-    global REQUEST_COUNT, REQUEST_LATENCY
-    
-    try:
-        # Set resource attributes - Fixed the Resource creation
-        resource = Resource(attributes={
-            "service.name": "blog-generator",
-            "service.version": "1.0.0",
-            "deployment.environment": os.getenv("ENVIRONMENT", "production")
-        })
-        
-        # Tracing setup
-        trace.set_tracer_provider(TracerProvider(resource=resource))
-        
-        # Only set up OTLP if endpoint is configured
-        otlp_endpoint = os.getenv("OTLP_ENDPOINT")
-        if otlp_endpoint:
-            otlp_exporter = OTLPSpanExporter(
-                endpoint=otlp_endpoint,
-                insecure=True
-            )
-            trace.get_tracer_provider().add_span_processor(
-                BatchSpanProcessor(otlp_exporter)
-            )
-            logger.info(f"OTLP tracing configured for endpoint: {otlp_endpoint}")
-        else:
-            logger.info("OTLP_ENDPOINT not set, skipping OTLP tracing setup")
-        
-        # Instrument Flask
-        FlaskInstrumentor().instrument_app(app)
-
-        # Metrics setup
-        try:
-            start_http_server(8000)
-            REQUEST_COUNT = Counter(
-                'http_requests_total',
-                'Total HTTP Requests',
-                ['method', 'endpoint', 'status_code']
-            )
-            REQUEST_LATENCY = Histogram(
-                'http_request_duration_seconds',
-                'HTTP Request Duration',
-                ['endpoint']
-            )
-            logger.info("Prometheus metrics server started on port 8000")
-        except Exception as metrics_error:
-            logger.warning(f"Failed to start metrics server: {metrics_error}")
-
-        # Logging setup - only if OTLP endpoint is configured
-        if otlp_endpoint:
-            try:
-                logger_provider = LoggerProvider(resource=resource)
-                set_logger_provider(logger_provider)
-                otlp_log_exporter = OTLPLogExporter(
-                    endpoint=otlp_endpoint,
-                    insecure=True
-                )
-                logger_provider.add_log_record_processor(
-                    BatchLogRecordProcessor(otlp_log_exporter)
-                )
-                handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
-                
-                # Configure root logger
-                root_logger = logging.getLogger()
-                root_logger.addHandler(handler)
-                root_logger.setLevel(logging.INFO)
-                logger.info("OTLP logging configured")
-            except Exception as logging_error:
-                logger.warning(f"Failed to configure OTLP logging: {logging_error}")
-        
-        logger.info("Telemetry initialization completed successfully")
-        
-    except Exception as e:
-        logger.error(f"Telemetry initialization failed: {str(e)}")
-        # Continue without telemetry rather than crashing
-        logger.info("Continuing without full telemetry setup")
-
-# Initialize telemetry
-init_telemetry(app)
-
-# Import application components after environment is loaded
+# Import application components
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from src.main import generate_blog_from_youtube
@@ -142,47 +58,51 @@ except ImportError as e:
     logger.error(f"Import error: {str(e)}")
     raise
 
-# Metrics middleware
-@app.before_request
-def before_request():
-    request.start_time = time.time()
-
-@app.after_request
-def after_request(response):
-    if REQUEST_LATENCY and REQUEST_COUNT:
-        try:
-            latency = time.time() - request.start_time
-            REQUEST_LATENCY.labels(request.path).observe(latency)
-            REQUEST_COUNT.labels(
-                request.method, 
-                request.path, 
-                response.status_code
-            ).inc()
-        except Exception as e:
-            logger.warning(f"Metrics recording failed: {e}")
-    return response
-
-@app.route('/', methods=['GET'])
+@app.route('/')
 def index():
     """Render the main form page"""
-    session.clear()
-    return render_template('index.html')
+    try:
+        session.clear()
+        return render_template('index.html')
+    except Exception as e:
+        logger.error(f"Index page error: {str(e)}")
+        return f"Error loading page: {str(e)}", 500
 
 @app.route('/generate', methods=['POST'])
 def generate_blog():
-    """Process YouTube URL and generate blog"""
-    logger = logging.getLogger(__name__)
-    logger.info("Starting blog generation")
-    
-    youtube_url = request.form['youtube_url']
-    language = request.form.get('language', 'en')
-    
-    if not youtube_url:
-        return render_template('index.html', error="YouTube URL is required")
+    """Process YouTube URL and generate blog with enhanced error handling"""
+    start_time = time.time()
     
     try:
-        # Generate blog content
-        blog_content = generate_blog_from_youtube(youtube_url, language)
+        youtube_url = request.form.get('youtube_url', '').strip()
+        language = request.form.get('language', 'en')
+        
+        if not youtube_url:
+            return render_template('index.html', error="YouTube URL is required"), 400
+        
+        # Validate URL format
+        if not re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', youtube_url):
+            return render_template('index.html', error="Please enter a valid YouTube URL"), 400
+        
+        logger.info(f"Starting blog generation for URL: {youtube_url}")
+        
+        # Generate blog content with enhanced error handling
+        try:
+            blog_content = generate_blog_from_youtube(youtube_url, language)
+        except Exception as gen_error:
+            logger.error(f"Blog generation failed: {str(gen_error)}")
+            error_msg = f"Failed to generate blog: {str(gen_error)}"
+            return render_template('index.html', error=error_msg), 500
+        
+        # Check if generation was successful
+        if not blog_content or len(blog_content) < 100:
+            error_msg = "Failed to generate blog content. Please try with a different video."
+            return render_template('index.html', error=error_msg), 500
+        
+        # Check for error responses
+        if blog_content.startswith("ERROR:"):
+            error_msg = blog_content.replace("ERROR:", "").strip()
+            return render_template('index.html', error=error_msg), 500
         
         # Generate unique ID for content
         content_id = str(uuid.uuid4())
@@ -190,55 +110,74 @@ def generate_blog():
         # Store in session
         session[content_id] = {
             'blog_content': blog_content,
-            'youtube_url': youtube_url
+            'youtube_url': youtube_url,
+            'generation_time': time.time() - start_time,
+            'timestamp': time.time()
         }
         session['content_id'] = content_id
         
-        logger.info("Blog generated successfully")
+        duration = time.time() - start_time
+        logger.info(f"Blog generated successfully in {duration:.2f}s")
         return redirect(url_for('results'))
-    
+        
     except Exception as e:
         logger.error(f"Blog generation failed: {str(e)}", exc_info=True)
-        return render_template('index.html', error=f"Error: {str(e)}")
+        error_msg = f"Error generating blog: {str(e)}"
+        return render_template('index.html', error=error_msg), 500
 
-@app.route('/results', methods=['GET'])
+@app.route('/results')
 def results():
-    """Show generated blog content"""
-    content_id = session.get('content_id')
-    if not content_id:
-        return redirect(url_for('index'))
-    
-    result_data = session.get(content_id, {})
-    if not result_data:
-        return redirect(url_for('index'))
-    
-    return render_template('results.html', 
-                           blog_content=result_data['blog_content'],
-                           youtube_url=result_data['youtube_url'])
-
-@app.route('/download', methods=['GET'])
-def download_pdf():
-    """Generate and download the PDF"""
-    logger = logging.getLogger(__name__)
-    logger.info("Generating PDF download")
-    
-    content_id = session.get('content_id')
-    if not content_id:
-        return redirect(url_for('index'))
-    
-    result_data = session.get(content_id, {})
-    if not result_data or 'blog_content' not in result_data:
-        return redirect(url_for('index'))
-    
-    blog_content = result_data['blog_content']
-    youtube_url = result_data.get('youtube_url', '')
-    
-    # Extract video ID for filename
-    video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', youtube_url)
-    safe_name = f"blog_{video_id_match.group(1)}.pdf" if video_id_match else "blog_article.pdf"
-    
+    """Show generated blog content with enhanced display"""
     try:
-        # Generate PDF with validation
+        content_id = session.get('content_id')
+        if not content_id:
+            return redirect(url_for('index'))
+        
+        result_data = session.get(content_id, {})
+        if not result_data:
+            return redirect(url_for('index'))
+        
+        # Extract video info for display
+        youtube_url = result_data.get('youtube_url', '')
+        video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', youtube_url)
+        video_id = video_id_match.group(1) if video_id_match else 'unknown'
+        
+        # Calculate content stats
+        blog_content = result_data.get('blog_content', '')
+        word_count = len(blog_content.split())
+        char_count = len(blog_content)
+        
+        return render_template('results.html', 
+                             blog_content=blog_content,
+                             youtube_url=youtube_url,
+                             video_id=video_id,
+                             generation_time=result_data.get('generation_time', 0),
+                             word_count=word_count,
+                             char_count=char_count)
+    except Exception as e:
+        logger.error(f"Results page error: {str(e)}")
+        return redirect(url_for('index'))
+
+@app.route('/download')
+def download_pdf():
+    """Generate and download PDF with enhanced error handling"""
+    try:
+        content_id = session.get('content_id')
+        if not content_id:
+            return redirect(url_for('index'))
+        
+        result_data = session.get(content_id, {})
+        if not result_data or 'blog_content' not in result_data:
+            return redirect(url_for('index'))
+        
+        blog_content = result_data['blog_content']
+        youtube_url = result_data.get('youtube_url', '')
+        
+        # Extract video ID for filename
+        video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', youtube_url)
+        safe_name = f"blog_{video_id_match.group(1)}.pdf" if video_id_match else "blog_article.pdf"
+        
+        # Generate PDF
         pdf_generator = PDFGeneratorTool()
         pdf_bytes = pdf_generator.generate_pdf_bytes(blog_content)
         
@@ -247,7 +186,7 @@ def download_pdf():
         mem_file.write(pdf_bytes)
         mem_file.seek(0)
         
-        logger.info("PDF generated successfully")
+        logger.info(f"PDF generated successfully: {safe_name}")
         return send_file(
             mem_file,
             as_attachment=True,
@@ -258,56 +197,173 @@ def download_pdf():
     except Exception as e:
         logger.error(f"PDF generation failed: {str(e)}", exc_info=True)
         
-        # Generate a simple fallback PDF
+        # Fallback to text file
         try:
-            mem_file = io.BytesIO()
-            p = canvas.Canvas(mem_file, pagesize=letter)
-            p.setFont("Helvetica", 12)
+            content_id = session.get('content_id')
+            result_data = session.get(content_id, {})
+            blog_content = result_data.get('blog_content', 'Content not available')
             
-            # Add title
-            p.drawString(100, 750, "Blog Article")
-            p.drawString(100, 730, f"Based on YouTube video: {youtube_url}")
-            p.line(100, 725, 500, 725)
-            
-            # Add content (first 2000 characters)
-            y_position = 700
-            text = blog_content[:2000]
-            text_object = p.beginText(100, y_position)
-            text_object.setFont("Helvetica", 10)
-            text_object.textLines(text)
-            p.drawText(text_object)
-            
-            # Save PDF
-            p.showPage()
-            p.save()
-            
-            mem_file.seek(0)
-            logger.warning("Used fallback PDF method")
-            return send_file(
-                mem_file,
-                as_attachment=True,
-                download_name=safe_name,
-                mimetype='application/pdf'
-            )
-            
-        except Exception as fallback_error:
-            logger.critical(f"Fallback PDF failed: {str(fallback_error)}")
-            
-            # Return as text file as last resort
             mem_file = io.BytesIO(blog_content.encode('utf-8'))
             mem_file.seek(0)
             return send_file(
                 mem_file,
                 as_attachment=True,
-                download_name=safe_name.replace('.pdf', '.txt'),
+                download_name='blog_article.txt',
                 mimetype='text/plain'
             )
+        except Exception as fallback_error:
+            logger.error(f"Fallback download failed: {str(fallback_error)}")
+            return redirect(url_for('results'))
+
+@app.route('/api/status')
+def api_status():
+    """API endpoint to check application status"""
+    try:
+        # Check environment variables
+        openai_key = bool(os.getenv('OPENAI_API_KEY'))
+        
+        status = {
+            'status': 'healthy',
+            'timestamp': time.time(),
+            'environment': {
+                'openai_configured': openai_key,
+                'session_dir_exists': os.path.exists(app.config['SESSION_FILE_DIR'])
+            }
+        }
+        
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Status check failed: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/validate-url', methods=['POST'])
+def validate_youtube_url():
+    """API endpoint to validate YouTube URL"""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        
+        if not url:
+            return jsonify({'valid': False, 'message': 'URL is required'})
+        
+        # Check URL format
+        if not re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', url):
+            return jsonify({'valid': False, 'message': 'Invalid YouTube URL format'})
+        
+        # Extract video ID
+        video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
+        if not video_id_match:
+            return jsonify({'valid': False, 'message': 'Could not extract video ID'})
+        
+        video_id = video_id_match.group(1)
+        
+        return jsonify({
+            'valid': True, 
+            'video_id': video_id,
+            'message': 'Valid YouTube URL'
+        })
+        
+    except Exception as e:
+        logger.error(f"URL validation failed: {str(e)}")
+        return jsonify({'valid': False, 'message': 'Validation error'}), 500
+
+@app.route('/clear-session')
+def clear_session():
+    """Clear current session and redirect to home"""
+    try:
+        session.clear()
+        logger.info("Session cleared successfully")
+        return redirect(url_for('index'))
+    except Exception as e:
+        logger.error(f"Session clear failed: {str(e)}")
+        return redirect(url_for('index'))
+
+@app.route('/health')
+def health_check():
+    """Simple health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': time.time(),
+        'version': '1.0.0'
+    })
+
+# Error handlers
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors"""
+    logger.warning(f"404 error: {request.url}")
+    return render_template('index.html', error="Page not found"), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors"""
+    logger.error(f"Internal server error: {str(error)}")
+    return render_template('index.html', error="Internal server error occurred"), 500
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """Handle file too large errors"""
+    logger.warning("Request entity too large")
+    return render_template('index.html', error="Request too large"), 413
+
+@app.before_request
+def before_request():
+    """Log all requests for debugging"""
+    logger.info(f"Request: {request.method} {request.path} from {request.remote_addr}")
+
+@app.after_request
+def after_request(response):
+    """Log response status"""
+    logger.info(f"Response: {response.status_code} for {request.path}")
+    return response
+
+def cleanup_old_sessions():
+    """Clean up old session files"""
+    try:
+        session_dir = app.config['SESSION_FILE_DIR']
+        if os.path.exists(session_dir):
+            current_time = time.time()
+            for filename in os.listdir(session_dir):
+                file_path = os.path.join(session_dir, filename)
+                if os.path.isfile(file_path):
+                    # Remove files older than 24 hours
+                    if current_time - os.path.getmtime(file_path) > 86400:
+                        os.remove(file_path)
+                        logger.info(f"Removed old session file: {filename}")
+    except Exception as e:
+        logger.error(f"Session cleanup failed: {str(e)}")
+
+def get_env_var(name, default=None):
+    """Get environment variable with fallback"""
+    return os.getenv(name) or default
 
 if __name__ == '__main__':
-    # Create session directory if it doesn't exist
+    # Create session directory
     session_dir = app.config['SESSION_FILE_DIR']
     if not os.path.exists(session_dir):
         os.makedirs(session_dir)
+        logger.info(f"Created session directory: {session_dir}")
     
+    # Clean up old sessions on startup
+    cleanup_old_sessions()
+    
+    # Configuration
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    debug_mode = get_env_var('FLASK_DEBUG', 'False').lower() == 'true'
+    host = get_env_var('FLASK_HOST', '0.0.0.0')
+    
+    # Validate required environment variables
+    if not os.getenv('OPENAI_API_KEY'):
+        logger.error("OPENAI_API_KEY not found in environment variables!")
+        logger.error("Please set your OpenAI API key before running the application")
+        sys.exit(1)
+    
+    logger.info(f"Starting application on {host}:{port}")
+    logger.info(f"Debug mode: {debug_mode}")
+    logger.info(f"Session directory: {session_dir}")
+    
+    try:
+        app.run(host=host, port=port, debug=debug_mode)
+    except Exception as e:
+        logger.error(f"Failed to start application: {str(e)}")
+        sys.exit(1)

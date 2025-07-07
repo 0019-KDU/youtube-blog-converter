@@ -22,3 +22,4 @@ opentelemetry-exporter-otlp
 opentelemetry-instrumentation-flask
 prometheus_client
 gunicorn
+browser-cookie3

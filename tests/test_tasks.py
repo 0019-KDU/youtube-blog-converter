@@ -1,113 +1,108 @@
-import pytest
-from unittest.mock import Mock, patch
+import logging
+from unittest.mock import patch, MagicMock
 from src.task import create_tasks
+from src.agent import create_agents
+from crewai import Task
 
-class TestCreateTasks:
-    """Test cases for task creation"""
+
+def test_create_tasks_basic_properties():
+    transcriber, writer = create_agents()
+    youtube_url = "https://www.youtube.com/watch?v=test123"
+    language = "en"
     
-    @pytest.fixture
-    def mock_agents(self):
-        """Create mock agents for testing"""
-        transcriber = Mock()
-        writer = Mock()
-        return transcriber, writer
+    transcript_task, blog_task = create_tasks(transcriber, writer, youtube_url, language)
     
-    def test_create_tasks_returns_two_tasks(self, mock_agents):
-        """Test that create_tasks returns transcript and blog tasks"""
-        transcriber, writer = mock_agents
-        youtube_url = "https://www.youtube.com/watch?v=test123"
-        language = "en"
-        
-        with patch('src.task.Task') as mock_task:
-            mock_task_instance = Mock()
-            mock_task.return_value = mock_task_instance
-            
-            transcript_task, blog_task = create_tasks(transcriber, writer, youtube_url, language)
-            
-            assert transcript_task is not None
-            assert blog_task is not None
-            assert mock_task.call_count == 2
+    # Check types
+    assert isinstance(transcript_task, Task)
+    assert isinstance(blog_task, Task)
+
+    # Check descriptions contain expected phrases and input values
+    assert youtube_url in transcript_task.description
+    assert "Preserve ALL specific tool names" in transcript_task.description
+
+    assert "PRESERVE ALL SPECIFIC INFORMATION" in blog_task.description
+    assert "FORMAT: Use the exact categories" in blog_task.description
+
+    # blog_task should depend on transcript_task
+    assert blog_task.context == [transcript_task]
+
+
+def test_create_tasks_logging_called():
+    transcriber, writer = create_agents()
+    youtube_url = "https://www.youtube.com/watch?v=test123"
+    language = "en"
     
-    def test_transcript_task_configuration(self, mock_agents):
-        """Test transcript task is configured correctly"""
-        transcriber, writer = mock_agents
-        youtube_url = "https://www.youtube.com/watch?v=test123"
-        language = "en"
-        
-        with patch('src.task.Task') as mock_task:
-            mock_task_instance = Mock()
-            mock_task.return_value = mock_task_instance
-            
-            create_tasks(transcriber, writer, youtube_url, language)
-            
-            # Check first call (transcript task)
-            first_call = mock_task.call_args_list[0]
-            kwargs = first_call[1]
-            
-            assert youtube_url in kwargs['description']
-            assert language in kwargs['description']
-            assert 'Extract the complete transcript' in kwargs['description']
-            assert 'complete, accurate transcript' in kwargs['expected_output']
-            assert kwargs['agent'] == transcriber
+    with patch('src.task.logger.info') as mock_log:
+        create_tasks(transcriber, writer, youtube_url, language)
+        mock_log.assert_called_with("Enhanced tasks created successfully")
+
+
+def test_transcript_task_callback_logs_output(caplog):
+    transcriber, writer = create_agents()
+    youtube_url = "https://www.youtube.com/watch?v=test123"
+    language = "en"
     
-    def test_blog_task_configuration(self, mock_agents):
-        """Test blog task is configured correctly"""
-        transcriber, writer = mock_agents
-        youtube_url = "https://www.youtube.com/watch?v=test123"
-        language = "en"
-        
-        with patch('src.task.Task') as mock_task:
-            mock_task_instance = Mock()
-            mock_task.return_value = mock_task_instance
-            
-            transcript_task, blog_task = create_tasks(transcriber, writer, youtube_url, language)
-            
-            # Check second call (blog task)
-            second_call = mock_task.call_args_list[1]
-            kwargs = second_call[1]
-            
-            assert 'comprehensive blog article' in kwargs['description']
-            assert 'engaging title' in kwargs['description']
-            assert 'Markdown' in kwargs['description']
-            assert 'at least 800 words' in kwargs['description']
-            assert kwargs['agent'] == writer
-            assert transcript_task in kwargs['context']
+    transcript_task, _ = create_tasks(transcriber, writer, youtube_url, language)
+
+    # Set log level to INFO so logs are captured
+    caplog.set_level(logging.INFO)
+
+    # Simulate task output set and trigger callback
+    transcript_task.output = "This is a transcript output example..."
+    transcript_task.callback(transcript_task)
     
-    def test_task_descriptions_contain_requirements(self, mock_agents):
-        """Test that task descriptions contain all required elements"""
-        transcriber, writer = mock_agents
-        youtube_url = "https://www.youtube.com/watch?v=test123"
-        language = "fr"  # Test with different language
-        
-        with patch('src.task.Task') as mock_task:
-            create_tasks(transcriber, writer, youtube_url, language)
-            
-            # Check transcript task requirements
-            transcript_call = mock_task.call_args_list[0][1]
-            assert 'meaningful dialogue' in transcript_call['description']
-            assert 'properly formatted' in transcript_call['expected_output']
-            
-            # Check blog task requirements
-            blog_call = mock_task.call_args_list[1][1]
-            blog_desc = blog_call['description']
-            assert 'engaging title' in blog_desc
-            assert 'brief introduction' in blog_desc
-            assert 'clear sections' in blog_desc
-            assert 'detailed explanations' in blog_desc
-            assert 'conclusion' in blog_desc
-            assert 'Markdown' in blog_desc
+    assert "Transcript task completed: This is a transcript output example..." in caplog.text
+
+    # Also test with no output set
+    transcript_task.output = None
+    transcript_task.callback(transcript_task)
+    assert "Transcript task completed: No output..." in caplog.text
+
+
+def test_blog_task_callback_logs_output_length(caplog):
+    transcriber, writer = create_agents()
+    youtube_url = "https://www.youtube.com/watch?v=test123"
+    language = "en"
     
-    def test_different_languages_handled(self, mock_agents):
-        """Test that different languages are properly handled"""
-        transcriber, writer = mock_agents
-        youtube_url = "https://www.youtube.com/watch?v=test123"
-        
-        languages = ["en", "es", "fr", "de"]
-        
-        for language in languages:
-            with patch('src.task.Task') as mock_task:
-                create_tasks(transcriber, writer, youtube_url, language)
-                
-                # Check that language is included in description
-                first_call = mock_task.call_args_list[0]
-                assert language in first_call[1]['description']
+    _, blog_task = create_tasks(transcriber, writer, youtube_url, language)
+    
+    caplog.set_level(logging.INFO)
+    
+    # Set output with some length and trigger callback
+    blog_task.output = "This is a blog article content with more than 50 chars..."
+    blog_task.callback(blog_task)
+    
+    assert "Blog task completed: " in caplog.text
+    assert "characters" in caplog.text
+    
+    # Test empty output
+    blog_task.output = None
+    blog_task.callback(blog_task)
+    assert "Blog task completed: 0 characters" in caplog.text
+
+
+def test_create_tasks_empty_url_and_language():
+    """Test edge case with empty YouTube URL and language"""
+    transcriber, writer = create_agents()
+    youtube_url = ""
+    language = ""
+    
+    transcript_task, blog_task = create_tasks(transcriber, writer, youtube_url, language)
+
+    assert "https://" not in transcript_task.description  # no URL
+    assert "Language: " in transcript_task.description  # should still contain Language key, even if empty
+
+    # Should still create blog task with context linking
+    assert blog_task.context == [transcript_task]
+
+
+def test_create_tasks_callbacks_are_callable():
+    """Ensure callback functions are callable"""
+    transcriber, writer = create_agents()
+    youtube_url = "https://www.youtube.com/watch?v=test123"
+    language = "en"
+    
+    transcript_task, blog_task = create_tasks(transcriber, writer, youtube_url, language)
+    
+    assert callable(transcript_task.callback)
+    assert callable(blog_task.callback)
