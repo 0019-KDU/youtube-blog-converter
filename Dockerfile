@@ -9,13 +9,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install minimal build dependencies
+# Create proper APT sources
+RUN echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian bookworm-updates main" >> /etc/apt/sources.list && \
+    echo "deb http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list
+
+# Install build dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       chromium \
       chromium-driver \
       libxml2-dev \
-      libxslt-dev \ 
+      libxslt-dev \
       build-essential \
       libssl-dev \
       pkg-config \
@@ -30,7 +35,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip wheel --no-cache-dir --wheel-dir=/wheels -r requirements.txt
 
 ##################################
-### Stage 2: Optimized runtime image ###
+### Stage 2: Optimized runtime ###
 ##################################
 FROM python:3.12-slim AS runtime
 
@@ -40,49 +45,42 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install only essential runtime dependencies
+# Create proper APT sources
+RUN echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian bookworm-updates main" >> /etc/apt/sources.list && \
+    echo "deb http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list
+
+# Install only RUNTIME dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       chromium \
       chromium-driver \
       libgomp1 \
       libffi8 \
-      libxml2-dev \
-      libxslt-dev \
       ca-certificates && \
-    # Clean up aggressively
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 COPY --from=builder /wheels /wheels
 COPY requirements.txt ./
 
-# Install from wheels and clean up
+# Install from wheels
 RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt && \
     rm -rf /wheels && \
-    # Reduce Python package size
-    find /usr/local/lib/python3.12 -depth \
-        \( -type d -name __pycache__ -o -name '*.pyc' \) -exec rm -rf '{}' + && \
+    find /usr/local/lib/python3.12 -depth \( -type d -name __pycache__ -o -name '*.pyc' \) -exec rm -rf '{}' + && \
     rm -rf /root/.cache
 
-# Create necessary directories for Flask sessions and logs
+# Setup application
 RUN mkdir -p /app/.flask_session /app/logs && \
     chmod 755 /app/.flask_session /app/logs
 
-# Copy only necessary application files
 COPY . .
 
-# Create non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     chown -R appuser:appuser /app
 
 USER appuser
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5000/health')" || exit 1
-
-# Expose ports for Flask app and Prometheus metrics
 EXPOSE 5000 8000
 
 CMD ["python", "app.py"]
