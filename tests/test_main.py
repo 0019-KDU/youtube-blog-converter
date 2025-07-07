@@ -251,18 +251,24 @@ def test_test_individual_components_blog_failure(mock_blog_tool, mock_transcript
     assert "Blog generation failed" in result
     assert "Technical Issue" in result
 
+@patch("main._clean_final_output", return_value="CLEANED BLOG CONTENT")
 @patch("main.test_individual_components")
-def test_generate_blog_success(mock_test_components):
-    """Test successful blog generation"""
-    # Setup environment
+def test_generate_blog_success(mock_test_components, mock_clean_output):
+    """Test successful blog generation with cleaning"""
     os.environ["OPENAI_API_KEY"] = "fake_key"
-    
-    # Mock successful blog content
-    mock_test_components.return_value = "This is a valid blog article" + " with enough content" * 100
-    
+
+    # Simulate blog text over 500 chars
+    long_blog = "Intro " + ("Content. " * 100)  # > 500 characters
+    mock_test_components.return_value = long_blog
+
     result = main.generate_blog_from_youtube("https://youtu.be/ABCDEFGHIJK", "en")
-    assert "This is a valid blog article" in result
-    assert len(result) > 500
+
+    # Validate cleaning was done
+    mock_clean_output.assert_called_once_with(long_blog)
+
+    # Final cleaned result is returned
+    assert result == "CLEANED BLOG CONTENT"
+
 
 def test_generate_blog_missing_api_key():
     """Test handling of missing API key"""
