@@ -9,8 +9,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Fix repository sources first!
-RUN sed -i 's|http://.*.debian.org|http://deb.debian.org|g' /etc/apt/sources.list
+# Create proper APT sources
+RUN echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian bookworm-updates main" >> /etc/apt/sources.list && \
+    echo "deb http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list
 
 # Install build dependencies
 RUN apt-get update && \
@@ -43,8 +45,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Fix repository sources again
-RUN sed -i 's|http://.*.debian.org|http://deb.debian.org|g' /etc/apt/sources.list
+# Create proper APT sources
+RUN echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian bookworm-updates main" >> /etc/apt/sources.list && \
+    echo "deb http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list
 
 # Install only RUNTIME dependencies
 RUN apt-get update && \
@@ -76,10 +80,6 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     chown -R appuser:appuser /app
 
 USER appuser
-
-# Important: Remove healthcheck during build
-# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-#    CMD python -c "import requests; requests.get('http://localhost:5000/health')" || exit 1
 
 EXPOSE 5000 8000
 
