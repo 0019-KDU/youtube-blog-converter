@@ -603,12 +603,6 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Show commit author
-        run: |
-          echo "Commit by ${{ github.actor }}"
-          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
-          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
-
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -617,28 +611,33 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Method 1: Using Azure CLI (Recommended for Docker Hub)
-      - name: Update Azure Container App
+      - name: Confirm Azure login success
+        run: echo "✅ Azure login successful"
+
+      - name: Configure Docker Hub registry
+        run: |
+          # Remove registry if exists (ignore errors)
+          az containerapp registry remove \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --server docker.io --yes || true
+          
+          # Add Docker Hub credentials
+          az containerapp registry add \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --server docker.io \
+            --username ${{ secrets.DOCKERHUB_USERNAME }} \
+            --password ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Update Container App Image
         run: |
           az containerapp update \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
-            --registry-server docker.io \
-            --registry-username ${{ secrets.DOCKERHUB_USERNAME }} \
-            --registry-password ${{ secrets.DOCKERHUB_TOKEN }}
+            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
 
-      # Alternative Method 2: Using Container Apps Deploy Action (if available)
-      # - name: Deploy to Azure Container Apps
-      #   uses: azure/container-apps-deploy-action@v1
-      #   with:
-      #     containerAppName: ${{ secrets.CONTAINER_APP_NAME }}
-      #     resourceGroup: ${{ secrets.RESOURCE_GROUP }}
-      #     imageToDeploy: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
-      #     registryUrl: docker.io
-      #     registryUsername: ${{ secrets.DOCKERHUB_USERNAME }}
-      #     registryPassword: ${{ secrets.DOCKERHUB_TOKEN }}
-
+      # ADD THIS MISSING STEP
       - name: Get Container App URL
         id: get-url
         run: |
@@ -660,8 +659,8 @@ jobs:
         run: |
           echo "Testing deployment health..."
           sleep 30  # Wait for deployment to stabilize
-          curl -f ${{ steps.get-url.outputs.url }} || echo "Health check failed, but deployment may still be successful"
-
+          # Continue on health check failure
+          curl -f ${{ steps.get-url.outputs.url }} || echo "Health check warning - app may be starting"
       - name: Create issue on failure
         if: ${{ failure() }}
         uses: actions/github-script@v7
