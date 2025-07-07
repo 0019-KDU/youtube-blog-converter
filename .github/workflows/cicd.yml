@@ -611,19 +611,16 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Confirm Azure login success
-        run: echo "✅ Azure login successful"
-
       - name: Configure Docker Hub registry
         run: |
-          # Remove registry if exists (ignore errors)
+          echo "🔄 Removing existing Docker registry config (if any)..."
           az containerapp registry remove \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --server docker.io --yes || true
-          
-          # Add Docker Hub credentials
-          az containerapp registry add \
+            --server docker.io || true
+
+          echo "➕ Adding Docker Hub registry..."
+          az containerapp registry set \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --server docker.io \
@@ -632,15 +629,16 @@ jobs:
 
       - name: Update Container App Image
         run: |
+          echo "🚀 Updating container image to ${{ github.sha }}"
           az containerapp update \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
 
-      # ADD THIS MISSING STEP
       - name: Get Container App URL
         id: get-url
         run: |
+          echo "🔍 Retrieving app URL..."
           URL=$(az containerapp show \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
@@ -651,16 +649,16 @@ jobs:
 
       - name: Verify Azure deployment
         run: |
-          echo "Successfully deployed to Azure Container Apps!"
+          echo "✅ Successfully deployed to Azure Container Apps!"
           echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
           echo "Application URL: ${{ steps.get-url.outputs.url }}"
 
       - name: Test deployment health
         run: |
-          echo "Testing deployment health..."
+          echo "🩺 Testing deployment health..."
           sleep 30  # Wait for deployment to stabilize
-          # Continue on health check failure
-          curl -f ${{ steps.get-url.outputs.url }} || echo "Health check warning - app may be starting"
+          curl -f ${{ steps.get-url.outputs.url }} || echo "⚠️ Health check warning - app may still be starting"
+
       - name: Create issue on failure
         if: ${{ failure() }}
         uses: actions/github-script@v7
