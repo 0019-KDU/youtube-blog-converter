@@ -4,6 +4,8 @@ import openai
 import uuid
 import hashlib
 import time
+import random
+import requests
 from typing import Type, Dict, Any
 from pydantic import BaseModel, Field
 from crewai.tools import BaseTool
@@ -11,6 +13,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 import re
 import io
+from bs4 import BeautifulSoup
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -20,9 +23,86 @@ from reportlab.pdfgen import canvas
 
 logger = logging.getLogger(__name__)
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
 def get_env_var(azure_name, traditional_name, default=None):
     """Get environment variable with Azure Container Apps naming fallback"""
     return os.getenv(azure_name) or os.getenv(traditional_name) or default
+
+class ProxyManager:
+    def __init__(self):
+        self.proxies = []
+        self.last_refresh = 0
+        self.refresh_interval = 1800  # 30 minutes in seconds
+        self.refresh_proxies()
+    
+    def refresh_proxies(self):
+        """Fetch fresh proxies from free-proxy-list.net"""
+        try:
+            logger.info("Refreshing proxy list...")
+            url = 'https://free-proxy-list.net/'
+            response = requests.get(url, timeout=10)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            self.proxies = []
+            table = soup.find('table', {'class': 'table table-striped table-bordered'})
+            
+            if not table:
+                logger.error("Could not find proxy table")
+                return
+                
+            rows = table.find_all('tr')[1:50]  # First 50 rows
+            
+            for row in rows:
+                cols = row.find_all('td')
+                if len(cols) > 6:
+                    ip = cols[0].text.strip()
+                    port = cols[1].text.strip()
+                    https = cols[6].text.strip()
+                    if https == 'yes':
+                        proxy = f"{ip}:{port}"
+                        self.proxies.append(proxy)
+            
+            logger.info(f"Found {len(self.proxies)} HTTPS proxies")
+            self.last_refresh = time.time()
+            
+        except Exception as e:
+            logger.error(f"Failed to refresh proxies: {str(e)}")
+            # If refresh fails, use some fallback proxies
+            self.proxies = [
+                '104.236.55.48:8080',
+                '45.77.136.149:3128',
+                '138.68.60.8:3128',
+                '192.99.176.117:3128'
+            ]
+    
+    def get_random_proxy(self):
+        """Get a random proxy from the list"""
+        if (not self.proxies or 
+            time.time() - self.last_refresh > self.refresh_interval):
+            self.refresh_proxies()
+        
+        if not self.proxies:
+            return None
+            
+        return random.choice(self.proxies)
+    
+    def get_proxy_dict(self, proxy_url):
+        """Get proxy dictionary for requests"""
+        if not proxy_url:
+            return {}
+            
+        return {
+            'http': f'http://{proxy_url}',
+            'https': f'http://{proxy_url}'
+        }
+
+# Initialize proxy manager globally
+proxy_manager = ProxyManager()
 
 class TranscriptInput(BaseModel):
     youtube_url: str = Field(..., description="YouTube video URL")
@@ -43,11 +123,13 @@ class YouTubeTranscriptTool(BaseTool):
         self._call_count = 0
         self._session_id = str(uuid.uuid4())[:8]
         self._last_call_time = 0
+        self._proxy_failures = 0
+        self._max_proxy_failures = 3
 
     def _run(self, youtube_url: str, language: str = "en") -> str:
-        """Enhanced run method with input variation and state management"""
+        """Enhanced run method with proxy rotation - FIXED VERSION"""
         try:
-            # Create unique input signature to prevent reuse detection
+            # Create unique input signature
             current_time = time.time()
             unique_suffix = f"_{self._session_id}_{current_time}_{self._call_count}"
             
@@ -72,16 +154,13 @@ class YouTubeTranscriptTool(BaseTool):
             
             self._last_input_hash = current_hash
             
-            # Log attempt
-            logger.info(f"Transcript extraction attempt {self._call_count} for video")
-            
             # Extract video ID
             video_id = self._extract_video_id(youtube_url)
             if not video_id:
                 raise ValueError(f"Could not extract video ID from URL: {youtube_url}")
             
-            # Get transcript with enhanced error handling
-            transcript_text = self._get_transcript_with_fallbacks(video_id, language)
+            # Get transcript with proxy rotation - FIXED
+            transcript_text = self._get_transcript_with_proxies(video_id, language)
             
             if not transcript_text or len(transcript_text) < 50:
                 raise ValueError("Transcript too short or empty after extraction")
@@ -95,12 +174,51 @@ class YouTubeTranscriptTool(BaseTool):
         except Exception as e:
             error_msg = f"Transcript extraction failed: {str(e)}"
             logger.error(error_msg)
-            # Return error instead of raising to prevent CrewAI retry loops
             return f"ERROR: {error_msg}"
 
-    def _get_transcript_with_fallbacks(self, video_id: str, language: str) -> str:
-        """Get transcript with multiple fallback strategies"""
+    def _get_transcript_with_proxies(self, video_id: str, language: str) -> str:
+        """Get transcript with proxy rotation - FIXED VERSION"""
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                # Get a proxy (except for first attempt in case we're not blocked)
+                proxy_url = None
+                if attempt > 0 or self._proxy_failures > 0:
+                    proxy_url = proxy_manager.get_random_proxy()
+                    logger.info(f"Using proxy: {proxy_url} (attempt {attempt+1})")
+                
+                return self._get_transcript_with_fallbacks(video_id, language, proxy_url)
+                
+            except Exception as e:
+                if "blocked" in str(e).lower() or "IP" in str(e):
+                    self._proxy_failures += 1
+                    logger.warning(f"IP blocked detected, will use proxy on next attempt")
+                
+                logger.error(f"Attempt {attempt+1} failed: {str(e)}")
+                
+                if attempt < max_retries - 1:
+                    sleep_time = retry_delay * (attempt + 1)
+                    logger.info(f"Retrying in {sleep_time} seconds...")
+                    time.sleep(sleep_time)
+                else:
+                    raise Exception(f"All {max_retries} attempts failed: {str(e)}")
+
+    def _get_transcript_with_fallbacks(self, video_id: str, language: str, proxy_url: str = None) -> str:
+        """Get transcript with multiple fallback strategies - FIXED VERSION"""
+        
+        # Set proxy environment variables if proxy is provided
+        original_http_proxy = os.environ.get('HTTP_PROXY')
+        original_https_proxy = os.environ.get('HTTPS_PROXY')
+        
         try:
+            if proxy_url:
+                os.environ['HTTP_PROXY'] = f'http://{proxy_url}'
+                os.environ['HTTPS_PROXY'] = f'http://{proxy_url}'
+                logger.info(f"Set proxy environment variables: {proxy_url}")
+            
+            # FIXED: Remove session parameter that's not supported
             transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
             
             # Strategy 1: Try requested language
@@ -145,7 +263,25 @@ class YouTubeTranscriptTool(BaseTool):
             
         except Exception as e:
             logger.error(f"Transcript list retrieval failed: {str(e)}")
+            # Check for specific API compatibility issues
+            if "unexpected keyword argument" in str(e):
+                raise Exception("YouTube Transcript API compatibility issue detected")
+            # Raise specific error for IP blocking
+            if "blocked" in str(e).lower() or "IP" in str(e):
+                raise Exception("YouTube is blocking requests from your IP. Use proxies to bypass.")
             raise
+        
+        finally:
+            # Restore original proxy settings
+            if original_http_proxy is not None:
+                os.environ['HTTP_PROXY'] = original_http_proxy
+            else:
+                os.environ.pop('HTTP_PROXY', None)
+            
+            if original_https_proxy is not None:
+                os.environ['HTTPS_PROXY'] = original_https_proxy
+            else:
+                os.environ.pop('HTTPS_PROXY', None)
 
     def _process_transcript(self, transcript) -> str:
         """Process and format transcript data"""
@@ -760,3 +896,38 @@ class PDFGeneratorTool:
             pdf_bytes = buffer.getvalue()
             buffer.close()
             return pdf_bytes
+
+# Example usage and testing
+# if __name__ == "__main__":
+#     # Test the fixed YouTube transcript tool
+#     tool = YouTubeTranscriptTool()
+    
+#     # Test with the problematic URL
+#     test_url = "https://youtu.be/8RWfE9eDWXI?si=RBJ7XLk5cZeh8Gbt"
+    
+#     print("Testing YouTube Transcript Tool...")
+#     result = tool._run(test_url)
+    
+#     if result.startswith("ERROR:"):
+#         print(f"Error occurred: {result}")
+#     else:
+#         print(f"Success! Transcript length: {len(result)} characters")
+#         print(f"First 200 characters: {result[:200]}...")
+        
+#         # Test blog generation
+#         blog_tool = BlogGeneratorTool()
+#         blog_result = blog_tool._run(result)
+        
+#         if blog_result.startswith("ERROR:"):
+#             print(f"Blog generation error: {blog_result}")
+#         else:
+#             print(f"Blog generated successfully! Length: {len(blog_result)} characters")
+            
+#             # Test PDF generation
+#             pdf_tool = PDFGeneratorTool()
+#             pdf_bytes = pdf_tool.generate_pdf_bytes(blog_result)
+            
+#             # Save PDF to file
+#             with open("generated_blog.pdf", "wb") as f:
+#                 f.write(pdf_bytes)
+#             print("PDF saved as 'generated_blog.pdf'")

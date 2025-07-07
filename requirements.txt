@@ -23,3 +23,5 @@ opentelemetry-instrumentation-flask
 prometheus_client
 gunicorn
 browser-cookie3
+beautifulsoup4
+lxml
