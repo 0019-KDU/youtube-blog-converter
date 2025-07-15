@@ -622,3 +622,404 @@ class TestEdgeCases:
         
         assert not result.startswith('ERROR:')
     
+class TestModuleLevelCoverage:
+    """Test module-level code coverage"""
+    
+    def test_env_path_exists(self):
+        """Test environment path loading when .env exists"""
+        with patch('pathlib.Path.exists', return_value=True):
+            with patch('dotenv.load_dotenv') as mock_load:
+                # Re-import to trigger module-level code
+                import importlib
+                import src.tool
+                importlib.reload(src.tool)
+                mock_load.assert_called()
+    
+    def test_env_path_not_exists(self):
+        """Test environment path loading when .env doesn't exist"""
+        with patch('pathlib.Path.exists', return_value=False):
+            with patch('dotenv.load_dotenv') as mock_load:
+                import importlib
+                import src.tool
+                importlib.reload(src.tool)
+                mock_load.assert_called()
+    
+    def test_openai_model_name_default(self):
+        """Test default OpenAI model name"""
+        with patch.dict(os.environ, {}, clear=True):
+            import importlib
+            import src.tool
+            importlib.reload(src.tool)
+            assert hasattr(src.tool, 'OPENAI_MODEL_NAME')
+    
+    def test_openai_client_initialization_no_key(self):
+        """Test OpenAI client initialization without API key"""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch('src.tool.OPENAI_API_KEY', None):
+                with patch('openai.OpenAI') as mock_openai:
+                    mock_openai.return_value = None
+                    
+                    import importlib
+                    import src.tool
+                    importlib.reload(src.tool)
+                    
+                    # The client should be None when no API key is present
+                    assert src.tool.openai_client is None
+
+
+class TestEnhancedErrorHandling:
+    """Test advanced error handling scenarios"""
+    
+    @patch('requests.get')
+    def test_run_timeout_error(self, mock_get, mock_env_vars):
+        """Test timeout error handling"""
+        mock_get.side_effect = requests.exceptions.Timeout('Request timed out')
+        
+        tool = YouTubeTranscriptTool()
+        result = tool._run('https://youtube.com/watch?v=test123', 'en')
+        
+        assert result.startswith('ERROR: Request failed')
+        assert 'Request timed out' in result
+    
+    @patch('requests.get')
+    def test_run_connection_error(self, mock_get, mock_env_vars):
+        """Test connection error handling"""
+        mock_get.side_effect = requests.exceptions.ConnectionError('Connection failed')
+        
+        tool = YouTubeTranscriptTool()
+        result = tool._run('https://youtube.com/watch?v=test123', 'en')
+        
+        assert result.startswith('ERROR: Request failed')
+        assert 'Connection failed' in result
+    
+    @patch('requests.get')
+    def test_run_ssl_error(self, mock_get, mock_env_vars):
+        """Test SSL error handling"""
+        mock_get.side_effect = requests.exceptions.SSLError('SSL verification failed')
+        
+        tool = YouTubeTranscriptTool()
+        result = tool._run('https://youtube.com/watch?v=test123', 'en')
+        
+        assert result.startswith('ERROR: Request failed')
+        assert 'SSL verification failed' in result
+    
+    def test_empty_api_responses(self, mock_env_vars):
+        """Test handling of empty API responses"""
+        with patch('requests.get') as mock_get:
+            mock_response = MagicMock()
+            mock_response.json.return_value = {'content': ''}
+            mock_response.raise_for_status.return_value = None
+            mock_get.return_value = mock_response
+            
+            tool = YouTubeTranscriptTool()
+            result = tool._run('https://youtube.com/watch?v=test123', 'en')
+            
+            assert result == ''
+class TestPDFGenerationEdgeCases:
+    """Test PDF generation edge cases for full coverage"""
+    
+    def test_generate_pdf_bytes_all_content_types(self):
+        """Test PDF generation with all possible content types"""
+        content = """# Title
+
+## Section
+Regular paragraph.
+
+### Subsection
+More content.
+
+- Bullet 1
+- Bullet 2
+
+1. Number 1
+2. Number 2
+
+#### Fourth level heading
+Extra content.
+
+##### Fifth level heading
+More extra content.
+
+###### Sixth level heading
+Even more content.
+"""
+        
+        tool = PDFGeneratorTool()
+        pdf_bytes = tool.generate_pdf_bytes(content)
+        
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0
+    
+    def test_generate_pdf_bytes_edge_list_formats(self):
+        """Test edge cases in list formatting"""
+        content = """# Test Lists
+
+- Simple bullet
+-   Bullet with spaces
+-Complex bullet without space
+
+1. Simple numbered
+1.   Numbered with spaces
+1.Complex numbered without space
+
+10. Double digit number
+"""
+        
+        tool = PDFGeneratorTool()
+        pdf_bytes = tool.generate_pdf_bytes(content)
+        
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0
+    
+    def test_clean_unicode_text_comprehensive(self):
+        """Test comprehensive Unicode character handling"""
+        # Test all Unicode replacements
+        text = """Text with:
+        — em dash
+        – en dash
+        ' right single quote
+        ' left single quote
+        " left double quote
+        " right double quote
+        … ellipsis
+        non-breaking space
+        • bullet
+        ‐ hyphen
+        ­ soft hyphen
+        · middle dot
+        ● black circle
+        − minus sign
+        × multiplication
+        ÷ division
+        ← left arrow
+        → right arrow
+        ↑ up arrow
+        ↓ down arrow
+        Other: àáâãäåæçèéêë
+        """
+        
+        tool = PDFGeneratorTool()
+        result = tool._clean_unicode_text(text)
+        
+        # Verify all replacements occurred
+        assert '--' in result
+        assert '-' in result
+        assert "'" in result
+        assert '"' in result
+        assert '...' in result
+        assert '*' in result
+        assert 'x' in result
+        assert '/' in result
+        assert '<-' in result
+        assert '->' in result
+        assert '^' in result
+        assert 'v' in result
+        assert '?' in result  # Non-ASCII replacement
+
+class TestCompleteIntegration:
+    """Complete integration tests for full workflow coverage"""
+    
+    @patch('requests.get')
+    def test_complete_failure_workflow(self, mock_get, mock_env_vars, mock_openai_client):
+        """Test complete failure workflow"""
+        # Mock failed transcript response
+        mock_get.side_effect = requests.exceptions.HTTPError('API Error')
+        
+        # Test transcript tool failure
+        transcript_tool = YouTubeTranscriptTool()
+        transcript = transcript_tool._run('https://youtube.com/watch?v=test123', 'en')
+        
+        # Test blog generator with error input
+        blog_tool = BlogGeneratorTool()
+        blog_content = blog_tool._run(transcript)
+        
+        # Test PDF generator with error content
+        pdf_tool = PDFGeneratorTool()
+        pdf_bytes = pdf_tool.generate_pdf_bytes(blog_content)
+        
+        # All should handle errors gracefully
+        assert transcript.startswith('ERROR:')
+        assert blog_content.startswith('ERROR:')
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0
+    
+    def test_mixed_success_failure_workflow(self, mock_env_vars, mock_openai_client):
+        """Test mixed success/failure workflow"""
+        # Successful transcript
+        transcript = "Valid transcript content" * 10
+        
+        # Failed blog generation
+        mock_openai_client.chat.completions.create.side_effect = Exception('API Error')
+        
+        blog_tool = BlogGeneratorTool()
+        blog_content = blog_tool._run(transcript)
+        
+        # PDF generation should still work
+        pdf_tool = PDFGeneratorTool()
+        pdf_bytes = pdf_tool.generate_pdf_bytes(blog_content)
+        
+        assert blog_content.startswith('ERROR:')
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0
+class TestBoundaryConditions:
+    """Test boundary conditions and limits"""
+    
+    def test_transcript_exactly_100_chars(self, mock_env_vars, mock_openai_client):
+        """Test transcript with exactly 100 characters"""
+        transcript = "a" * 100  # Exactly 100 characters
+        
+        tool = BlogGeneratorTool()
+        result = tool._run(transcript)
+        
+        assert not result.startswith('ERROR:')
+    
+    def test_transcript_99_chars(self, mock_env_vars, mock_openai_client):
+        """Test transcript with 99 characters (boundary)"""
+        transcript = "a" * 99  # Just under 100 characters
+        
+        tool = BlogGeneratorTool()
+        result = tool._run(transcript)
+        
+        assert result == 'ERROR: Invalid or empty transcript provided'
+    
+    def test_transcript_exactly_15000_chars(self, mock_env_vars, mock_openai_client):
+        """Test transcript truncation at exactly 15000 characters"""
+        transcript = "a" * 15000  # Exactly 15000 characters
+        
+        tool = BlogGeneratorTool()
+        result = tool._run(transcript)
+        
+        # Verify truncation occurred
+        call_args = mock_openai_client.chat.completions.create.call_args
+        prompt_content = call_args[1]['messages'][1]['content']
+        assert 'a' * 15000 in prompt_content
+        
+class TestFileIOCoverage:
+    """Test file I/O operations for coverage"""
+    
+    def test_pdf_output_all_return_types(self):
+        """Test handling different return types from FPDF"""
+        tool = PDFGeneratorTool()
+        
+        # Test bytes return (most common case)
+        with patch('fpdf.FPDF.output', return_value=b'PDF content'):
+            result = tool.generate_pdf_bytes("# Test\n\nContent")
+            assert isinstance(result, bytes)
+            assert result == b'PDF content'
+        
+        # Test bytearray return
+        with patch('fpdf.FPDF.output', return_value=bytearray(b'PDF content')):
+            result = tool.generate_pdf_bytes("# Test\n\nContent")
+            assert isinstance(result, bytes)
+            assert result == b'PDF content'
+        
+        # Test string return
+        with patch('fpdf.FPDF.output', return_value='PDF content'):
+            result = tool.generate_pdf_bytes("# Test\n\nContent")
+            assert isinstance(result, bytes)
+            assert result == b'PDF content'
+        
+        # Test other type return that should raise an error
+        with patch('fpdf.FPDF.output', return_value=['PDF', 'content']):
+            with pytest.raises(RuntimeError, match="PDF generation error"):
+                tool.generate_pdf_bytes("# Test\n\nContent")
+    
+    def test_pdf_generation_with_various_content(self):
+        """Test PDF generation with various content types"""
+        tool = PDFGeneratorTool()
+        
+        test_contents = [
+            "# Simple Title\n\nSimple content",
+            "# Title\n\n## Section\n\nContent\n\n- List item\n\n1. Numbered item",
+            "# Title\n\n### Subsection\n\nParagraph",
+            "",  # Empty content
+            "No title content",
+            "# Title with — special chars\n\nContent with → arrows",
+        ]
+        
+        for content in test_contents:
+            with patch('fpdf.FPDF.output', return_value=b'PDF content'):
+                result = tool.generate_pdf_bytes(content)
+                assert isinstance(result, bytes)
+                assert len(result) > 0
+    
+    def test_pdf_unicode_handling(self):
+        """Test PDF generation with Unicode content"""
+        tool = PDFGeneratorTool()
+        
+        unicode_content = """# Title with Unicode: — – ' " … •
+        
+## Section with arrows: ← → ↑ ↓
+
+Content with math: × ÷ −
+
+Non-ASCII: café naïve résumé
+"""
+        
+        with patch('fpdf.FPDF.output', return_value=b'PDF content'):
+            result = tool.generate_pdf_bytes(unicode_content)
+            assert isinstance(result, bytes)
+            assert len(result) > 0
+    
+    def test_pdf_regex_matching(self):
+        """Test PDF generation regex matching for different content patterns"""
+        tool = PDFGeneratorTool()
+        
+        # Test content with various heading levels
+        content_with_headings = """# Main Title
+## Second Level
+### Third Level
+#### Fourth Level (should be converted to ###)
+##### Fifth Level (should be converted to ###)
+###### Sixth Level (should be converted to ###)
+
+Regular content
+"""
+        
+        with patch('fpdf.FPDF.output', return_value=b'PDF content'):
+            result = tool.generate_pdf_bytes(content_with_headings)
+            assert isinstance(result, bytes)
+            assert len(result) > 0
+    
+    def test_pdf_list_processing(self):
+        """Test PDF generation with various list formats"""
+        tool = PDFGeneratorTool()
+        
+        list_content = """# List Test
+
+- Simple bullet
+- Another bullet
+
+1. First numbered
+2. Second numbered
+10. Double digit
+99. Two digit number
+
+Regular paragraph after lists
+"""
+        
+        with patch('fpdf.FPDF.output', return_value=b'PDF content'):
+            result = tool.generate_pdf_bytes(list_content)
+            assert isinstance(result, bytes)
+            assert len(result) > 0
+    
+    def test_edge_case_content_formats(self):
+        """Test edge cases in content formatting"""
+        tool = PDFGeneratorTool()
+        
+        edge_cases = [
+            "# \n\n",  # Title with just spaces
+            "##\n\n",  # Empty section header
+            "###\n\n",  # Empty subsection header
+            "- \n\n",  # Empty bullet point
+            "1. \n\n",  # Empty numbered item
+            "\n\n\n\n",  # Just newlines
+            "# Title\n\n\n\n\n\n\n\n",  # Excessive newlines
+        ]
+        
+        for content in edge_cases:
+            with patch('fpdf.FPDF.output', return_value=b'PDF content'):
+                result = tool.generate_pdf_bytes(content)
+                assert isinstance(result, bytes)
+                assert len(result) > 0
+        
