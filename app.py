@@ -164,10 +164,12 @@ def download_pdf():
     try:
         content_id = session.get('content_id')
         if not content_id:
+            logger.error("No content ID found in session")
             return redirect(url_for('index'))
         
         result_data = session.get(content_id, {})
         if not result_data or 'blog_content' not in result_data:
+            logger.error("No result data found in session")
             return redirect(url_for('index'))
         
         blog_content = result_data['blog_content']
@@ -176,6 +178,8 @@ def download_pdf():
         # Extract video ID for filename
         video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', youtube_url)
         safe_name = f"blog_{video_id_match.group(1)}.pdf" if video_id_match else "blog_article.pdf"
+        
+        logger.info(f"Generating PDF: {safe_name}")
         
         # Generate PDF
         pdf_generator = PDFGeneratorTool()
@@ -186,7 +190,9 @@ def download_pdf():
         mem_file.write(pdf_bytes)
         mem_file.seek(0)
         
-        logger.info(f"PDF generated successfully: {safe_name}")
+        logger.info(f"PDF generated successfully: {safe_name} ({len(pdf_bytes)} bytes)")
+        
+        # Send PDF file
         return send_file(
             mem_file,
             as_attachment=True,
@@ -197,23 +203,12 @@ def download_pdf():
     except Exception as e:
         logger.error(f"PDF generation failed: {str(e)}", exc_info=True)
         
-        # Fallback to text file
-        try:
-            content_id = session.get('content_id')
-            result_data = session.get(content_id, {})
-            blog_content = result_data.get('blog_content', 'Content not available')
-            
-            mem_file = io.BytesIO(blog_content.encode('utf-8'))
-            mem_file.seek(0)
-            return send_file(
-                mem_file,
-                as_attachment=True,
-                download_name='blog_article.txt',
-                mimetype='text/plain'
-            )
-        except Exception as fallback_error:
-            logger.error(f"Fallback download failed: {str(fallback_error)}")
-            return redirect(url_for('results'))
+        # Instead of fallback to text, show error message
+        return render_template(
+            'results.html',
+            error_message=f"PDF generation failed: {str(e)}",
+            **session.get(session.get('content_id', {}), {})
+        )
 
 @app.route('/api/status')
 def api_status():
@@ -221,12 +216,14 @@ def api_status():
     try:
         # Check environment variables
         openai_key = bool(os.getenv('OPENAI_API_KEY'))
+        supadata_key = bool(os.getenv('SUPADATA_API_KEY'))
         
         status = {
             'status': 'healthy',
             'timestamp': time.time(),
             'environment': {
                 'openai_configured': openai_key,
+                'supadata_configured': supadata_key,
                 'session_dir_exists': os.path.exists(app.config['SESSION_FILE_DIR'])
             }
         }
@@ -235,57 +232,6 @@ def api_status():
     except Exception as e:
         logger.error(f"Status check failed: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/validate-url', methods=['POST'])
-def validate_youtube_url():
-    """API endpoint to validate YouTube URL"""
-    try:
-        data = request.get_json()
-        url = data.get('url', '').strip()
-        
-        if not url:
-            return jsonify({'valid': False, 'message': 'URL is required'})
-        
-        # Check URL format
-        if not re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', url):
-            return jsonify({'valid': False, 'message': 'Invalid YouTube URL format'})
-        
-        # Extract video ID
-        video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
-        if not video_id_match:
-            return jsonify({'valid': False, 'message': 'Could not extract video ID'})
-        
-        video_id = video_id_match.group(1)
-        
-        return jsonify({
-            'valid': True, 
-            'video_id': video_id,
-            'message': 'Valid YouTube URL'
-        })
-        
-    except Exception as e:
-        logger.error(f"URL validation failed: {str(e)}")
-        return jsonify({'valid': False, 'message': 'Validation error'}), 500
-
-@app.route('/clear-session')
-def clear_session():
-    """Clear current session and redirect to home"""
-    try:
-        session.clear()
-        logger.info("Session cleared successfully")
-        return redirect(url_for('index'))
-    except Exception as e:
-        logger.error(f"Session clear failed: {str(e)}")
-        return redirect(url_for('index'))
-
-@app.route('/health')
-def health_check():
-    """Simple health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': time.time(),
-        'version': '1.0.0'
-    })
 
 # Error handlers
 @app.errorhandler(404)
@@ -300,43 +246,6 @@ def internal_error(error):
     logger.error(f"Internal server error: {str(error)}")
     return render_template('index.html', error="Internal server error occurred"), 500
 
-@app.errorhandler(413)
-def request_entity_too_large(error):
-    """Handle file too large errors"""
-    logger.warning("Request entity too large")
-    return render_template('index.html', error="Request too large"), 413
-
-@app.before_request
-def before_request():
-    """Log all requests for debugging"""
-    logger.info(f"Request: {request.method} {request.path} from {request.remote_addr}")
-
-@app.after_request
-def after_request(response):
-    """Log response status"""
-    logger.info(f"Response: {response.status_code} for {request.path}")
-    return response
-
-def cleanup_old_sessions():
-    """Clean up old session files"""
-    try:
-        session_dir = app.config['SESSION_FILE_DIR']
-        if os.path.exists(session_dir):
-            current_time = time.time()
-            for filename in os.listdir(session_dir):
-                file_path = os.path.join(session_dir, filename)
-                if os.path.isfile(file_path):
-                    # Remove files older than 24 hours
-                    if current_time - os.path.getmtime(file_path) > 86400:
-                        os.remove(file_path)
-                        logger.info(f"Removed old session file: {filename}")
-    except Exception as e:
-        logger.error(f"Session cleanup failed: {str(e)}")
-
-def get_env_var(name, default=None):
-    """Get environment variable with fallback"""
-    return os.getenv(name) or default
-
 if __name__ == '__main__':
     # Create session directory
     session_dir = app.config['SESSION_FILE_DIR']
@@ -344,23 +253,21 @@ if __name__ == '__main__':
         os.makedirs(session_dir)
         logger.info(f"Created session directory: {session_dir}")
     
-    # Clean up old sessions on startup
-    cleanup_old_sessions()
-    
     # Configuration
     port = int(os.environ.get('PORT', 5000))
-    debug_mode = get_env_var('FLASK_DEBUG', 'False').lower() == 'true'
-    host = get_env_var('FLASK_HOST', '0.0.0.0')
+    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    host = os.getenv('FLASK_HOST', '0.0.0.0')
     
     # Validate required environment variables
     if not os.getenv('OPENAI_API_KEY'):
         logger.error("OPENAI_API_KEY not found in environment variables!")
-        logger.error("Please set your OpenAI API key before running the application")
+        sys.exit(1)
+    
+    if not os.getenv('SUPADATA_API_KEY'):
+        logger.error("SUPADATA_API_KEY not found in environment variables!")
         sys.exit(1)
     
     logger.info(f"Starting application on {host}:{port}")
-    logger.info(f"Debug mode: {debug_mode}")
-    logger.info(f"Session directory: {session_dir}")
     
     try:
         app.run(host=host, port=port, debug=debug_mode)

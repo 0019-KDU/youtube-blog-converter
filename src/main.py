@@ -38,44 +38,75 @@ def _extract_video_id(url: str) -> str:
     return None
 
 def _clean_final_output(content: str) -> str:
-    """Clean the final output to remove any unwanted artifacts"""
+    """Enhanced content cleaning for better presentation"""
     if not content:
         return ""
-    
+
     # Remove tool mentions and actions
     content = re.sub(r'Action:\s*\w+', '', content, flags=re.IGNORECASE)
     content = re.sub(r'Tool:\s*\w+', '', content, flags=re.IGNORECASE)
     content = re.sub(r'BlogGeneratorTool', '', content, flags=re.IGNORECASE)
     content = re.sub(r'YouTubeTranscriptTool', '', content, flags=re.IGNORECASE)
     
-    # Remove JSON artifacts using iterative removal of innermost braces
-    max_passes = 10
-    for _ in range(max_passes):
-        new_content = re.sub(r'\{[^{}]*\}', '', content, flags=re.DOTALL)
-        if new_content == content:
-            break
-        content = new_content
+    # Remove JSON artifacts and unmatched braces
+    content = re.sub(r'\{[^{}]*"[^"]*"[^{}]*\}', '', content, flags=re.DOTALL)
+    content = re.sub(r'\{[^{}]*\}', '', content, flags=re.DOTALL)
+    content = re.sub(r'[{}]', '', content)
     
-    # Remove any remaining unmatched braces
-    content = re.sub(r'\{', '', content)
-    content = re.sub(r'\}', '', content)
+    # Remove markdown artifacts but preserve proper formatting
+    content = re.sub(r'\*{3,}', '', content)  # Remove excess asterisks
+    content = re.sub(r'-{3,}', '', content)   # Remove horizontal rules
+    content = re.sub(r'\|{2,}', '', content)  # Remove pipe symbols
+    content = re.sub(r'_{3,}', '', content)   # Remove excess underscores
     
-    # Remove markdown artifacts if present
-    content = re.sub(r'``````', '', content, flags=re.DOTALL)
+    # Fix heading formatting with proper spacing
+    content = re.sub(r'^(\s*#{4,})\s*', r'\1### ', content, flags=re.MULTILINE)
+    content = re.sub(r'^(\s*#{1,3})\s*(\S)', r'\1 \2', content, flags=re.MULTILINE)
     
-    # Clean up extra whitespace
+    # Ensure proper spacing between sections
     content = re.sub(r'\n{3,}', '\n\n', content)
     content = re.sub(r'^\s+', '', content, flags=re.MULTILINE)
+    content = re.sub(r'\s+$', '', content, flags=re.MULTILINE)
     
-    return content.strip()
+    # Fix list formatting
+    content = re.sub(r'^\•\s+', '- ', content, flags=re.MULTILINE)
+    content = re.sub(r'^\*\s+', '- ', content, flags=re.MULTILINE)
+    content = re.sub(r'^(\d+)\.\s+', r'\1. ', content, flags=re.MULTILINE)
+    
+    # Ensure proper paragraph structure with better spacing
+    lines = content.split('\n')
+    formatted_lines = []
+    prev_line_empty = False
+    
+    for line in lines:
+        line = line.strip()
+        
+        if not line:
+            if not prev_line_empty:
+                formatted_lines.append('')
+            prev_line_empty = True
+        else:
+            # Add extra spacing before headings
+            if line.startswith('#'):
+                if formatted_lines and formatted_lines[-1] != '':
+                    formatted_lines.append('')
+                formatted_lines.append(line)
+                formatted_lines.append('')
+                prev_line_empty = True
+            else:
+                formatted_lines.append(line)
+                prev_line_empty = False
+    
+    return '\n'.join(formatted_lines).strip()
 
 def _create_error_response(youtube_url: str, error_msg: str) -> str:
     """Create informative error response"""
     return f"""# YouTube Video Analysis - Technical Issue
 
 ## Video Information
-- **URL**: {youtube_url}
-- **Processing Date**: {time.strftime('%Y-%m-%d %H:%M:%S')}
+
+**URL**: {youtube_url}
+**Processing Date**: {time.strftime('%Y-%m-%d %H:%M:%S')}
 
 ## Technical Issue Encountered
 
@@ -84,7 +115,7 @@ def _create_error_response(youtube_url: str, error_msg: str) -> str:
 ## Troubleshooting Steps
 
 1. **Verify Video Accessibility**: Ensure the video is public and has captions/transcripts available
-2. **Check API Limits**: YouTube transcript API may have rate limits
+2. **Check API Limits**: Supadata API may have rate limits
 3. **Network Connectivity**: Verify internet connection and API accessibility
 4. **Video Format**: Some videos may not have extractable transcripts
 
@@ -94,19 +125,9 @@ def _create_error_response(youtube_url: str, error_msg: str) -> str:
 - Verify the video has closed captions enabled
 - Check if the video is region-restricted
 - Ensure the video ID is correctly extracted from the URL
-
-## Technical Details
-
-This tool uses the YouTube Transcript API to extract video transcripts. Common issues include:
-- Videos without available transcripts
-- Private or restricted videos
-- API rate limiting
-- Network connectivity issues
-
-Please try with a different video or contact support if the issue persists.
 """
 
-def test_individual_components(youtube_url: str, language: str = "en") -> str:
+def individual_components_test(youtube_url: str, language: str = "en") -> str:
     """Test each component separately to isolate issues"""
     logger.info("Testing individual components...")
     
@@ -143,9 +164,14 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
     """Generate a blog article from a YouTube video URL with comprehensive error handling"""
     start_time = time.time()
     
+    # Check required API keys
     if not os.getenv("OPENAI_API_KEY"):
         logger.error("OpenAI API key not found")
         return _create_error_response(youtube_url, "OpenAI API key not found in environment variables")
+    
+    if not os.getenv("SUPADATA_API_KEY"):
+        logger.error("Supadata API key not found")
+        return _create_error_response(youtube_url, "SUPADATA_API_KEY not found in environment variables")
     
     if not youtube_url or not re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', youtube_url):
         return _create_error_response(youtube_url, "Invalid YouTube URL provided")
@@ -157,8 +183,8 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
     logger.info(f"Starting blog generation for video ID: {video_id}")
     
     try:
-        logger.info("Using reliable fallback approach...")
-        result_text = test_individual_components(youtube_url, language)
+        logger.info("Using Supadata API approach...")
+        result_text = individual_components_test(youtube_url, language)
         
         if result_text and len(result_text) > 500:
             cleaned_output = _clean_final_output(result_text)
@@ -177,7 +203,7 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
 
 def validate_environment():
     """Validate all required environment variables"""
-    required_vars = ['OPENAI_API_KEY']
+    required_vars = ['OPENAI_API_KEY', 'SUPADATA_API_KEY']
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     
     if missing_vars:
@@ -187,7 +213,7 @@ def validate_environment():
 
 def cli_main():
     """Command line interface with enhanced error handling"""
-    print("YouTube Blog Generator - Enhanced Version")
+    print("YouTube Blog Generator - Supadata API Version")
     print("=" * 50)
     
     try:

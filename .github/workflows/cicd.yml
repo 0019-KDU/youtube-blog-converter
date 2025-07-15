@@ -124,6 +124,10 @@ jobs:
 
   build-and-test:
     runs-on: ubuntu-latest
+    # 🔧 ADD SUPADATA_API_KEY HERE FOR TESTING
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
     steps:
       - name: Show commit author
         run: |
@@ -456,10 +460,12 @@ jobs:
       - name: Container Vulnerability Scan with Trivy
         run: trivy image --severity HIGH,CRITICAL --exit-code 0 youtube-blog-converter:${{ github.sha }}
       
+      # 🔧 ADD BOTH API KEYS TO SMOKE TEST
       - name: Run smoke test
         run: |
           docker run -d --name smoke-test \
             -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            -e SUPADATA_API_KEY=${{ secrets.SUPADATA_API_KEY }} \
             -p 5000:5000 \
             youtube-blog-converter:${{ github.sha }}
           sleep 10
@@ -627,13 +633,18 @@ jobs:
             --username ${{ secrets.DOCKERHUB_USERNAME }} \
             --password ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Update Container App Image
+      # 🔧 ADD BOTH API KEYS TO AZURE DEPLOYMENT
+      - name: Update Container App with Environment Variables
         run: |
-          echo "🚀 Updating container image to ${{ github.sha }}"
+          echo "🔧 Setting environment variables for the container app..."
           az containerapp update \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
+            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
+            --set-env-vars \
+              OPENAI_API_KEY=secretref:openai-api-key \
+              SUPADATA_API_KEY=secretref:supadata-api-key \
+              FLASK_SECRET_KEY=secretref:flask-secret-key
 
       - name: Get Container App URL
         id: get-url

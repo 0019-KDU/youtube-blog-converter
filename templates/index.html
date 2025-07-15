@@ -18,9 +18,112 @@
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
+      padding-top: 70px;
+    }
+
+    /* Navigation Bar Styles */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: rgba(255, 255, 255, 0.95);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+      z-index: 1000;
+      padding: 0 20px;
+      box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .nav-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 70px;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #2c3e50;
+      font-size: 1.4rem;
+      font-weight: 700;
+      text-decoration: none;
+      transition: color 0.3s ease;
+    }
+
+    .nav-brand:hover {
+      color: #667eea;
+    }
+
+    .nav-brand i {
+      font-size: 1.6rem;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .nav-menu {
+      display: flex;
+      list-style: none;
+      gap: 30px;
+      align-items: center;
+    }
+
+    .nav-menu li {
+      position: relative;
+    }
+
+    .nav-menu a {
+      color: #2c3e50;
+      text-decoration: none;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 8px;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-menu a:hover {
+      background: rgba(102, 126, 234, 0.1);
+      color: #667eea;
+    }
+
+    .nav-menu a.active {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+    }
+
+    .nav-toggle {
+      display: none;
+      background: none;
+      border: none;
+      color: #2c3e50;
+      font-size: 1.5rem;
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 8px;
+      transition: all 0.3s ease;
+    }
+
+    .nav-toggle:hover {
+      background: rgba(102, 126, 234, 0.1);
+      color: #667eea;
+    }
+
+    /* Main Content Container */
+    .main-content {
       display: flex;
       align-items: center;
       justify-content: center;
+      min-height: calc(100vh - 70px);
       padding: 20px;
     }
 
@@ -218,7 +321,42 @@
       100% { transform: rotate(360deg); }
     }
 
+    /* Mobile Navigation */
     @media (max-width: 768px) {
+      .nav-toggle {
+        display: block;
+      }
+
+      .nav-menu {
+        position: fixed;
+        top: 70px;
+        left: -100%;
+        width: 100%;
+        height: calc(100vh - 70px);
+        background: rgba(255, 255, 255, 0.95);
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
+        flex-direction: column;
+        justify-content: flex-start;
+        align-items: center;
+        padding-top: 50px;
+        transition: left 0.3s ease;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+      }
+
+      .nav-menu.active {
+        left: 0;
+      }
+
+      .nav-menu li {
+        margin: 10px 0;
+      }
+
+      .nav-menu a {
+        font-size: 1.2rem;
+        padding: 15px 20px;
+      }
+
       .container {
         padding: 30px 25px;
         margin: 10px;
@@ -234,6 +372,10 @@
     }
 
     @media (max-width: 480px) {
+      .nav-brand {
+        font-size: 1.2rem;
+      }
+
       .container {
         padding: 25px 20px;
       }
@@ -249,64 +391,110 @@
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1><i class="fas fa-blog"></i> YouTube to Blog Converter</h1>
-
-    {% if error %}
-    <div class="error">
-      <i class="fas fa-exclamation-triangle"></i> {{ error }}
+  <!-- Navigation Bar -->
+  <nav>
+    <div class="nav-container">
+      <a href="/" class="nav-brand">
+        <i class="fas fa-blog"></i>
+        BlogConverter
+      </a>
+      
+      <ul class="nav-menu" id="nav-menu">
+        <li><a href="/" class="active"><i class="fas fa-home"></i> Home</a></li>
+        <li><a href="#"><i class="fas fa-convert"></i> Convert</a></li>
+        <li><a href="#"><i class="fas fa-info-circle"></i> About</a></li>
+        <li><a href="#"><i class="fas fa-envelope"></i> Contact</a></li>
+      </ul>
+      
+      <buttonbutton class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation menu">
+        <i class="fas fa-bars"></i>
+      </button>
     </div>
-    {% endif %}
+  </nav>
 
-    <form action="/generate" method="POST" id="main-form">
-      <div class="form-group">
-        <label for="youtube_url">
-          <i class="fab fa-youtube"></i> YouTube Video URL:
-        </label>
-        <div class="input-container">
-          <input type="text" id="youtube_url" name="youtube_url" 
-                 placeholder="https://youtu.be/... or https://www.youtube.com/watch?v=..." 
-                 required />
-        </div>
-        
-        <div class="video-preview" id="video-preview">
-          <iframe id="video-iframe" allowfullscreen></iframe>
-          <div class="video-info">
-            <div class="video-title" id="video-title">Video Preview</div>
-            <div class="video-channel" id="video-channel">Ready to convert</div>
+  <!-- Main Content -->
+  <div class="main-content">
+    <div class="container">
+      <h1><i class="fas fa-blog"></i> YouTube to Blog Converter</h1>
+
+      {% if error %}
+      <div class="error">
+        <i class="fas fa-exclamation-triangle"></i> {{ error }}
+      </div>
+      {% endif %}
+
+      <form action="/generate" method="POST" id="main-form">
+        <div class="form-group">
+          <label for="youtube_url">
+            <i class="fab fa-youtube"></i> YouTube Video URL:
+          </label>
+          <div class="input-container">
+            <input type="text" id="youtube_url" name="youtube_url" 
+                   placeholder="https://youtu.be/... or https://www.youtube.com/watch?v=..." 
+                   required />
+          </div>
+          
+          <div class="video-preview" id="video-preview">
+            <iframe id="video-iframe" allowfullscreen></iframe>
+            <div class="video-info">
+              <div class="video-title" id="video-title">Video Preview</div>
+              <div class="video-channel" id="video-channel">Ready to convert</div>
+            </div>
           </div>
         </div>
+        
+        <button type="submit" id="submit-btn">
+          <span class="normal-state">
+            <i class="fas fa-magic"></i> Generate Blog Article
+          </span>
+          <span class="loading-state">
+            <div class="spinner"></div> Processing Video...
+          </span>
+        </button>
+      </form>
+
+      <div class="note">
+        <i class="fas fa-info-circle"></i>
+        Paste a valid YouTube URL to preview the video and generate a professional blog article from its content.
       </div>
       
-      <button type="submit" id="submit-btn">
-        <span class="normal-state">
-          <i class="fas fa-magic"></i> Generate Blog Article
-        </span>
-        <span class="loading-state">
-          <div class="spinner"></div> Processing Video...
-        </span>
-      </button>
-    </form>
-
-    <div class="note">
-      <i class="fas fa-info-circle"></i>
-      Paste a valid YouTube URL to preview the video and generate a professional blog article from its content.
-    </div>
-    
-    <div class="feature-list">
-      <h3><i class="fas fa-star"></i> Key Features</h3>
-      <ul>
-        <li>Convert YouTube videos to detailed blog articles</li>
-        <li>Live video preview before conversion</li>
-        <li>Auto-detects the best available transcript</li>
-        <li>Download as professional PDF format</li>
-        <li>Clean, responsive design optimized for all devices</li>
-        <li>Fast processing with real-time progress tracking</li>
-      </ul>
+      <div class="feature-list">
+        <h3><i class="fas fa-star"></i> Key Features</h3>
+        <ul>
+          <li>Convert YouTube videos to detailed blog articles</li>
+          <li>Live video preview before conversion</li>
+          <li>Auto-detects the best available transcript</li>
+          <li>Download as professional PDF format</li>
+          <li>Clean, responsive design optimized for all devices</li>
+          <li>Fast processing with real-time progress tracking</li>
+        </ul>
+      </div>
     </div>
   </div>
   
   <script>
+    // Navigation toggle functionality
+    const navToggle = document.getElementById('nav-toggle');
+    const navMenu = document.getElementById('nav-menu');
+
+    navToggle.addEventListener('click', function() {
+      navMenu.classList.toggle('active');
+      const icon = this.querySelector('i');
+      icon.classList.toggle('fa-bars');
+      icon.classList.toggle('fa-times');
+    });
+
+    // Close mobile menu when clicking on a link
+    document.querySelectorAll('.nav-menu a').forEach(link => {
+      link.addEventListener('click', () => {
+        navMenu.classList.remove('active');
+        const icon = navToggle.querySelector('i');
+        icon.classList.remove('fa-times');
+        icon.classList.add('fa-bars');
+      });
+    });
+
+    // Original YouTube functionality
     const urlInput = document.getElementById('youtube_url');
     const videoPreview = document.getElementById('video-preview');
     const videoIframe = document.getElementById('video-iframe');
