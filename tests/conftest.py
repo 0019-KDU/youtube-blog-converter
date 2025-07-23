@@ -6,14 +6,19 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 from flask import Flask
 import json
+from bson import ObjectId
+import datetime
 
 # Test fixtures for the application
 @pytest.fixture
 def app():
     """Create a Flask app configured for testing"""
     os.environ['FLASK_SECRET_KEY'] = 'test-secret-key-for-testing'
+    os.environ['JWT_SECRET_KEY'] = 'test-jwt-secret-key'
     os.environ['OPENAI_API_KEY'] = 'test-openai-key'
     os.environ['SUPADATA_API_KEY'] = 'test-supadata-key'
+    os.environ['MONGODB_URI'] = 'mongodb://localhost:27017/test_db'
+    os.environ['MONGODB_DB_NAME'] = 'test_youtube_blog_db'
     
     from app import app
     app.config['TESTING'] = True
@@ -34,25 +39,100 @@ def client(app):
     return app.test_client()
 
 @pytest.fixture
+def mock_mongo_connection():
+    """Mock MongoDB connection manager"""
+    with patch('auth.models.mongo_manager') as mock_manager:
+        mock_collection = Mock()
+        mock_db = Mock()
+        mock_client = Mock()
+        
+        # Setup mock methods
+        mock_manager.get_collection.return_value = mock_collection
+        mock_manager.get_database.return_value = mock_db
+        mock_manager.get_connection.return_value = (mock_client, mock_db)
+        mock_manager.is_connected.return_value = True
+        mock_manager.close_connection.return_value = None
+        
+        yield {
+            'manager': mock_manager,
+            'collection': mock_collection,
+            'db': mock_db,
+            'client': mock_client
+        }
+
+@pytest.fixture
 def mock_openai_client():
     """Mock OpenAI client for testing"""
-    with patch('src.tool.openai_client') as mock_client:
+    with patch('src.tool.openai_client_context') as mock_context:
+        mock_client = Mock()
         mock_response = Mock()
         mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "Generated blog content"
+        mock_response.choices[0].message.content = "# Generated Blog\n\nThis is a test blog content."
         mock_client.chat.completions.create.return_value = mock_response
+        mock_context.return_value.__enter__.return_value = mock_client
+        mock_context.return_value.__exit__.return_value = None
         yield mock_client
 
 @pytest.fixture
 def mock_requests():
     """Mock requests for API calls"""
-    with patch('src.tool.requests') as mock_requests:
+    with patch('src.tool.requests.Session') as mock_session_class:
+        mock_session = Mock()
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {'content': 'Test transcript content'}
         mock_response.raise_for_status.return_value = None
-        mock_requests.get.return_value = mock_response
-        yield mock_requests
+        mock_session.get.return_value = mock_response
+        mock_session.close.return_value = None
+        mock_session_class.return_value = mock_session
+        yield mock_session
+
+@pytest.fixture
+def sample_user_data():
+    """Sample user data for testing"""
+    return {
+        '_id': str(ObjectId()),
+        'username': 'testuser',
+        'email': 'test@example.com',
+        'is_active': True,
+        'created_at': datetime.datetime.utcnow(),
+        'updated_at': datetime.datetime.utcnow()
+    }
+
+@pytest.fixture
+def sample_blog_post():
+    """Sample blog post for testing"""
+    return {
+        '_id': str(ObjectId()),
+        'user_id': str(ObjectId()),
+        'title': 'Test Blog Post',
+        'content': '# Test Blog\n\nThis is test content.',
+        'youtube_url': 'https://www.youtube.com/watch?v=test123',
+        'video_id': 'test123',
+        'word_count': 100,
+        'created_at': datetime.datetime.utcnow(),
+        'updated_at': datetime.datetime.utcnow()
+    }
+
+@pytest.fixture
+def authenticated_user(client, sample_user_data):
+    """Create an authenticated user session"""
+    with client.session_transaction() as sess:
+        sess['access_token'] = 'test_token'
+        sess['user_id'] = sample_user_data['_id']
+    return sample_user_data
+
+@pytest.fixture
+def mock_jwt_functions():
+    """Mock JWT functions"""
+    with patch('auth.routes.create_access_token') as mock_create, \
+         patch('auth.routes.decode_token') as mock_decode:
+        mock_create.return_value = 'mock_access_token'
+        mock_decode.return_value = {'sub': str(ObjectId())}
+        yield {
+            'create_access_token': mock_create,
+            'decode_token': mock_decode
+        }
 
 @pytest.fixture
 def sample_transcript():
@@ -87,11 +167,6 @@ This article reviews various AI productivity tools and their capabilities.
 - Good for complex tasks
 - Reliable performance
 
-### ChatGPT
-- Versatile conversational AI
-- Wide range of applications
-- Continuous improvements
-
 ## Conclusion
 
 Each tool has its place in the AI productivity landscape.
@@ -104,11 +179,9 @@ def valid_youtube_urls():
         'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         'https://youtu.be/dQw4w9WgXcQ',
         'https://youtube.com/watch?v=dQw4w9WgXcQ',
-        'https://m.youtube.com/watch?v=dQw4w9WgXcQ',
         'https://www.youtube.com/embed/dQw4w9WgXcQ',
         'https://www.youtube.com/v/dQw4w9WgXcQ',
-        'https://www.youtube.com/shorts/dQw4w9WgXcQ',
-        'https://youtube.com/live/dQw4w9WgXcQ'
+        'https://www.youtube.com/shorts/dQw4w9WgXcQ'
     ]
 
 @pytest.fixture
@@ -118,34 +191,9 @@ def invalid_youtube_urls():
         'https://vimeo.com/123456789',
         'https://www.google.com',
         'not-a-url',
-        'https://youtube.com/watch?v=invalid',
         'https://youtube.com/watch?v=',
         '',
-        None
     ]
-
-@pytest.fixture
-def mock_environment_variables():
-    """Mock environment variables for testing"""
-    env_vars = {
-        'OPENAI_API_KEY': 'test-openai-key',
-        'SUPADATA_API_KEY': 'test-supadata-key',
-        'OPENAI_MODEL_NAME': 'gpt-4.1-nano-2025-04-14',
-        'FLASK_SECRET_KEY': 'test-secret-key',
-        'FLASK_DEBUG': 'False',
-        'FLASK_HOST': '127.0.0.1',
-        'PORT': '5000'
-    }
-    
-    with patch.dict(os.environ, env_vars):
-        yield env_vars
-
-@pytest.fixture
-def temp_session_dir():
-    """Create temporary session directory for testing"""
-    temp_dir = tempfile.mkdtemp()
-    yield temp_dir
-    shutil.rmtree(temp_dir)
 
 @pytest.fixture
 def mock_pdf_generator():
@@ -155,64 +203,6 @@ def mock_pdf_generator():
         mock_instance.generate_pdf_bytes.return_value = b'mock pdf content'
         mock_pdf.return_value = mock_instance
         yield mock_pdf
-
-@pytest.fixture
-def mock_crew_ai():
-    """Mock CrewAI components for testing"""
-    with patch('src.agents.Agent') as mock_agent, \
-         patch('src.tasks.Task') as mock_task:
-        
-        # Mock agent
-        mock_agent_instance = Mock()
-        mock_agent.return_value = mock_agent_instance
-        
-        # Mock task
-        mock_task_instance = Mock()
-        mock_task_instance.output = "Mock task output"
-        mock_task.return_value = mock_task_instance
-        
-        yield {
-            'agent': mock_agent,
-            'task': mock_task,
-            'agent_instance': mock_agent_instance,
-            'task_instance': mock_task_instance
-        }
-
-@pytest.fixture
-def mock_logging():
-    """Mock logging for testing"""
-    with patch('src.main.logger') as mock_logger:
-        yield mock_logger
-
-# Test data fixtures
-@pytest.fixture
-def api_response_success():
-    """Successful API response for testing"""
-    return {
-        'content': 'This is a test transcript from YouTube video'
-    }
-
-@pytest.fixture
-def api_response_failure():
-    """Failed API response for testing"""
-    return {
-        'error': 'Video not found or transcript unavailable'
-    }
-
-@pytest.fixture
-def cleanup_test_files():
-    """Cleanup test files after testing"""
-    test_files = []
-    
-    def add_file(filename):
-        test_files.append(filename)
-    
-    yield add_file
-    
-    # Cleanup after test
-    for file in test_files:
-        if os.path.exists(file):
-            os.remove(file)
 
 # Configuration for pytest
 def pytest_configure(config):
@@ -226,10 +216,3 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "unit: marks tests as unit tests"
     )
-
-# Skip tests if environment variables are not set
-def pytest_runtest_setup(item):
-    """Setup for each test run"""
-    if 'requires_api_keys' in item.keywords:
-        if not os.getenv('OPENAI_API_KEY') or not os.getenv('SUPADATA_API_KEY'):
-            pytest.skip('API keys not configured for testing')

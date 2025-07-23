@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}Sign Up - BlogGen Pro{% endblock %}
+
+{% block content %}
+<section class="auth-section">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-6 col-lg-5">
+                <div class="auth-card">
+                    <div class="text-center mb-4">
+                        <div class="auth-icon">
+                            <i class="fas fa-user-plus"></i>
+                        </div>
+                        <h2 class="auth-title">Create Account</h2>
+                        <p class="auth-subtitle">Join thousands of content creators</p>
+                    </div>
+                    
+                    <div id="registerAlert" class="alert alert-danger d-none" role="alert"></div>
+                    
+                    <form id="registerForm">
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="username" name="username" placeholder="Username" required>
+                            <label for="username">Username</label>
+                        </div>
+                        
+                        <div class="form-floating mb-3">
+                            <input type="email" class="form-control" id="email" name="email" placeholder="name@example.com" required>
+                            <label for="email">Email address</label>
+                        </div>
+                        
+                        <div class="form-floating mb-3">
+                            <input type="password" class="form-control" id="password" name="password" placeholder="Password" required>
+                            <label for="password">Password</label>
+                        </div>
+                        
+                        <div class="form-floating mb-3">
+                            <input type="password" class="form-control" id="confirm_password" name="confirm_password" placeholder="Confirm Password" required>
+                            <label for="confirm_password">Confirm Password</label>
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="terms" required>
+                            <label class="form-check-label" for="terms">
+                                I agree to the <a href="#" class="text-orange">Terms of Service</a> and <a href="#" class="text-orange">Privacy Policy</a>
+                            </label>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-orange w-100 mb-3" id="registerBtn">
+                            <span class="btn-text">Create Account</span>
+                            <span class="btn-loading d-none">
+                                <i class="fas fa-spinner fa-spin me-2"></i>Creating account...
+                            </span>
+                        </button>
+                    </form>
+                    
+                    <div class="text-center">
+                        <p class="mb-0">Already have an account? 
+                            <a href="{{ url_for('auth.login') }}" class="text-decoration-none text-orange">Sign in</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.getElementById('registerForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const btn = document.getElementById('registerBtn');
+    const btnText = btn.querySelector('.btn-text');
+    const btnLoading = btn.querySelector('.btn-loading');
+    const alert = document.getElementById('registerAlert');
+    
+    // Check password match
+    const password = document.getElementById('password').value;
+    const confirmPassword = document.getElementById('confirm_password').value;
+    
+    if (password !== confirmPassword) {
+        alert.textContent = 'Passwords do not match';
+        alert.classList.remove('d-none');
+        return;
+    }
+    
+    // Show loading state
+    btnText.classList.add('d-none');
+    btnLoading.classList.remove('d-none');
+    btn.disabled = true;
+    alert.classList.add('d-none');
+    
+    try {
+        const formData = new FormData(this);
+        const jsonData = {};
+        for (let [key, value] of formData.entries()) {
+            jsonData[key] = value;
+        }
+        
+        const response = await fetch('{{ url_for("auth.register") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(jsonData)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && response.ok) {
+            localStorage.setItem('access_token', data.access_token);
+            
+            try {
+                await fetch('{{ url_for("auth.set_session_token") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ access_token: data.access_token })
+                });
+            } catch (sessionError) {
+                console.log('Session token error (non-critical):', sessionError);
+            }
+            
+            if (typeof showToast === 'function') {
+                showToast('Registration successful! Redirecting...', 'success');
+            }
+            
+            setTimeout(() => {
+                window.location.href = data.redirect_url || '{{ url_for("dashboard") }}';
+            }, 500);
+        } else {
+            const errorMsg = data.message || 'Registration failed';
+            alert.textContent = errorMsg;
+            alert.classList.remove('d-none');
+        }
+    } catch (error) {
+        console.error('Registration error:', error);
+        const errorMsg = 'Registration failed. Please try again.';
+        alert.textContent = errorMsg;
+        alert.classList.remove('d-none');
+    } finally {
+        btnText.classList.remove('d-none');
+        btnLoading.classList.add('d-none');
+        btn.disabled = false;
+    }
+});
+</script>
+{% endblock %}

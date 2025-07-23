@@ -1,643 +1,196 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generated Blog Article</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-            padding-top: 90px;
-        }
+{% extends "base.html" %}
 
-        /* Navigation Bar */
-        nav {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-            z-index: 1000;
-            padding: 0 20px;
-            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
-        }
+{% block title %}Blog Generated - BlogGen Pro{% endblock %}
 
-        .nav-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            height: 70px;
-        }
-
-        .nav-brand {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            color: #2c3e50;
-            font-size: 1.4rem;
-            font-weight: 700;
-            text-decoration: none;
-            transition: color 0.3s ease;
-        }
-
-        .nav-brand:hover {
-            color: #667eea;
-        }
-
-        .nav-brand i {
-            font-size: 1.6rem;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .nav-menu {
-            display: flex;
-            list-style: none;
-            gap: 30px;
-            align-items: center;
-        }
-
-        .nav-menu a {
-            color: #2c3e50;
-            text-decoration: none;
-            font-weight: 500;
-            padding: 8px 16px;
-            border-radius: 8px;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .nav-menu a:hover {
-            background: rgba(102, 126, 234, 0.1);
-            color: #667eea;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.95);
-            -webkit-backdrop-filter: blur(20px);
-            backdrop-filter: blur(20px);
-            border-radius: 24px;
-            overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .header {
-            background: linear-gradient(135deg, #2c3e50, #34495e);
-            color: white;
-            padding: 30px 40px;
-            text-align: center;
-        }
-
-        .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 15px;
-            font-weight: 700;
-        }
-
-        .source-info {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
-            margin-top: 20px;
-            flex-wrap: wrap;
-        }
-
-        .source-link {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 10px 20px;
-            border-radius: 25px;
-            color: #ecf0f1;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .source-link:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: translateY(-2px);
-        }
-
-        .video-embed {
-            margin: 30px 40px;
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-            background: #000;
-        }
-
-        .video-embed iframe {
-            width: 100%;
-            height: 400px;
-            border: none;
-        }
-
-        .content-wrapper {
-            padding: 40px;
-        }
-
-        .blog-meta {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
-            border-radius: 16px;
-            border: 1px solid #e1e8ed;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
-
-        .meta-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: #495057;
-            font-weight: 500;
-        }
-
-        .meta-item i {
-            color: #667eea;
-        }
-
-        .article-container {
-            background: #fff;
-            border-radius: 16px;
-            padding: 50px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            border: 1px solid #e1e8ed;
-            line-height: 1.8;
-        }
-
-        .blog-content {
-            font-size: 1.1rem;
-            color: #2c3e50;
-            font-family: 'Georgia', 'Times New Roman', serif;
-            max-width: none;
-        }
-        
-        /* ENHANCED CONTENT FORMATTING */
-        .blog-content h1 {
-            color: #2c3e50;
-            margin: 0 0 30px 0;
-            padding-bottom: 20px;
-            border-bottom: 3px solid #667eea;
-            font-size: 2.4em;
-            font-weight: 700;
-            line-height: 1.2;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        
-        .blog-content h2 {
-            color: #34495e;
-            margin: 40px 0 20px 0;
-            padding-bottom: 12px;
-            border-bottom: 2px solid #bdc3c7;
-            font-size: 1.8em;
-            font-weight: 600;
-            line-height: 1.3;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        
-        .blog-content h3 {
-            color: #2c3e50;
-            margin: 30px 0 15px 0;
-            font-size: 1.4em;
-            font-weight: 600;
-            line-height: 1.3;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        
-        .blog-content h4 {
-            color: #34495e;
-            margin: 25px 0 12px 0;
-            font-size: 1.2em;
-            font-weight: 600;
-            line-height: 1.3;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        
-        .blog-content p {
-            margin-bottom: 20px;
-            text-align: justify;
-            line-height: 1.8;
-            font-size: 1.1em;
-        }
-        
-        .blog-content ul, .blog-content ol {
-            margin: 20px 0 25px 0;
-            padding-left: 30px;
-        }
-        
-        .blog-content ul li, .blog-content ol li {
-            margin-bottom: 12px;
-            line-height: 1.7;
-            font-size: 1.05em;
-        }
-        
-        .blog-content ul li {
-            list-style-type: disc;
-        }
-        
-        .blog-content ol li {
-            list-style-type: decimal;
-        }
-        
-        .blog-content strong {
-            color: #2c3e50;
-            font-weight: 600;
-        }
-        
-        .blog-content em {
-            color: #7f8c8d;
-            font-style: italic;
-        }
-        
-        .blog-content code {
-            background: #f8f9fa;
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-family: 'Courier New', monospace;
-            color: #e74c3c;
-            border: 1px solid #e1e8ed;
-            font-size: 0.95em;
-        }
-        
-        .blog-content blockquote {
-            border-left: 4px solid #667eea;
-            margin: 25px 0;
-            padding: 15px 20px;
-            background: #f8f9fa;
-            border-radius: 0 8px 8px 0;
-            font-style: italic;
-            color: #555;
-            font-size: 1.05em;
-        }
-
-        /* Better paragraph spacing */
-        .blog-content > *:not(:last-child) {
-            margin-bottom: 20px;
-        }
-
-        /* Improved list spacing */
-        .blog-content ul > li:last-child,
-        .blog-content ol > li:last-child {
-            margin-bottom: 0;
-        }
-
-        .actions {
-            display: flex;
-            gap: 20px;
-            justify-content: center;
-            flex-wrap: wrap;
-            padding: 30px 40px;
-            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
-        }
-
-        .btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            padding: 16px 30px;
-            font-size: 1.1rem;
-            border: none;
-            border-radius: 12px;
-            color: white;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-decoration: none;
-            font-weight: 600;
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-            min-width: 200px;
-        }
-
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.2);
-        }
-
-        .btn-back {
-            background: linear-gradient(135deg, #95a5a6, #7f8c8d);
-        }
-
-        .btn-download {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-        }
-
-        .btn:disabled {
-            opacity: 0.7;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        /* Progress and loading states */
-        .progress-container {
-            display: none;
-            margin: 20px 40px;
-            background: rgba(0, 0, 0, 0.05);
-            border-radius: 10px;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            height: 8px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            width: 0%;
-            transition: width 0.3s ease;
-            border-radius: 10px;
-        }
-
-        .loader {
-            display: none;
-            text-align: center;
-            padding: 20px;
-            color: #667eea;
-        }
-
-        .spinner {
-            border: 4px solid rgba(102, 126, 234, 0.1);
-            border-radius: 50%;
-            border-top: 4px solid #667eea;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 15px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .message {
-            display: none;
-            margin: 20px 40px;
-            padding: 15px 20px;
-            border-radius: 12px;
-            text-align: center;
-            font-weight: 500;
-        }
-
-        .success-message {
-            background: linear-gradient(135deg, #27ae60, #2ecc71);
-            color: white;
-        }
-
-        .error-message {
-            background: linear-gradient(135deg, #e74c3c, #c0392b);
-            color: white;
-        }
-
-        /* Responsive design */
-        @media (max-width: 768px) {
-            body {
-                padding: 15px;
-            }
-            
-            .container {
-                margin: 0;
-                border-radius: 16px;
-            }
-            
-            .header, .content-wrapper, .actions {
-                padding: 25px 20px;
-            }
-
-            .video-embed {
-                margin: 20px;
-            }
-
-            .video-embed iframe {
-                height: 250px;
-            }
-            
-            .header h1 {
-                font-size: 2rem;
-            }
-            
-            .actions {
-                flex-direction: column;
-            }
-            
-            .btn {
-                width: 100%;
-            }
-            
-            .blog-meta {
-                flex-direction: column;
-                text-align: center;
-            }
-            
-            .article-container {
-                padding: 30px 20px;
-            }
-            
-            .blog-content h1 {
-                font-size: 2em;
-            }
-            
-            .blog-content h2 {
-                font-size: 1.6em;
-            }
-            
-            .blog-content h3 {
-                font-size: 1.3em;
-            }
-        }
-    </style>
-</head>
-<body>
-    <!-- Navigation Bar -->
-    <nav>
-        <div class="nav-container">
-            <a href="/" class="nav-brand">
-                <i class="fas fa-blog"></i>
-                BlogConverter
-            </a>
-            
-            <ul class="nav-menu">
-                <li><a href="/"><i class="fas fa-home"></i> Home</a></li>
-                <li><a href="/results" class="active"><i class="fas fa-file-alt"></i> Results</a></li>
-                <li><a href="#"><i class="fas fa-info-circle"></i> About</a></li>
-                <li><a href="#"><i class="fas fa-envelope"></i> Contact</a></li>
-            </ul>
-        </div>
-    </nav>
-
+{% block content %}
+<section class="results-section">
     <div class="container">
-        <div class="header">
-            <h1><i class="fas fa-blog"></i> Generated Blog Article</h1>
-            <div class="source-info">
-                <a href="{{ youtube_url }}" target="_blank" class="source-link">
-                    <i class="fab fa-youtube"></i> View Original Video
-                </a>
+        <!-- Success Header -->
+        <div class="success-header text-center mb-5">
+            <div class="success-animation">
+                <div class="success-icon">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+                <div class="success-particles">
+                    <div class="particle"></div>
+                    <div class="particle"></div>
+                    <div class="particle"></div>
+                    <div class="particle"></div>
+                </div>
+            </div>
+            <h2 class="success-title">Blog Generated Successfully!</h2>
+            <p class="success-subtitle">Your AI-powered blog post is ready</p>
+        </div>
+        
+        <!-- Stats Cards -->
+        <div class="row g-4 mb-5">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <div class="stat-value">{{ "%.1f"|format(generation_time) }}s</div>
+                    <div class="stat-label">Generation Time</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-file-alt"></i>
+                    </div>
+                    <div class="stat-value">{{ word_count }}</div>
+                    <div class="stat-label">Words</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fab fa-youtube"></i>
+                    </div>
+                    <div class="stat-value">{{ video_id[:8] }}...</div>
+                    <div class="stat-label">Video ID</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-language"></i>
+                    </div>
+                    <div class="stat-value">EN</div>
+                    <div class="stat-label">Language</div>
+                </div>
             </div>
         </div>
         
-        <div class="video-embed">
-            <iframe src="https://www.youtube.com/embed/{{ video_id }}" allowfullscreen></iframe>
+        <!-- Action Buttons -->
+        <div class="actions-section mb-5">
+            <div class="row g-3">
+                <div class="col-lg-6">
+                    <a href="{{ url_for('download_pdf') }}" class="btn btn-orange btn-lg w-100" id="downloadBtn">
+                        <i class="fas fa-download me-2"></i>Download PDF
+                    </a>
+                </div>
+                <div class="col-lg-3">
+                    <button class="btn btn-outline-light btn-lg w-100" onclick="copyToClipboard()">
+                        <i class="fas fa-copy me-2"></i>Copy Text
+                    </button>
+                </div>
+                <div class="col-lg-3">
+                    <a href="{{ url_for('generate_page') }}" class="btn btn-outline-orange btn-lg w-100">
+                        <i class="fas fa-plus me-2"></i>New Blog
+                    </a>
+                </div>
+            </div>
         </div>
         
-        <div class="content-wrapper">
-            <div class="blog-meta">
-                <div class="meta-item">
-                    <i class="fas fa-clock"></i>
-                    <span>Generated just now</span>
+        <!-- Video Preview -->
+        <div class="video-section mb-5">
+            <div class="row">
+                <div class="col-lg-4">
+                    <div class="video-card">
+                        <div class="video-thumbnail">
+                            <iframe src="https://www.youtube.com/embed/{{ video_id }}" 
+                                    width="100%" height="200" frameborder="0" allowfullscreen></iframe>
+                        </div>
+                        <div class="video-info">
+                            <h6 class="video-title">{{ title }}</h6>
+                            <a href="{{ youtube_url }}" target="_blank" class="video-link">
+                                <i class="fas fa-external-link-alt me-1"></i>Watch Original
+                            </a>
+                        </div>
+                    </div>
                 </div>
-                <div class="meta-item">
-                    <i class="fas fa-file-alt"></i>
-                    <span>{{ word_count }} words</span>
+                <div class="col-lg-8">
+                    <div class="blog-preview">
+                        <h4><i class="fas fa-eye me-2"></i>Blog Preview</h4>
+                        <div class="blog-content-preview" id="blogPreview">
+                            {{ blog_content[:500] }}...
+                        </div>
+                        <button class="btn btn-sm btn-outline-orange mt-2" onclick="togglePreview()">
+                            <span id="toggleText">Show Full Content</span>
+                        </button>
+                    </div>
                 </div>
-                <div class="meta-item">
-                    <i class="fas fa-eye"></i>
-                    <span>Professional format</span>
+            </div>
+        </div>
+        
+        <!-- Blog Content -->
+        <div class="blog-section">
+            <div class="blog-header">
+                <h3><i class="fas fa-blog me-2"></i>Generated Blog Post</h3>
+                <div class="blog-meta">
+                    <span class="meta-item"><i class="fas fa-calendar me-1"></i>{{ moment().format('MMMM Do, YYYY') }}</span>
+                    <span class="meta-item"><i class="fas fa-user me-1"></i>{{ current_user.username }}</span>
                 </div>
             </div>
             
-            <div class="article-container">
-                <div class="blog-content">
-                    {{ blog_content|safe }}
-                </div>
+            <div class="blog-content" id="blogContent">
+                {{ blog_content|safe|nl2br }}
             </div>
         </div>
         
-        <div class="actions">
-            <a href="/" class="btn btn-back">
-                <i class="fas fa-arrow-left"></i> Convert Another Video
-            </a>
-            <button class="btn btn-download" id="download-btn">
-                <i class="fas fa-download"></i> Download as PDF
-            </button>
-        </div>
-        
-        <div class="progress-container" id="progress-container">
-            <div class="progress-bar" id="progress-bar"></div>
-        </div>
-        
-        <div class="loader" id="loader">
-            <div class="spinner"></div>
-            <p>Preparing your PDF download...</p>
-        </div>
-        
-        <div class="message success-message" id="success-message">
-            <i class="fas fa-check-circle"></i> PDF downloaded successfully!
-        </div>
-        
-        <div class="message error-message" id="error-message">
-            <i class="fas fa-exclamation-triangle"></i> 
-            <span id="error-text">Download failed. Please try again.</span>
+        <!-- Feedback Section -->
+        <div class="feedback-section mt-5">
+            <div class="feedback-card">
+                <h4><i class="fas fa-star me-2"></i>How was your experience?</h4>
+                <div class="rating-buttons">
+                    <button title="#" class="btn btn-outline-light rating-btn" data-rating="5">
+                        <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
+                    </button>
+                    <button title="#" class="btn btn-outline-light rating-btn" data-rating="4">
+                        <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="far fa-star"></i>
+                    </button>
+                    <button title="#" class="btn btn-outline-light rating-btn" data-rating="3">
+                        <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
+</section>
+{% endblock %}
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const downloadBtn = document.getElementById('download-btn');
-            const loader = document.getElementById('loader');
-            const progressContainer = document.getElementById('progress-container');
-            const progressBar = document.getElementById('progress-bar');
-            const successMessage = document.getElementById('success-message');
-            const errorMessage = document.getElementById('error-message');
-            const errorText = document.getElementById('error-text');
+{% block extra_scripts %}
+<script>
+function copyToClipboard() {
+    const content = document.getElementById('blogContent').innerText;
+    navigator.clipboard.writeText(content).then(function() {
+        showToast('Blog content copied to clipboard!', 'success');
+    });
+}
 
-            downloadBtn.addEventListener('click', async function() {
-                downloadBtn.disabled = true;
-                loader.style.display = 'block';
-                progressContainer.style.display = 'block';
-                errorMessage.style.display = 'none';
-                successMessage.style.display = 'none';
-                progressBar.style.width = '0%';
-                
-                let progressInterval;
-                try {
-                    let progress = 0;
-                    progressInterval = setInterval(() => {
-                        progress = Math.min(progress + 5, 95);
-                        progressBar.style.width = `${progress}%`;
-                    }, 150);
-                    
-                    const response = await fetch('/download');
-                    
-                    if (!response.ok) {
-                        throw new Error(`Server error: ${response.status}`);
-                    }
-                    
-                    const blob = await response.blob();
-                    
-                    clearInterval(progressInterval);
-                    progressBar.style.width = '100%';
-                    
-                    const contentDisposition = response.headers.get('content-disposition');
-                    let filename = 'blog_article.pdf';
-                    if (contentDisposition) {
-                        const match = contentDisposition.match(/filename="?([^"]+)"?/);
-                        if (match && match[1]) {
-                            filename = match[1];
-                        }
-                    }
-                    
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    
-                    setTimeout(() => {
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                    }, 100);
-                    
-                    successMessage.style.display = 'block';
-                    loader.style.display = 'none';
-                    
-                    setTimeout(() => {
-                        successMessage.style.display = 'none';
-                        progressContainer.style.display = 'none';
-                        downloadBtn.disabled = false;
-                    }, 3000);
-                    
-                } catch (error) {
-                    console.error('Download failed:', error);
-                    
-                    if (progressInterval) clearInterval(progressInterval);
-                    
-                    loader.style.display = 'none';
-                    errorText.textContent = error.message || 'Download failed. Please try again.';
-                    errorMessage.style.display = 'block';
-                    
-                    setTimeout(() => {
-                        errorMessage.style.display = 'none';
-                        progressContainer.style.display = 'none';
-                        downloadBtn.disabled = false;
-                    }, 5000);
-                }
-            });
-        });
-    </script>
-</body>
-</html>
+function togglePreview() {
+    const preview = document.getElementById('blogPreview');
+    const toggleText = document.getElementById('toggleText');
+    const fullContent = `{{ blog_content|safe }}`;
+    
+    if (preview.innerHTML.includes('...')) {
+        preview.innerHTML = fullContent;
+        toggleText.textContent = 'Show Preview Only';
+    } else {
+        preview.innerHTML = fullContent.substring(0, 500) + '...';
+        toggleText.textContent = 'Show Full Content';
+    }
+}
+
+// Rating functionality
+document.querySelectorAll('.rating-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const rating = this.dataset.rating;
+        showToast(`Thank you for rating ${rating} stars!`, 'success');
+        this.classList.add('active');
+    });
+});
+
+// Download button animation
+document.getElementById('downloadBtn').addEventListener('click', function() {
+    this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Generating PDF...';
+    setTimeout(() => {
+        this.innerHTML = '<i class="fas fa-check me-2"></i>Downloaded!';
+        setTimeout(() => {
+            this.innerHTML = '<i class="fas fa-download me-2"></i>Download PDF';
+        }, 2000);
+    }, 1000);
+});
+</script>
+{% endblock %}

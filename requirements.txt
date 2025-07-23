@@ -25,3 +25,6 @@ gunicorn
 browser-cookie3
 beautifulsoup4
 lxml
+Flask-JWT-Extended
+pymongo
+bcrypt
