@@ -624,6 +624,12 @@ jobs:
       runs-on: ubuntu-latest
 
       steps:
+        - name: Show commit author
+          run: |
+            echo "Commit by ${{ github.actor }}"
+            echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+            echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
+
         - name: Checkout code
           uses: actions/checkout@v4
 
@@ -648,12 +654,25 @@ jobs:
               --username ${{ secrets.DOCKERHUB_USERNAME }} \
               --password ${{ secrets.DOCKERHUB_TOKEN }}
 
-        - name: Deploy container app (image only)
+        - name: Get existing container name
+          id: get-container
+          run: |
+            echo "🔍 Getting existing container name..."
+            CONTAINER_NAME=$(az containerapp show \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --query "properties.template.containers[0].name" \
+              --output tsv)
+            echo "container_name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
+            echo "Found container name: $CONTAINER_NAME"
+
+        - name: Deploy container app
           run: |
             echo "🚀 Deploying image to Container App..."
             az containerapp update \
               --name ${{ secrets.CONTAINER_APP_NAME }} \
               --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --container-name ${{ steps.get-container.outputs.container_name }} \
               --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
 
         - name: Get Container App URL
@@ -677,11 +696,14 @@ jobs:
         - name: Test deployment health
           run: |
             echo "🩺 Testing deployment health..."
-            sleep 30  # wait for stabilization
-            if curl -f "${{ steps.get-url.outputs.url }}"; then
+            sleep 60  # wait for container to stabilize
+            if curl -f --max-time 30 "${{ steps.get-url.outputs.url }}"; then
               echo "✅ Health check passed"
             else
               echo "⚠️ Health check warning – app may still be starting"
+              # Try one more time after additional wait
+              sleep 30
+              curl -f --max-time 30 "${{ steps.get-url.outputs.url }}" || echo "❌ Health check failed"
             fi
 
         - name: Create issue on failure
