@@ -630,7 +630,6 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # FIX 1: Directly update container with explicit parameters
       - name: Deploy new image to Container App
         run: |
           echo "🚀 Updating Container App with new image tag..."
@@ -641,22 +640,32 @@ jobs:
             --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
             --set-env-vars "DEPLOY_TIMESTAMP=$(date +%s)"
 
-      # FIX 2: Revision verification with CLI argument handling
+      # FIXED: Proper revision name handling
       - name: Verify deployment revision
         run: |
           echo "🔍 Checking active revision..."
+          # Get all active revisions (should be only one)
           ACTIVE_REV=$(az containerapp revision list \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --query "[?properties.active].name" -o tsv | tr -d '\r\n')
+            --query "[?properties.active].name" -o tsv)
           
-          echo "Active Revision: $ACTIVE_REV"
+          # Validate we got a revision
+          if [[ -z "$ACTIVE_REV" ]]; then
+            echo "❌ ERROR: No active revision found"
+            exit 1
+          fi
           
-          # Handle revisions starting with hyphens
+          # Clean and format revision name
+          CLEAN_REV=$(echo "$ACTIVE_REV" | head -n1 | tr -d '\r\n' | sed 's/[^a-zA-Z0-9-]//g')
+          
+          echo "Active Revision: $CLEAN_REV"
+          
+          # Get image using cleaned revision name
           IMAGE_USED=$(az containerapp revision show \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --revision "$ACTIVE_REV" \
+            --revision "$CLEAN_REV" \
             --query "properties.template.containers[0].image" -o tsv)
           
           echo "Current Image: $IMAGE_USED"
@@ -683,7 +692,6 @@ jobs:
           echo "Container App URL: https://$URL"
           echo "url=https://$URL" >> $GITHUB_OUTPUT
 
-      # FIX 3: Enhanced health check with retries
       - name: Test deployment health
         run: |
           echo "🩺 Testing deployment health (retry 3x)..."
