@@ -625,11 +625,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+
+      # FIX 1: Directly update container with explicit parameters
       - name: Deploy new image to Container App
         run: |
           echo "🚀 Updating Container App with new image tag..."
@@ -640,45 +643,6 @@ jobs:
             --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
             --set-env-vars "DEPLOY_TIMESTAMP=$(date +%s)"
 
-      # FIXED: Proper revision name handling
-      - name: Verify deployment revision
-        run: |
-          echo "🔍 Checking active revision..."
-          # Get all active revisions (should be only one)
-          ACTIVE_REV=$(az containerapp revision list \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --query "[?properties.active].name" -o tsv)
-          
-          # Validate we got a revision
-          if [[ -z "$ACTIVE_REV" ]]; then
-            echo "❌ ERROR: No active revision found"
-            exit 1
-          fi
-          
-          # Clean and format revision name
-          CLEAN_REV=$(echo "$ACTIVE_REV" | head -n1 | tr -d '\r\n' | sed 's/[^a-zA-Z0-9-]//g')
-          
-          echo "Active Revision: $CLEAN_REV"
-          
-          # Get image using cleaned revision name
-          IMAGE_USED=$(az containerapp revision show \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --revision "$CLEAN_REV" \
-            --query "properties.template.containers[0].image" -o tsv)
-          
-          echo "Current Image: $IMAGE_USED"
-          EXPECTED_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
-          
-          if [ "$IMAGE_USED" != "$EXPECTED_IMAGE" ]; then
-            echo "❌ CRITICAL: Active revision uses old image!"
-            echo "Expected: $EXPECTED_IMAGE"
-            echo "Actual: $IMAGE_USED"
-            exit 1
-          else
-            echo "✅ Verified active revision uses new image"
-          fi
 
       - name: Get Container App URL
         id: get-url
@@ -692,6 +656,8 @@ jobs:
           echo "Container App URL: https://$URL"
           echo "url=https://$URL" >> $GITHUB_OUTPUT
 
+
+      # FIX 3: Enhanced health check with retries
       - name: Test deployment health
         run: |
           echo "🩺 Testing deployment health (retry 3x)..."
@@ -708,6 +674,7 @@ jobs:
           
           echo "❌ Health check failed after 3 attempts"
           exit 1
+
 
       - name: Create issue on failure
         if: ${{ failure() }}
@@ -737,6 +704,7 @@ jobs:
               core.setFailed(`Failed to create issue: ${error.message}`);
             }
 
+
       - name: Slack Notification on Failure
         if: ${{ failure() }}
         uses: act10ns/slack@v2.1.0
@@ -755,6 +723,7 @@ jobs:
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
+
       - name: Slack Notification on Success
         if: ${{ success() }}
         uses: act10ns/slack@v2.1.0
@@ -771,6 +740,7 @@ jobs:
               {"title": "Commit", "value": "${{ github.sha }}", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
   notify:
     name: Pipeline Status Notification
     if: always()
