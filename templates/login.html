@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Login - BlogGen Pro{% endblock %}
+
+{% block content %}
+<section class="auth-section">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-6 col-lg-5">
+                <div class="auth-card">
+                    <div class="text-center mb-4">
+                        <div class="auth-icon">
+                            <i class="fas fa-sign-in-alt"></i>
+                        </div>
+                        <h2 class="auth-title">Welcome Back</h2>
+                        <p class="auth-subtitle">Sign in to your account</p>
+                    </div>
+                    
+                    <div id="loginAlert" class="alert alert-danger d-none" role="alert"></div>
+                    
+                    <form id="loginForm">
+                        <div class="form-floating mb-3">
+                            <input type="email" class="form-control" id="email" name="email" placeholder="name@example.com" required>
+                            <label for="email">Email address</label>
+                        </div>
+                        
+                        <div class="form-floating mb-3">
+                            <input type="password" class="form-control" id="password" name="password" placeholder="Password" required>
+                            <label for="password">Password</label>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="remember">
+                                <label class="form-check-label" for="remember">Remember me</label>
+                            </div>
+                            <a href="#" class="text-decoration-none text-orange">Forgot password?</a>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-orange w-100 mb-3" id="loginBtn">
+                            <span class="btn-text">Sign In</span>
+                            <span class="btn-loading d-none">
+                                <i class="fas fa-spinner fa-spin me-2"></i>Signing in...
+                            </span>
+                        </button>
+                    </form>
+                    
+                    <div class="text-center">
+                        <p class="mb-0">Don't have an account? 
+                            <a href="{{ url_for('auth.register') }}" class="text-decoration-none text-orange">Sign up</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.getElementById('loginForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const btn = document.getElementById('loginBtn');
+    const btnText = btn.querySelector('.btn-text');
+    const btnLoading = btn.querySelector('.btn-loading');
+    const alert = document.getElementById('loginAlert');
+    
+    // Show loading state
+    btnText.classList.add('d-none');
+    btnLoading.classList.remove('d-none');
+    btn.disabled = true;
+    alert.classList.add('d-none');
+    
+    try {
+        const formData = new FormData(this);
+        const jsonData = {};
+        for (let [key, value] of formData.entries()) {
+            jsonData[key] = value;
+        }
+        
+        const response = await fetch('{{ url_for("auth.login") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(jsonData)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && response.ok) {
+            localStorage.setItem('access_token', data.access_token);
+            
+            try {
+                await fetch('{{ url_for("auth.set_session_token") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ access_token: data.access_token })
+                });
+            } catch (sessionError) {
+                console.log('Session token error (non-critical):', sessionError);
+            }
+            
+            if (typeof showToast === 'function') {
+                showToast('Login successful! Redirecting...', 'success');
+            }
+            
+            setTimeout(() => {
+                window.location.href = data.redirect_url || '{{ url_for("dashboard") }}';
+            }, 500);
+        } else {
+            const errorMsg = data.message || 'Login failed';
+            alert.textContent = errorMsg;
+            alert.classList.remove('d-none');
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        const errorMsg = 'Login failed. Please check your connection and try again.';
+        alert.textContent = errorMsg;
+        alert.classList.remove('d-none');
+    } finally {
+        btnText.classList.remove('d-none');
+        btnLoading.classList.add('d-none');
+        btn.disabled = false;
+    }
+});
+</script>
+{% endblock %}

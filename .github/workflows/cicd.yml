@@ -464,14 +464,27 @@ jobs:
       - name: Run smoke test
         run: |
           docker run -d --name smoke-test \
-            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
-            -e SUPADATA_API_KEY=${{ secrets.SUPADATA_API_KEY }} \
+            -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            -e SUPADATA_API_KEY="${{ secrets.SUPADATA_API_KEY }}" \
+            -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
+            -e JWT_ACCESS_TOKEN_EXPIRES="${{ secrets.JWT_ACCESS_TOKEN_EXPIRES }}" \
+            -e MONGODB_URI="${{ secrets.MONGODB_URI }}" \
+            -e MONGODB_DB_NAME="${{ secrets.MONGODB_DB_NAME }}" \
+            -e FLASK_SECRET_KEY="${{ secrets.FLASK_SECRET_KEY }}" \
+            -e FLASK_DEBUG="false" \
+            -e FLASK_HOST="0.0.0.0" \
+            -e OPENAI_MODEL_NAME="${{ secrets.OPENAI_MODEL_NAME }}" \
             -p 5000:5000 \
             youtube-blog-converter:${{ github.sha }}
-          sleep 10
+          # wait for Flask to boot
+          for i in {1..10}; do
+            docker logs smoke-test 2>&1 | grep -q "Running on" && break
+            sleep 2
+          done
           docker logs smoke-test
-          curl --retry 5 --retry-delay 5 --retry-all-errors http://localhost:5000
+          curl --retry 5 --retry-delay 5 --retry-connrefused http://localhost:5000/
           docker stop smoke-test
+
 
       - name: Create issue on failure
         if: ${{ failure() }}
@@ -633,18 +646,13 @@ jobs:
             --username ${{ secrets.DOCKERHUB_USERNAME }} \
             --password ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 🔧 ADD BOTH API KEYS TO AZURE DEPLOYMENT
-      - name: Update Container App with Environment Variables
+      - name: Deploy new image to Container App
         run: |
-          echo "🔧 Setting environment variables for the container app..."
+          echo "🚀 Updating Container App with new image tag..."
           az containerapp update \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
-            --set-env-vars \
-              OPENAI_API_KEY=secretref:openai-api-key \
-              SUPADATA_API_KEY=secretref:supadata-api-key \
-              FLASK_SECRET_KEY=secretref:flask-secret-key
+            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
 
       - name: Get Container App URL
         id: get-url
@@ -715,6 +723,24 @@ jobs:
               {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
+      - name: Slack Notification on Success
+        if: ${{ success() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: 'success'
+          text: "✅ Azure Deployment Successful in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": true},
+              {"title": "Application URL", "value": "${{ steps.get-url.outputs.url }}", "short": false},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
 
       - name: Slack Notification on Success
         if: ${{ success() }}

@@ -1,0 +1,429 @@
+{% extends "base.html" %}
+
+{% block title %}Generate Blog - BlogGen Pro{% endblock %}
+
+{% block content %}
+<section class="generate-section">
+    <div class="container-fluid">
+        <div class="row min-vh-100">
+            <!-- LEFT SIDE - INPUT FORM -->
+            <div class="col-lg-6 left-panel">
+                <div class="form-container">
+                    <div class="generate-header text-center mb-4">
+                        <div class="generate-icon">
+                            <i class="fas fa-magic"></i>
+                        </div>
+                        <h2 class="generate-title">Generate Your Blog</h2>
+                        <p class="generate-subtitle">Transform YouTube videos into engaging blog posts</p>
+                    </div>
+                    
+                    <div class="generate-card">
+                        <div id="errorAlert" class="alert alert-danger d-none" role="alert"></div>
+                        
+                        <form id="generateForm">
+                            <div class="mb-4">
+                                <label for="youtube_url" class="form-label">
+                                    <i class="fab fa-youtube text-danger me-2"></i>YouTube URL
+                                </label>
+                                <div class="input-group input-group-lg">
+                                    <span class="input-group-text">
+                                        <i class="fas fa-link"></i>
+                                    </span>
+                                    <input type="url" class="form-control" id="youtube_url" name="youtube_url" 
+                                           placeholder="https://www.youtube.com/watch?v=..." required>
+                                </div>
+                                <div class="form-text">
+                                    Paste any YouTube video URL
+                                </div>
+                            </div>
+                            
+                            <!-- Hidden language field -->
+                            <input type="hidden" name="language" value="en">
+                            
+                            <!-- Video Preview -->
+                            <div class="mb-4" id="videoPreview" style="display: none;">
+                                <label class="form-label">
+                                    <i class="fas fa-eye me-2"></i>Video Preview
+                                </label>
+                                <div class="video-preview-container">
+                                    <iframe id="videoFrame" width="100%" height="200" frameborder="0" allowfullscreen></iframe>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-orange btn-lg w-100" id="generateBtn">
+                                <span class="btn-text">
+                                    <i class="fas fa-magic me-2"></i>Generate Blog Post
+                                </span>
+                                <span class="btn-loading d-none">
+                                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                                    Processing...
+                                </span>
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- Tips Section -->
+                    <div class="tips-section mt-4">
+                        <h6><i class="fas fa-lightbulb me-2"></i>Tips for Best Results</h6>
+                        <div class="tip-item">
+                            <i class="fas fa-check text-success me-2"></i>
+                            <span>Use videos with clear audio</span>
+                        </div>
+                        <div class="tip-item">
+                            <i class="fas fa-check text-success me-2"></i>
+                            <span>Educational content works best</span>
+                        </div>
+                        <div class="tip-item">
+                            <i class="fas fa-check text-success me-2"></i>
+                            <span>5-60 minute videos are ideal</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- RIGHT SIDE - RESULTS -->
+            <div class="col-lg-6 right-panel">
+                <div class="results-container">
+                    <!-- Default State -->
+                    <div id="defaultState" class="default-state">
+                        <div class="empty-state">
+                            <div class="empty-icon">
+                                <i class="fas fa-blog"></i>
+                            </div>
+                            <h4>Generated Blog Will Appear Here</h4>
+                            <p>Enter a YouTube URL and click generate to see your blog post</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Results State -->
+                    <div id="resultsState" class="results-state d-none">
+                        <!-- Success Header -->
+                        <div class="results-header text-center mb-4">
+                            <div class="success-icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <h4 class="results-title">Blog Generated Successfully!</h4>
+                        </div>
+                        
+                        <!-- Stats Cards -->
+                        <div class="row g-2 mb-4">
+                            <div class="col-4">
+                                <div class="mini-stat-card">
+                                    <i class="fas fa-clock"></i>
+                                    <span class="stat-value" id="generationTime">-</span>
+                                    <small class="stat-label">Time</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="mini-stat-card">
+                                    <i class="fas fa-file-alt"></i>
+                                    <span class="stat-value" id="wordCount">-</span>
+                                    <small class="stat-label">Words</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="mini-stat-card">
+                                    <i class="fas fa-check"></i>
+                                    <span class="stat-value">Ready</span>
+                                    <small class="stat-label">Status</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="action-buttons mb-4">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <a href="{{ url_for('download_pdf') }}" class="btn btn-orange w-100" id="downloadBtn">
+                                        <i class="fas fa-download me-1"></i>PDF
+                                    </a>
+                                </div>
+                                <div class="col-6">
+                                    <button class="btn btn-outline-light w-100" onclick="copyBlogContent()">
+                                        <i class="fas fa-copy me-1"></i>Copy
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Blog Content -->
+                        <div class="blog-content-section">
+                            <h6><i class="fas fa-blog me-2"></i>Generated Content</h6>
+                            <div class="blog-content-display" id="blogContentDisplay">
+                                <!-- Blog content will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let generatedBlogData = null;
+
+// Initialize page when loaded
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Generate page initialized');
+    initializeVideoPreview();
+    initializeForm();
+});
+
+function initializeVideoPreview() {
+    const youtubeUrlInput = document.getElementById('youtube_url');
+    if (youtubeUrlInput) {
+        youtubeUrlInput.addEventListener('input', function() {
+            const url = this.value;
+            const videoId = extractVideoId(url);
+            const preview = document.getElementById('videoPreview');
+            const frame = document.getElementById('videoFrame');
+            
+            if (videoId) {
+                frame.src = `https://www.youtube.com/embed/${videoId}`;
+                preview.style.display = 'block';
+            } else {
+                preview.style.display = 'none';
+            }
+        });
+    }
+}
+
+function initializeForm() {
+    const form = document.getElementById('generateForm');
+    if (form) {
+        form.addEventListener('submit', handleFormSubmit);
+    }
+}
+
+function handleFormSubmit(e) {
+    e.preventDefault();
+    console.log('Form submitted');
+    
+    const btn = document.getElementById('generateBtn');
+    const btnText = btn.querySelector('.btn-text');
+    const btnLoading = btn.querySelector('.btn-loading');
+    const errorAlert = document.getElementById('errorAlert');
+    
+    // Show loading state
+    btnText.classList.add('d-none');
+    btnLoading.classList.remove('d-none');
+    btn.disabled = true;
+    errorAlert.classList.add('d-none');
+    
+    // Get form data
+    const formData = new FormData(e.target);
+    const youtubeUrl = formData.get('youtube_url');
+    
+    console.log('Submitting URL:', youtubeUrl);
+    
+    // Get token from localStorage
+    const token = localStorage.getItem('access_token');
+    
+    // Submit request
+    fetch('{{ url_for("generate_blog") }}', {
+        method: 'POST',
+        headers: token ? {
+            'Authorization': `Bearer ${token}`
+        } : {},
+        body: formData
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        return response.json();
+    })
+    .then(data => {
+        console.log('Response data:', data);
+        
+        if (data.success) {
+            // Show results
+            showResults(data.blog_content, data.generation_time, data.word_count, data.title);
+            if (typeof showToast === 'function') {
+                showToast('Blog generated successfully!', 'success');
+            }
+        } else {
+            // Show error
+            const errorMsg = data.message || 'Failed to generate blog';
+            errorAlert.textContent = errorMsg;
+            errorAlert.classList.remove('d-none');
+            
+            if (typeof showToast === 'function') {
+                showToast(errorMsg, 'error');
+            }
+            console.error('Generation failed:', errorMsg);
+        }
+    })
+    .catch(error => {
+        console.error('Generation error:', error);
+        const errorMsg = 'Failed to generate blog. Please try again.';
+        errorAlert.textContent = errorMsg;
+        errorAlert.classList.remove('d-none');
+        
+        if (typeof showToast === 'function') {
+            showToast('Generation failed', 'error');
+        }
+    })
+    .finally(() => {
+        // Reset button state
+        btnText.classList.remove('d-none');
+        btnLoading.classList.add('d-none');
+        btn.disabled = false;
+    });
+}
+
+function showResults(blogContent, generationTime, wordCount, title) {
+    console.log('Showing results:', { title, generationTime, wordCount });
+    
+    const defaultState = document.getElementById('defaultState');
+    const resultsState = document.getElementById('resultsState');
+    const blogContentDisplay = document.getElementById('blogContentDisplay');
+    const generationTimeElement = document.getElementById('generationTime');
+    const wordCountElement = document.getElementById('wordCount');
+    
+    if (!blogContentDisplay) {
+        console.error('Blog content display element not found');
+        return;
+    }
+    
+    // Store data globally
+    generatedBlogData = {
+        content: blogContent,
+        time: generationTime,
+        words: wordCount,
+        title: title
+    };
+    
+    // Update UI
+    blogContentDisplay.innerHTML = formatBlogContent(blogContent);
+    generationTimeElement.textContent = generationTime;
+    wordCountElement.textContent = wordCount;
+    
+    // Switch states
+    defaultState.classList.add('d-none');
+    resultsState.classList.remove('d-none');
+    
+    // Add animation
+    resultsState.style.opacity = '0';
+    setTimeout(() => {
+        resultsState.style.transition = 'opacity 0.5s ease';
+        resultsState.style.opacity = '1';
+    }, 100);
+    
+    console.log('Results displayed successfully');
+}
+
+function formatBlogContent(content) {
+    if (!content) return '';
+    
+    // Convert markdown-style content to HTML
+    let formatted = content;
+    
+    // Headers
+    formatted = formatted.replace(/^# (.+)$/gm, '<h2 class="blog-h2">$1</h2>');
+    formatted = formatted.replace(/^## (.+)$/gm, '<h3 class="blog-h3">$1</h3>');
+    formatted = formatted.replace(/^### (.+)$/gm, '<h4 class="blog-h4">$1</h4>');
+    
+    // Bold text
+    formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    
+    // Line breaks - convert double newlines to paragraphs
+    const paragraphs = formatted.split('\n\n');
+    formatted = paragraphs.map(p => {
+        if (p.trim() && !p.startsWith('<h')) {
+            return `<p>${p.trim()}</p>`;
+        }
+        return p;
+    }).join('');
+    
+    // Clean up
+    formatted = formatted.replace(/<p><h([2-4])/g, '<h$1');
+    formatted = formatted.replace(/<\/h([2-4])><\/p>/g, '</h$1>');
+    
+    return formatted;
+}
+
+function copyBlogContent() {
+    if (generatedBlogData && generatedBlogData.content) {
+        const textContent = generatedBlogData.content;
+        
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(textContent).then(function() {
+                if (typeof showToast === 'function') {
+                    showToast('Blog content copied to clipboard!', 'success');
+                }
+            }).catch(function() {
+                fallbackCopy(textContent);
+            });
+        } else {
+            fallbackCopy(textContent);
+        }
+    } else {
+        if (typeof showToast === 'function') {
+            showToast('No content to copy', 'error');
+        }
+    }
+}
+
+function fallbackCopy(text) {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.select();
+    
+    try {
+        document.execCommand('copy');
+        if (typeof showToast === 'function') {
+            showToast('Blog content copied to clipboard!', 'success');
+        }
+    } catch (err) {
+        console.error('Copy failed:', err);
+        if (typeof showToast === 'function') {
+            showToast('Copy failed', 'error');
+        }
+    }
+    
+    document.body.removeChild(textArea);
+}
+
+function extractVideoId(url) {
+    if (!url) return null;
+    
+    const patterns = [
+        /youtube\.com\/watch\?v=([^&]+)/,
+        /youtu\.be\/([^?]+)/,
+        /youtube\.com\/embed\/([^?]+)/,
+        /youtube\.com\/v\/([^?]+)/,
+        /youtube\.com\/shorts\/([^?]+)/
+    ];
+    
+    for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+    }
+    return null;
+}
+
+// Download button handler
+document.addEventListener('click', function(e) {
+    if (e.target.closest('#downloadBtn')) {
+        const btn = e.target.closest('#downloadBtn');
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>PDF...';
+        
+        setTimeout(() => {
+            btn.innerHTML = '<i class="fas fa-check me-1"></i>Done!';
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+            }, 2000);
+        }, 1000);
+    }
+});
+
+// Make functions available globally
+window.copyBlogContent = copyBlogContent;
+</script>
+{% endblock %}

@@ -3,10 +3,12 @@ import re
 import requests
 import json
 import logging
+import gc
+import sys
+from contextlib import contextmanager
 from dotenv import load_dotenv
 from pathlib import Path
 from fpdf import FPDF
-from openai import OpenAI
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -21,10 +23,25 @@ else:
 # Get API keys
 SUPADATA_API_KEY = os.getenv("SUPADATA_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4.1-nano-2025-04-14")
+OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
 
-# Initialize OpenAI client
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+@contextmanager
+def openai_client_context():
+    """Context manager for OpenAI client to ensure proper cleanup"""
+    client = None
+    try:
+        # Import OpenAI only when needed to avoid COM issues
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        yield client
+    except Exception as e:
+        logger.error(f"OpenAI client error: {str(e)}")
+        raise
+    finally:
+        # Force cleanup
+        if client:
+            client = None
+        gc.collect()
 
 class YouTubeTranscriptTool:
     def __init__(self):
@@ -34,24 +51,29 @@ class YouTubeTranscriptTool:
 
     def _run(self, youtube_url: str, lang: str = 'en') -> str:
         """Fetch transcript from YouTube via Supadata API"""
+        session = None
         try:
+            # Use session for better connection management
+            session = requests.Session()
+            session.headers.update({"x-api-key": SUPADATA_API_KEY})
+            
             endpoint = "https://api.supadata.ai/v1/youtube/transcript"
             params = {
                 "url": youtube_url,
                 "lang": lang,
                 "text": "true"
             }
-            headers = {"x-api-key": SUPADATA_API_KEY}
 
             logger.info(f"Fetching transcript for URL: {youtube_url}")
             
-            resp = requests.get(endpoint, params=params, headers=headers)
+            resp = session.get(endpoint, params=params, timeout=30)
             resp.raise_for_status()
             
             data = resp.json()
             if "content" not in data:
                 return f"ERROR: Transcript not found for video: {youtube_url}"
             
+            logger.info(f"✅ Transcript extraction successful: {len(data['content'])} characters")
             return data["content"]
         
         except requests.exceptions.HTTPError as e:
@@ -66,10 +88,13 @@ class YouTubeTranscriptTool:
         except Exception as e:
             logger.error(f"Unexpected error: {str(e)}")
             return f"ERROR: Unexpected error - {str(e)}"
+        finally:
+            if session:
+                session.close()
 
 class BlogGeneratorTool:
     def __init__(self):
-        if not OPENAI_API_KEY or not openai_client:
+        if not OPENAI_API_KEY:
             logger.error("OpenAI API key not found in environment variables")
             raise RuntimeError("OpenAI API key not configured")
 
@@ -115,36 +140,41 @@ class BlogGeneratorTool:
             {transcript[:15000]}
             """
             
-            response = openai_client.chat.completions.create(
-                model=OPENAI_MODEL_NAME,
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": "You are a professional technical writer who creates clean, well-formatted blog posts without markdown artifacts."
-                    },
-                    {
-                        "role": "user", 
-                        "content": prompt
-                    }
-                ],
-                temperature=0.2,
-                max_tokens=5000,
-                top_p=0.9,
-                frequency_penalty=0.1,
-                presence_penalty=0.1
-            )
-            
-            generated_content = response.choices[0].message.content.strip()
+            # Use context manager for proper OpenAI client cleanup
+            with openai_client_context() as client:
+                response = client.chat.completions.create(
+                    model=OPENAI_MODEL_NAME,
+                    messages=[
+                        {
+                            "role": "system", 
+                            "content": "You are a professional technical writer who creates clean, well-formatted blog posts without markdown artifacts."
+                        },
+                        {
+                            "role": "user", 
+                            "content": prompt
+                        }
+                    ],
+                    temperature=0.2,
+                    max_tokens=5000,
+                    top_p=0.9,
+                    frequency_penalty=0.1,
+                    presence_penalty=0.1
+                )
+                
+                generated_content = response.choices[0].message.content.strip()
             
             # Clean up the generated content
             cleaned_content = self._clean_markdown_content(generated_content)
             
-            logger.info(f"Generated blog content: {len(cleaned_content)} characters")
+            logger.info(f"✅ Blog generation successful: {len(cleaned_content)} characters")
             return cleaned_content
         
         except Exception as e:
             logger.error(f"Blog generation failed: {str(e)}")
             return f"ERROR: Blog generation failed - {str(e)}"
+        finally:
+            # Force garbage collection to clean up COM objects
+            gc.collect()
     
     def _clean_markdown_content(self, content: str) -> str:
         """Clean up markdown content to remove artifacts and improve formatting"""
@@ -241,6 +271,7 @@ class PDFGeneratorTool:
     
     def generate_pdf_bytes(self, content: str) -> bytes:
         """Generate PDF with proper width and formatting"""
+        pdf = None
         try:
             # Clean the content first
             content = self._clean_unicode_text(content)
@@ -368,5 +399,15 @@ class PDFGeneratorTool:
         except Exception as e:
             logger.error(f"PDF generation failed: {str(e)}")
             raise RuntimeError(f"PDF generation error: {str(e)}")
+        finally:
+            # Clean up PDF object
+            if pdf:
+                pdf = None
+            gc.collect()
 
-
+# Helper function to safely cleanup resources
+def cleanup_resources():
+    """Force cleanup of resources to prevent Win32 exceptions"""
+    gc.collect()
+    if hasattr(gc, 'set_debug'):
+        gc.set_debug(0)

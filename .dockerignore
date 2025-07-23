@@ -1,24 +1,22 @@
-**
-!app.py
-!requirements.txt
-!src/
-!templates/
-.git*
-.dockerignore
-Dockerfile
-*.md
-LICENSE
-tests/
+# =============================================================================
+# PYTHON PROJECT .GITIGNORE
+# =============================================================================
+
+# Environment Variables (CRITICAL - NEVER COMMIT)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Virtual Environments
+venv/
 env/
-.*
-*.log
-*.tmp
-*.db
-*.sqlite3
-__pycache__
-.pytest_cache
-.flask_session
-# Python
+ENV/
+.venv/
+env.bak/
+venv.bak/
+
+# Python Runtime
 __pycache__/
 *.py[cod]
 *$py.class
@@ -42,60 +40,82 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+# Flask Specific
+.flask_session/
+instance/
 
-# IDE
+# Database Files
+*.db
+*.sqlite3
+*.sqlite
+
+# Logs and Temporary Files
+*.log
+*.tmp
+*.temp
+logs/
+
+# Testing and Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# IDEs and Editors
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.sublime-*
 
-# OS
+# OS Generated Files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Git
-.git/
-.gitignore
-
 # Docker
-Dockerfile*
-docker-compose*
+Dockerfile.dev
+docker-compose.override.yml
 .dockerignore
 
-# Documentation
-README.md
-*.md
-docs/
-
-# Tests
-tests/
-test_*.py
-*_test.py
-
-# Logs
-*.log
-logs/
-
-# Cache
+# Cache Directories
 .cache/
-.pytest_cache/
+.npm/
+node_modules/
 
-# Coverage
-.coverage
-htmlcov/
-
-# Jupyter
+# Jupyter Notebooks
 .ipynb_checkpoints/
 
-# Development files
-requirements-dev.txt
+# Development Tools
 .flake8
 .pre-commit-config.yaml
+requirements-dev.txt
+
+# Documentation (if you want to exclude them)
+# README.md
+# docs/
+
+# =============================================================================
+# PROJECT SPECIFIC INCLUDES/EXCLUDES
+# =============================================================================
+
+# Include these important files (remove # to activate)
+# !app.py
+# !requirements.txt
+# !src/
+# !templates/
+# !static/
+# !auth/
+
+# Exclude test files (uncomment if you don't want tests in repo)
+# tests/
+# test_*.py
+# *_test.py

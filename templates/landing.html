@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+{% block title %}AI YouTube Blog Generator - Transform Videos into Engaging Articles{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<section class="hero" id="hero">
+    <div class="hero-background">
+        <video autoplay muted loop playsinline class="hero-video">
+            <source src="{{ url_for('static', filename='videos/hero-demo.mp4') }}" type="video/mp4">
+        </video>
+        <div class="hero-overlay"></div>
+    </div>
+    
+    <div class="hero-container">
+        <div class="hero-content">
+            <div class="hero-badge">
+                <span class="badge-icon">🚀</span>
+                <span class="badge-text">Powered by Advanced AI</span>
+            </div>
+            
+            <h1 class="hero-title">
+                Transform <span class="highlight">YouTube Videos</span> into 
+                <span class="highlight-orange">Compelling Blog Articles</span>
+            </h1>
+            
+            <p class="hero-description">
+                Harness the power of CrewAI to automatically convert any YouTube video into 
+                SEO-optimized, engaging blog content. Save hours of manual work and boost 
+                your content creation workflow.
+            </p>
+            
+            <div class="hero-stats">
+                <div class="stat-item">
+                    <span class="stat-number">10K+</span>
+                    <span class="stat-label">Videos Processed</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number">95%</span>
+                    <span class="stat-label">Accuracy Rate</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number">5min</span>
+                    <span class="stat-label">Average Time</span>
+                </div>
+            </div>
+            
+            <div class="hero-actions">
+                <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-large">
+                    <span>Start Creating</span>
+                    <i class="fas fa-arrow-right"></i>
+                </a>
+                <a href="#demo" class="btn btn-outline btn-large">
+                    <i class="fas fa-play"></i>
+                    <span>Watch Demo</span>
+                </a>
+            </div>
+            
+            <div class="hero-trust">
+                <p class="trust-text">Trusted by content creators worldwide</p>
+                <div class="trust-avatars">
+                    <div class="avatar"></div>
+                    <div class="avatar"></div>
+                    <div class="avatar"></div>
+                    <div class="avatar-more">+1K</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="hero-visual">
+            <div class="demo-container">
+                <div class="demo-window">
+                    <div class="window-header">
+                        <div class="window-controls">
+                            <span class="control red"></span>
+                            <span class="control yellow"></span>
+                            <span class="control green"></span>
+                        </div>
+                        <div class="window-title">BlogAI Generator</div>
+                    </div>
+                    <div class="window-content">
+                        <div class="input-demo">
+                            <input title="#" type="text" value="https://youtube.com/watch?v=example" readonly>
+                            <button class="generate-btn">Generate</button>
+                        </div>
+                        <div class="output-demo">
+                            <div class="typing-animation">
+                                <span class="typing-text">Generating amazing blog content...</span>
+                                <span class="cursor">|</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="hero-scroll">
+        <a href="#features" class="scroll-indicator">
+            <span class="scroll-text">Scroll to explore</span>
+            <div class="scroll-arrow">
+                <i class="fas fa-arrow-down"></i>
+            </div>
+        </a>
+    </div>
+</section>
+
+<!-- Features Section -->
+<section class="features" id="features">
+    <div class="features-container">
+        <div class="section-header">
+            <div class="section-badge">
+                <span class="badge-icon">⚡</span>
+                <span class="badge-text">Powerful Features</span>
+            </div>
+            <h2 class="section-title">Everything You Need to Create Amazing Content</h2>
+            <p class="section-description">
+                Our AI-powered platform combines multiple advanced technologies to deliver 
+                the highest quality blog content from your YouTube videos.
+            </p>
+        </div>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-brain"></i>
+                </div>
+                <h3 class="feature-title">Advanced AI Processing</h3>
+                <p class="feature-description">
+                    Powered by CrewAI agents that understand context, tone, and structure 
+                    to create human-like blog content.
+                </p>
+                <div class="feature-tech">
+                    <span class="tech-tag">GPT-4</span>
+                    <span class="tech-tag">CrewAI</span>
+                </div>
+            </div>
+            
+            <div class="feature-card featured">
+                <div class="feature-badge">Most Popular</div>
+                <div class="feature-icon">
+                    <i class="fas fa-magic"></i>
+                </div>
+                <h3 class="feature-title">Smart Content Generation</h3>
+                <p class="feature-description">
+                    Automatically extracts key insights, creates engaging headlines, and 
+                    structures content for maximum readability and SEO performance.
+                </p>
+                <div class="feature-tech">
+                    <span class="tech-tag">SEO Optimized</span>
+                    <span class="tech-tag">Auto-Structure</span>
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-language"></i>
+                </div>
+                <h3 class="feature-title">Multi-Language Support</h3>
+                <p class="feature-description">
+                    Process videos in multiple languages and generate blog content 
+                    in your preferred language with perfect translations.
+                </p>
+                <div class="feature-tech">
+                    <span class="tech-tag">50+ Languages</span>
+                    <span class="tech-tag">Auto-Detect</span>
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-download"></i>
+                </div>
+                <h3 class="feature-title">Export Options</h3>
+                <p class="feature-description">
+                    Download your generated content as PDF, Markdown, or HTML 
+                    for easy publishing across any platform.
+                </p>
+                <div class="feature-tech">
+                    <span class="tech-tag">PDF</span>
+                    <span class="tech-tag">Markdown</span>
+                    <span class="tech-tag">HTML</span>
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-clock"></i>
+                </div>
+                <h3 class="feature-title">Lightning Fast</h3>
+                <p class="feature-description">
+                    Generate comprehensive blog articles in under 5 minutes, 
+                    no matter how long your source video is.
+                </p>
+                <div class="feature-tech">
+                    <span class="tech-tag">5min avg</span>
+                    <span class="tech-tag">Batch Process</span>
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <h3 class="feature-title">Secure & Private</h3>
+                <p class="feature-description">
+                    Your content and data are processed securely with enterprise-grade 
+                    encryption and privacy protection.
+                </p>
+                <div class="feature-tech">
+                    <span class="tech-tag">Encrypted</span>
+                    <span class="tech-tag">GDPR</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- How It Works Section -->
+<section class="how-it-works" id="how-it-works">
+    <div class="how-it-works-container">
+        <div class="section-header">
+            <div class="section-badge">
+                <span class="badge-icon">🔧</span>
+                <span class="badge-text">Simple Process</span>
+            </div>
+            <h2 class="section-title">How It Works</h2>
+            <p class="section-description">
+                Transform any YouTube video into a professional blog article in just three simple steps.
+            </p>
+        </div>
+        
+        <div class="process-steps">
+            <div class="process-step">
+                <div class="step-number">01</div>
+                <div class="step-content">
+                    <h3 class="step-title">Paste YouTube URL</h3>
+                    <p class="step-description">
+                        Simply copy and paste any YouTube video URL into our generator. 
+                        Our system supports all types of YouTube content.
+                    </p>
+                    <div class="step-visual">
+                        <div class="visual-input">
+                            <i class="fab fa-youtube"></i>
+                            <span>youtube.com/watch?v=...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="process-step">
+                <div class="step-number">02</div>
+                <div class="step-content">
+                    <h3 class="step-title">AI Processing Magic</h3>
+                    <p class="step-description">
+                        Our CrewAI agents extract the transcript, analyze the content, 
+                        and intelligently structure it into engaging blog format.
+                    </p>
+                    <div class="step-visual">
+                        <div class="visual-processing">
+                            <div class="processing-item">
+                                <i class="fas fa-microphone"></i>
+                                <span>Extract Audio</span>
+                            </div>
+                            <div class="processing-item">
+                                <i class="fas fa-brain"></i>
+                                <span>Analyze Content</span>
+                            </div>
+                            <div class="processing-item">
+                                <i class="fas fa-edit"></i>
+                                <span>Generate Blog</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="process-step">
+                <div class="step-number">03</div>
+                <div class="step-content">
+                    <h3 class="step-title">Download & Publish</h3>
+                    <p class="step-description">
+                        Get your perfectly formatted blog article ready for publishing. 
+                        Download as PDF, copy as text, or export in multiple formats.
+                    </p>
+                    <div class="step-visual">
+                        <div class="visual-output">
+                            <div class="output-format">
+                                <i class="fas fa-file-pdf"></i>
+                                <span>PDF</span>
+                            </div>
+                            <div class="output-format">
+                                <i class="fas fa-code"></i>
+                                <span>HTML</span>
+                            </div>
+                            <div class="output-format">
+                                <i class="fab fa-markdown"></i>
+                                <span>MD</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="process-cta">
+            <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-large">
+                Try It Now - It's Free
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- CTA Section -->
+<section class="cta">
+    <div class="cta-container">
+        <div class="cta-content">
+            <h2 class="cta-title">Ready to Transform Your Content Creation?</h2>
+            <p class="cta-description">
+                Join thousands of content creators who are already using BlogAI to streamline 
+                their workflow and create amazing blog content from YouTube videos.
+            </p>
+            <div class="cta-actions">
+                <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-large">
+                    Get Started Free
+                </a>
+                <a href="{{ url_for('contact') }}" class="btn btn-outline btn-large">
+                    Contact Sales
+                </a>
+            </div>
+            <p class="cta-note">No credit card required • Free trial • Cancel anytime</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

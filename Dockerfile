@@ -41,7 +41,7 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app:$PYTHONPATH
 
 WORKDIR /app
 
@@ -74,8 +74,13 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.t
 RUN mkdir -p /app/.flask_session /app/logs && \
     chmod 755 /app/.flask_session /app/logs
 
+# Copy the entire project BEFORE creating user
 COPY . .
 
+# Ensure __init__.py files exist for modules to be recognized
+RUN touch auth/__init__.py src/__init__.py
+
+# Create non-root user and set ownership
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     chown -R appuser:appuser /app
 
