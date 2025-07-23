@@ -630,29 +630,45 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Configure Docker Hub registry
-        run: |
-          echo "🔄 Removing existing Docker registry config (if any)..."
-          az containerapp registry remove \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --server docker.io || true
-
-          echo "➕ Adding Docker Hub registry..."
-          az containerapp registry set \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --server docker.io \
-            --username ${{ secrets.DOCKERHUB_USERNAME }} \
-            --password ${{ secrets.DOCKERHUB_TOKEN }}
-
+      # FIX 1: Directly update container with explicit parameters
       - name: Deploy new image to Container App
         run: |
           echo "🚀 Updating Container App with new image tag..."
           az containerapp update \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
+            --container-name ${{ secrets.CONTAINER_NAME || 'main' }} \  # Explicit container name
+            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
+            --set-env-vars "DEPLOY_TIMESTAMP=$(date +%s)"  # Force image pull
+
+      # FIX 2: Verify active revision uses new image
+      - name: Verify deployment revision
+        run: |
+          echo "🔍 Checking active revision..."
+          ACTIVE_REV=$(az containerapp revision list \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "[?properties.active].name" -o tsv)
+          
+          echo "Active Revision: $ACTIVE_REV"
+          
+          IMAGE_USED=$(az containerapp revision show \
+            --revision $ACTIVE_REV \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "properties.template.containers[0].image" -o tsv)
+          
+          echo "Current Image: $IMAGE_USED"
+          EXPECTED_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+          
+          if [ "$IMAGE_USED" != "$EXPECTED_IMAGE" ]; then
+            echo "❌ CRITICAL: Active revision uses old image!"
+            echo "Expected: $EXPECTED_IMAGE"
+            echo "Actual: $IMAGE_USED"
+            exit 1
+          else
+            echo "✅ Verified active revision uses new image"
+          fi
 
       - name: Get Container App URL
         id: get-url
@@ -666,17 +682,23 @@ jobs:
           echo "Container App URL: https://$URL"
           echo "url=https://$URL" >> $GITHUB_OUTPUT
 
-      - name: Verify Azure deployment
-        run: |
-          echo "✅ Successfully deployed to Azure Container Apps!"
-          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
-          echo "Application URL: ${{ steps.get-url.outputs.url }}"
-
+      # FIX 3: Enhanced health check with retries
       - name: Test deployment health
         run: |
-          echo "🩺 Testing deployment health..."
-          sleep 30  # Wait for deployment to stabilize
-          curl -f ${{ steps.get-url.outputs.url }} || echo "⚠️ Health check warning - app may still be starting"
+          echo "🩺 Testing deployment health (retry 3x)..."
+          APP_URL="${{ steps.get-url.outputs.url }}"
+          
+          for i in {1..3}; do
+            sleep 20
+            echo "Attempt $i/3: Checking $APP_URL"
+            if curl -f --retry 3 --retry-delay 5 $APP_URL; then
+              echo "✅ Health check passed"
+              exit 0
+            fi
+          done
+          
+          echo "❌ Health check failed after 3 attempts"
+          exit 1
 
       - name: Create issue on failure
         if: ${{ failure() }}
