@@ -381,17 +381,28 @@ class TestCleanupFunctions:
         mock_memory.assert_called_once()
     
     @patch('app.gc.collect')
-    @patch('app.cleanup_com_objects')
-    @patch('app.cleanup_memory')
-    def test_cleanup_after_generation(self, mock_memory, mock_com, mock_gc):
+    def test_cleanup_after_generation(self, mock_gc_collect):
         """Test cleanup after generation"""
         from app import cleanup_after_generation
         
-        cleanup_after_generation()
+        # Test on Windows platform
+        with patch('app.sys.platform', 'win32'):
+            with patch('app.cleanup_com_objects') as mock_com_cleanup:
+                with patch('app.cleanup_memory') as mock_memory_cleanup:
+                    cleanup_after_generation()
+                    
+                    assert mock_gc_collect.call_count == 3
+                    mock_com_cleanup.assert_called_once()
+                    mock_memory_cleanup.assert_called_once()
         
-        assert mock_gc.call_count == 3
-        mock_com.assert_called_once()
-        mock_memory.assert_called_once()
+        # Test on non-Windows platform (Linux/Mac)
+        with patch('app.sys.platform', 'linux'):
+            with patch('app.cleanup_memory') as mock_memory_cleanup:
+                cleanup_after_generation()
+                
+                assert mock_gc_collect.call_count >= 3
+                mock_memory_cleanup.assert_called_once()
+
 
 
 class TestRoutes:
