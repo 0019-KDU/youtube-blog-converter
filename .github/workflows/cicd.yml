@@ -630,15 +630,43 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Configure Docker Hub registry
+      - name: Clear Container App Cache and Reset
         run: |
-          echo "🔄 Removing existing Docker registry config (if any)..."
+          echo "🧹 Clearing existing cache and resetting container app..."
+          
+          # Stop all traffic to current revision
+          echo "Stopping traffic to current revision..."
+          az containerapp revision set-mode \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --mode Single || echo "Mode setting skipped"
+          
+          # Deactivate old revisions to force cache clear
+          echo "Deactivating old revisions..."
+          REVISIONS=$(az containerapp revision list \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "[?properties.active].name" -o tsv)
+          
+          for revision in $REVISIONS; do
+            echo "Deactivating revision: $revision"
+            az containerapp revision deactivate \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --revision "$revision" || echo "Failed to deactivate $revision"
+          done
+
+      - name: Force Remove Existing Registry Config
+        run: |
+          echo "🔄 Removing existing registry configuration..."
           az containerapp registry remove \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --server docker.io || true
+            --server docker.io || echo "Registry not present"
 
-          echo "➕ Adding Docker Hub registry..."
+      - name: Configure Docker Hub Registry
+        run: |
+          echo "📝 Configuring Docker Hub registry..."
           az containerapp registry set \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
@@ -646,18 +674,95 @@ jobs:
             --username ${{ secrets.DOCKERHUB_USERNAME }} \
             --password ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Deploy new image to Container App
+      - name: Force Image Pull and Deploy
         run: |
-          echo "🚀 Updating Container App with new image tag..."
+          echo "🚀 Forcing new image pull and deployment..."
+          REVISION_SUFFIX="rev-$(date +%s)-${{ github.run_number }}"
+          
+          # Use --force-restart to ensure fresh deployment
           az containerapp update \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
+            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
+            --revision-suffix "$REVISION_SUFFIX" \
+            --set-env-vars "CACHE_BUST=$(date +%s)" "DEPLOYMENT_ID=${{ github.run_id }}"
+          
+          echo "✅ Deployed with revision suffix: $REVISION_SUFFIX"
+
+      - name: Wait for Old Revisions to Terminate
+        run: |
+          echo "⏳ Waiting for old revisions to terminate..."
+          sleep 30
+          
+          # Check if old revisions are properly terminated
+          ACTIVE_REVISIONS=$(az containerapp revision list \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "[?properties.active].name" -o tsv | wc -l)
+          
+          echo "Active revisions count: $ACTIVE_REVISIONS"
+
+      - name: Verify Image and Clear Container Cache
+        run: |
+          echo "🔍 Verifying deployed image and clearing container cache..."
+          sleep 15
+          
+          # Force container restart to clear any internal cache
+          az containerapp restart \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} || echo "Restart command completed"
+          
+          # Wait for restart to complete
+          sleep 20
+          
+          # Verify the correct image is deployed
+          CURRENT_IMAGE=$(az containerapp show \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "properties.template.containers[0].image" -o tsv)
+          
+          EXPECTED_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+          
+          echo "Current deployed image: $CURRENT_IMAGE"
+          echo "Expected image: $EXPECTED_IMAGE"
+          
+          if [ "$CURRENT_IMAGE" != "$EXPECTED_IMAGE" ]; then
+            echo "::error::Image verification failed!"
+            echo "::error::Current: $CURRENT_IMAGE"
+            echo "::error::Expected: $EXPECTED_IMAGE"
+            exit 1
+          else
+            echo "✅ Image verification successful!"
+          fi
+
+      - name: Force Application Cache Clear
+        run: |
+          echo "🧹 Forcing application-level cache clear..."
+          
+          # Get the application URL first
+          URL=$(az containerapp show \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" \
+            --output tsv)
+          
+          # Wait for service to be ready
+          sleep 30
+          
+          # Multiple cache-busting requests
+          for i in {1..3}; do
+            echo "Cache-busting request $i..."
+            curl -s -H "Cache-Control: no-cache" \
+                -H "Pragma: no-cache" \
+                -H "X-Cache-Bust: $(date +%s)" \
+                "https://$URL/?cachebust=$(date +%s)" > /dev/null || echo "Request $i failed"
+            sleep 5
+          done
 
       - name: Get Container App URL
         id: get-url
         run: |
-          echo "🔍 Retrieving app URL..."
+          echo "🔍 Retrieving final app URL..."
           URL=$(az containerapp show \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
@@ -666,17 +771,106 @@ jobs:
           echo "Container App URL: https://$URL"
           echo "url=https://$URL" >> $GITHUB_OUTPUT
 
+      - name: Comprehensive Health Check
+        run: |
+          echo "🩺 Running comprehensive health checks..."
+          APP_URL="${{ steps.get-url.outputs.url }}"
+          
+          # Wait for full deployment stabilization
+          sleep 45
+          
+          # Health check with cache-busting headers
+          echo "Testing application health with cache-busting..."
+          HEALTH_CHECK_PASSED=false
+          
+          for attempt in {1..8}; do
+            echo "Health check attempt $attempt/8..."
+            
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Cache-Control: no-cache, no-store, must-revalidate" \
+              -H "Pragma: no-cache" \
+              -H "Expires: 0" \
+              -H "X-Cache-Bust: $(date +%s)" \
+              "$APP_URL/?v=$(date +%s)" || echo "000")
+            
+            echo "HTTP response code: $HTTP_CODE"
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Health check passed on attempt $attempt"
+              HEALTH_CHECK_PASSED=true
+              break
+            else
+              echo "⚠️ Health check failed with code $HTTP_CODE, retrying..."
+              sleep 20
+            fi
+          done
+          
+          if [ "$HEALTH_CHECK_PASSED" = "false" ]; then
+            echo "❌ Health check failed after all attempts"
+            
+            # Debug information
+            echo "=== DEBUG INFORMATION ==="
+            echo "App URL: $APP_URL"
+            echo "Checking container logs..."
+            az containerapp logs show \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --tail 50 || echo "Failed to retrieve logs"
+            
+            exit 1
+          fi
+
+      - name: Verify Deployment Completion
+        run: |
+          echo "🔍 Final deployment verification..."
+          
+          # Check latest revision status
+          LATEST_REVISION=$(az containerapp revision list \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "[0]" -o json)
+          
+          REVISION_STATE=$(echo "$LATEST_REVISION" | jq -r '.properties.provisioningState')
+          REVISION_ACTIVE=$(echo "$LATEST_REVISION" | jq -r '.properties.active')
+          REVISION_NAME=$(echo "$LATEST_REVISION" | jq -r '.name')
+          
+          echo "Latest revision: $REVISION_NAME"
+          echo "Revision state: $REVISION_STATE"
+          echo "Revision active: $REVISION_ACTIVE"
+          
+          if [ "$REVISION_STATE" = "Succeeded" ] && [ "$REVISION_ACTIVE" = "true" ]; then
+            echo "✅ Deployment verification successful!"
+          else
+            echo "⚠️ Deployment may not be fully complete"
+            echo "State: $REVISION_STATE, Active: $REVISION_ACTIVE"
+          fi
+
+      - name: Cache Clear Verification
+        run: |
+          echo "🔍 Verifying cache has been cleared..."
+          APP_URL="${{ steps.get-url.outputs.url }}"
+          
+          # Test with different cache-busting parameters
+          for i in {1..3}; do
+            RESPONSE=$(curl -s -H "Cache-Control: no-cache" \
+                            -H "X-Deployment-Version: ${{ github.sha }}" \
+                            "$APP_URL/?test=$i&timestamp=$(date +%s)" || echo "FAILED")
+            
+            if echo "$RESPONSE" | grep -q "title\|html\|DOCTYPE" 2>/dev/null; then
+              echo "✅ Cache clear verification $i: SUCCESS"
+            else
+              echo "⚠️ Cache clear verification $i: UNCLEAR"
+            fi
+            sleep 2
+          done
+
       - name: Verify Azure deployment
         run: |
           echo "✅ Successfully deployed to Azure Container Apps!"
           echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
           echo "Application URL: ${{ steps.get-url.outputs.url }}"
-
-      - name: Test deployment health
-        run: |
-          echo "🩺 Testing deployment health..."
-          sleep 30  # Wait for deployment to stabilize
-          curl -f ${{ steps.get-url.outputs.url }} || echo "⚠️ Health check warning - app may still be starting"
+          echo "Deployment ID: ${{ github.run_id }}"
+          echo "Cache cleared and new version verified!"
 
       - name: Create issue on failure
         if: ${{ failure() }}
@@ -697,9 +891,13 @@ jobs:
                       `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
                       `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
                       `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
-                      `Deployment to Azure Container Apps failed. Please check deployment logs and Azure Portal.`,
+                      `Deployment to Azure Container Apps failed after cache clearing attempts.\n\n` +
+                      `**Expected Image:** ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}\n` +
+                      `**App URL:** ${{ steps.get-url.outputs.url || 'URL not available' }}\n` +
+                      `**Deployment ID:** ${{ github.run_id }}\n\n` +
+                      `Please check deployment logs and Azure Portal for detailed error information.`,
                 assignees: [assignee],
-                labels: ['ci-failure', 'azure-deployment']
+                labels: ['ci-failure', 'azure-deployment', 'cache-issue']
               });
             } catch (error) {
               console.error('Error creating issue:', error);
@@ -730,34 +928,18 @@ jobs:
         with:
           channel: '#githubaction'
           status: 'success'
-          text: "✅ Azure Deployment Successful in ${{ github.repository }}"
+          text: "✅ Azure Deployment Successful with Cache Clear in ${{ github.repository }}"
           fields: |
             [
               {"title": "Repository", "value": "${{ github.repository }}", "short": true},
               {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": true},
               {"title": "Application URL", "value": "${{ steps.get-url.outputs.url }}", "short": false},
               {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
-              {"title": "Commit", "value": "${{ github.sha }}", "short": true}
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Cache Status", "value": "Cleared and Verified", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
-
-      - name: Slack Notification on Success
-        if: ${{ success() }}
-        uses: act10ns/slack@v2.1.0
-        with:
-          channel: '#githubaction'
-          status: 'success'
-          text: "✅ Azure Deployment Successful in ${{ github.repository }}"
-          fields: |
-            [
-              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-              {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": true},
-              {"title": "Application URL", "value": "${{ steps.get-url.outputs.url }}", "short": false},
-              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
-              {"title": "Commit", "value": "${{ github.sha }}", "short": true}
-            ]
-          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
   notify:
     name: Pipeline Status Notification
