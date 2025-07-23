@@ -21,6 +21,39 @@ from src.tool import (
 class TestOpenAIClientContext:
     """Test OpenAI client context manager"""
     
+    @patch('src.tool.logger')
+    def test_openai_client_context_logger_error(self, mock_logger):
+        """Test logger.error is called on exception - covers error logging line"""
+        with patch('builtins.__import__') as mock_import:
+            mock_import.side_effect = Exception("Import failed")
+            
+            with pytest.raises(Exception, match="Import failed"):
+                with openai_client_context():
+                    pass
+            
+            # Verify logger.error was called
+            mock_logger.error.assert_called_once()
+            assert "OpenAI client error" in str(mock_logger.error.call_args)
+    
+    def test_openai_client_context_openai_creation_error(self):
+        """Test OpenAI client creation error - covers exception in context manager"""
+        with patch('builtins.__import__') as mock_import:
+            mock_openai_module = Mock()
+            mock_openai_class = Mock()
+            mock_openai_class.side_effect = Exception("OpenAI API Error")
+            mock_openai_module.OpenAI = mock_openai_class
+            
+            def import_side_effect(name, *args, **kwargs):
+                if name == 'openai':
+                    return mock_openai_module
+                return __import__(name, *args, **kwargs)
+            
+            mock_import.side_effect = import_side_effect
+            
+            with pytest.raises(Exception, match="OpenAI API Error"):
+                with openai_client_context():
+                    pass
+    
     def test_openai_client_context_success(self):
         """Test successful OpenAI client context creation"""
         with patch('builtins.__import__') as mock_import:
@@ -75,7 +108,24 @@ class TestOpenAIClientContext:
 
 class TestYouTubeTranscriptTool:
     """Test YouTube transcript tool"""
-    
+    @patch.dict(os.environ, {'SUPADATA_API_KEY': 'test-api-key'})
+    @patch('requests.Session')
+    def test_run_session_none_in_finally(self, mock_session_class):
+        """Test session close when session is None - covers finally block"""
+        # Make session creation fail but not raise exception
+        mock_session_class.return_value = None
+        
+        tool = YouTubeTranscriptTool()
+        result = tool._run('https://www.youtube.com/watch?v=test123')
+        
+        # Should handle None session gracefully
+        assert result.startswith('ERROR:')
+    @patch('src.tool.SUPADATA_API_KEY', None)
+    def test_init_no_api_key(self):
+        """Test initialization without API key - covers line 35"""
+        with pytest.raises(RuntimeError, match="Supadata API key not configured"):
+            YouTubeTranscriptTool()
+            
     @patch.dict(os.environ, {'SUPADATA_API_KEY': 'test-api-key'})
     def test_init_success(self):
         """Test successful initialization"""
@@ -97,7 +147,25 @@ class TestYouTubeTranscriptTool:
     #         if original_key is not None:
     #             os.environ['SUPADATA_API_KEY'] = original_key
 
-
+    @patch.dict(os.environ, {'SUPADATA_API_KEY': 'test-api-key'})
+    @patch('requests.Session')
+    @patch('src.tool.logger')
+    def test_run_success_with_logging(self, mock_logger, mock_session_class):
+        """Test successful transcript with length logging - covers success log line"""
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {'content': 'Test transcript content'}
+        mock_response.raise_for_status.return_value = None
+        mock_session.get.return_value = mock_response
+        mock_session_class.return_value = mock_session
+        
+        tool = YouTubeTranscriptTool()
+        result = tool._run('https://www.youtube.com/watch?v=test123')
+        
+        # Verify success logging was called
+        success_calls = [call for call in mock_logger.info.call_args_list 
+                        if "✅ Transcript extraction successful" in str(call)]
+        assert len(success_calls) > 0
     
     @patch.dict(os.environ, {'SUPADATA_API_KEY': 'test-api-key'})
     @patch('requests.Session')
@@ -214,6 +282,11 @@ class TestYouTubeTranscriptTool:
 
 class TestBlogGeneratorTool:
     """Test blog generator tool"""
+    @patch('src.tool.OPENAI_API_KEY', None)
+    def test_init_no_api_key(self):
+        """Test initialization without API key - covers line 76"""
+        with pytest.raises(RuntimeError, match="OpenAI API key not configured"):
+            BlogGeneratorTool()
     
     @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-api-key'})
     def test_init_success(self):
@@ -656,6 +729,23 @@ Another paragraph here."""
         
         mock_gc_collect.assert_called_once()
 
+        
+    @patch('src.tool.FPDF')
+    @patch('src.tool.gc.collect')
+    def test_generate_pdf_bytes_pdf_none_cleanup(self, mock_gc_collect, mock_fpdf_class):
+        """Test PDF cleanup when pdf is None - covers finally block"""
+        # Make FPDF creation return None
+        mock_fpdf_class.return_value = None
+        
+        tool = PDFGeneratorTool()
+        
+        # The actual error will be AttributeError wrapped in RuntimeError
+        with pytest.raises(RuntimeError, match="PDF generation error"):
+            tool.generate_pdf_bytes('# Test')
+        
+        # Verify gc.collect was still called
+        mock_gc_collect.assert_called_once()
+
 
 class TestCleanupResources:
     """Test cleanup resources function"""
@@ -688,9 +778,42 @@ class TestCleanupResources:
             
             mock_gc_collect.assert_called_once()
 
+    @patch('src.tool.gc')
+    def test_cleanup_resources_no_set_debug_attribute(self, mock_gc):
+        """Test cleanup when gc doesn't have set_debug - covers hasattr check"""
+        # Mock gc.collect but don't add set_debug attribute
+        mock_gc.collect = Mock()
+        # Ensure hasattr(gc, 'set_debug') returns False
+        del mock_gc.set_debug  # Remove the attribute
+        
+        cleanup_resources()
+        
+        mock_gc.collect.assert_called_once()
+        # set_debug should not be called since it doesn't exist
 
 class TestEnvironmentVariables:
     """Test environment variable loading"""
+    
+    @patch.dict(os.environ, {}, clear=True)
+    @patch('src.tool.os.getenv')
+    def test_openai_model_name_default_when_not_set(self, mock_getenv):
+        """Test OPENAI_MODEL_NAME default value when env var not set"""
+        # Mock os.getenv to return the default value when OPENAI_MODEL_NAME is not set
+        def getenv_side_effect(key, default=None):
+            if key == "OPENAI_MODEL_NAME":
+                return default  # Return the default value
+            return os.environ.get(key, default)
+        
+        mock_getenv.side_effect = getenv_side_effect
+        
+        # Reload module to test default value assignment
+        import importlib
+        import src.tool
+        importlib.reload(src.tool)
+        
+        from src.tool import OPENAI_MODEL_NAME
+        assert OPENAI_MODEL_NAME == "gpt-4o-mini"
+
     
     def test_supadata_api_key_loaded(self):
         """Test SUPADATA_API_KEY is loaded"""
