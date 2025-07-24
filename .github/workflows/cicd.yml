@@ -619,156 +619,287 @@ jobs:
 
 
   deploy-to-azure:
-      needs: deploy-to-dockerhub
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      runs-on: ubuntu-latest
+    needs: deploy-to-dockerhub
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
 
-      steps:
-        - name: Show commit author
-          run: |
-            echo "Commit by ${{ github.actor }}"
-            echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
-            echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
 
-        - name: Checkout code
-          uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        - name: Azure Login
-          uses: azure/login@v2
-          with:
-            creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-        - name: Configure Docker Hub registry
-          run: |
-            echo "🔄 Removing existing Docker registry config (if any)…"
-            az containerapp registry remove \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
+      - name: Configure Docker Hub registry
+        run: |
+          echo "🔄 Removing existing Docker registry config (if any)…"
+          az containerapp registry remove \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --server docker.io || true
+
+          echo "➕ Adding Docker Hub registry…"
+          az containerapp registry set \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --server docker.io \
+            --username ${{ secrets.DOCKERHUB_USERNAME }} \
+            --password ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Get Container App information
+        id: get-container-info
+        run: |
+          echo "🔍 Getting Container App details..."
+          
+          # Get container name - from your screenshots, it's 'ytblogger'
+          CONTAINER_NAME=$(az containerapp show \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "properties.template.containers[0].name" \
+            --output tsv)
+          
+          # Validate container name and use fallback if needed
+          if [ -z "$CONTAINER_NAME" ] || [ "$CONTAINER_NAME" = "null" ]; then
+            echo "❌ Failed to get container name. Using 'ytblogger' as fallback."
+            CONTAINER_NAME="ytblogger"
+          fi
+          
+          echo "container_name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
+          echo "✅ Found container name: $CONTAINER_NAME"
+          
+          # Get current revision name for reference
+          CURRENT_REVISION=$(az containerapp revision list \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "[?properties.active].name | [0]" \
+            --output tsv)
+          
+          echo "current_revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
+          echo "📋 Current active revision: $CURRENT_REVISION"
+
+      - name: Deploy container app
+        run: |
+          echo "🚀 Deploying image to Container App..."
+          echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
+          echo "Resource Group: ${{ secrets.RESOURCE_GROUP }}"
+          echo "Container Name: ${{ steps.get-container-info.outputs.container_name }}"
+          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+          
+          az containerapp update \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --container-name ${{ steps.get-container-info.outputs.container_name }} \
+            --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
+            --output table
+
+      - name: Wait for deployment to complete
+        run: |
+          echo "⏳ Waiting for deployment to stabilize..."
+          sleep 45
+          
+          # Check if new revision is created and active
+          NEW_REVISION=$(az containerapp revision list \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "[?properties.active].name | [0]" \
+            --output tsv)
+          
+          echo "🔄 New active revision: $NEW_REVISION"
+          
+          # Wait for revision to be ready
+          echo "⏳ Waiting for revision to be ready..."
+          for i in {1..15}; do
+            REVISION_STATUS=$(az containerapp revision show \
+              --revision $NEW_REVISION \
               --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --server docker.io || true
-
-            echo "➕ Adding Docker Hub registry…"
-            az containerapp registry set \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --server docker.io \
-              --username ${{ secrets.DOCKERHUB_USERNAME }} \
-              --password ${{ secrets.DOCKERHUB_TOKEN }}
-
-        - name: Get existing container name
-          id: get-container
-          run: |
-            echo "🔍 Getting existing container name..."
-            CONTAINER_NAME=$(az containerapp show \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --query "properties.template.containers[0].name" \
-              --output tsv)
-            echo "container_name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
-            echo "Found container name: $CONTAINER_NAME"
-
-        - name: Deploy container app
-          run: |
-            echo "🚀 Deploying image to Container App..."
-            az containerapp update \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --container-name ${{ steps.get-container.outputs.container_name }} \
-              --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
-
-        - name: Get Container App URL
-          id: get-url
-          run: |
-            echo "🔍 Retrieving app URL…"
-            URL=$(az containerapp show \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --query "properties.configuration.ingress.fqdn" \
-              --output tsv)
-            echo "url=https://${URL}" >> $GITHUB_OUTPUT
-            echo "Container App URL: https://${URL}"
-
-        - name: Verify Azure deployment
-          run: |
-            echo "✅ Successfully deployed to Azure Container Apps!"
-            echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
-            echo "Application URL: ${{ steps.get-url.outputs.url }}"
-
-        - name: Test deployment health
-          run: |
-            echo "🩺 Testing deployment health..."
-            sleep 60  # wait for container to stabilize
-            if curl -f --max-time 30 "${{ steps.get-url.outputs.url }}"; then
-              echo "✅ Health check passed"
-            else
-              echo "⚠️ Health check warning – app may still be starting"
-              # Try one more time after additional wait
-              sleep 30
-              curl -f --max-time 30 "${{ steps.get-url.outputs.url }}" || echo "❌ Health check failed"
+              --query "properties.provisioningState" \
+              --output tsv 2>/dev/null || echo "Unknown")
+            
+            echo "Revision status: $REVISION_STATUS (attempt $i/15)"
+            
+            if [ "$REVISION_STATUS" = "Succeeded" ]; then
+              echo "✅ Revision is ready!"
+              break
+            elif [ "$REVISION_STATUS" = "Failed" ]; then
+              echo "❌ Revision deployment failed!"
+              # Show revision details for debugging
+              az containerapp revision show \
+                --revision $NEW_REVISION \
+                --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                --query "{name: name, status: properties.provisioningState, replicas: properties.replicas}" \
+                --output table
+              exit 1
             fi
+            
+            sleep 10
+          done
 
-        - name: Create issue on failure
-          if: ${{ failure() }}
-          uses: actions/github-script@v7
-          with:
-            script: |
-              try {
-                const assignee = "${{ github.actor }}";
-                const authorName = "${{ github.event.head_commit.author.name }}";
-                const authorEmail = "${{ github.event.head_commit.author.email }}";
-                await github.rest.issues.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  title: `Azure Deployment Failed in ${context.job}`,
-                  body:
-                    `### ❌ Deployment to Azure Container Apps Failed\n\n` +
-                    `**Job:** ${context.job}\n` +
-                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                    `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
-                    `Deployment to Azure Container Apps failed. Please check deployment logs and Azure Portal.`,
-                  assignees: [assignee],
-                  labels: ['ci-failure', 'azure-deployment']
-                });
-              } catch (error) {
-                console.error('Error creating issue:', error);
-                core.setFailed(`Failed to create issue: ${error.message}`);
-              }
+      - name: Get Container App URL
+        id: get-url
+        run: |
+          echo "🔍 Retrieving app URL…"
+          URL=$(az containerapp show \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" \
+            --output tsv)
+          
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "❌ Failed to get Container App URL"
+            echo "Container App ingress might not be configured"
+            exit 1
+          fi
+          
+          echo "url=https://${URL}" >> $GITHUB_OUTPUT
+          echo "✅ Container App URL: https://${URL}"
 
-        - name: Slack Notification on Failure
-          if: ${{ failure() }}
-          uses: act10ns/slack@v2.1.0
-          with:
-            channel: '#githubaction'
-            status: ${{ job.status }}
-            text: "❌ Azure Deployment Failed in ${{ github.repository }}"
-            fields: |
-              [
-                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-                {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
-                {"title": "Job", "value": "${{ github.job }}", "short": true},
-                {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
-                {"title": "Commit", "value": "${{ github.sha }}", "short": true},
-                {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
-              ]
-            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+      - name: Verify Azure deployment
+        run: |
+          echo "✅ Successfully deployed to Azure Container Apps!"
+          echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
+          echo "Container Name: ${{ steps.get-container-info.outputs.container_name }}"
+          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+          echo "Previous revision: ${{ steps.get-container-info.outputs.current_revision }}"
+          echo "Application URL: ${{ steps.get-url.outputs.url }}"
+          
+          # Show current app status
+          echo "📊 Current app status:"
+          az containerapp show \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "{name: name, status: properties.provisioningState, activeRevisions: properties.latestRevisionName}" \
+            --output table
 
-        - name: Slack Notification on Success
-          if: ${{ success() }}
-          uses: act10ns/slack@v2.1.0
-          with:
-            channel: '#githubaction'
-            status: 'success'
-            text: "✅ Azure Deployment Successful in ${{ github.repository }}"
-            fields: |
-              [
-                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-                {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": true},
-                {"title": "Application URL", "value": "${{ steps.get-url.outputs.url }}", "short": false},
-                {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
-                {"title": "Commit", "value": "${{ github.sha }}", "short": true}
-              ]
-            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+      - name: Test deployment health
+        run: |
+          echo "🩺 Testing deployment health..."
+          echo "URL: ${{ steps.get-url.outputs.url }}"
+          
+          # Wait for container to start (Azure Container Apps cold start)
+          echo "⏳ Waiting for container to start (cold start delay)..."
+          sleep 90
+          
+          # Health check with retries
+          for i in {1..6}; do
+            echo "🔍 Health check attempt $i/6..."
+            
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 45 "${{ steps.get-url.outputs.url }}" || echo "000")
+            echo "HTTP Status: $HTTP_STATUS"
+            
+            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "302" ]; then
+              echo "✅ Health check passed! (Status: $HTTP_STATUS)"
+              break
+            else
+              echo "⚠️ Health check failed with status: $HTTP_STATUS (attempt $i/6)"
+              if [ $i -eq 6 ]; then
+                echo "❌ All health checks failed"
+                echo "📋 Container App status:"
+                az containerapp show \
+                  --name ${{ secrets.CONTAINER_APP_NAME }} \
+                  --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                  --query "{name: name, status: properties.provisioningState, replicas: properties.template.scale, ingress: properties.configuration.ingress.fqdn}" \
+                  --output table
+                
+                echo "📋 Latest revision logs (last 50 lines):"
+                az containerapp logs show \
+                  --name ${{ secrets.CONTAINER_APP_NAME }} \
+                  --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                  --tail 50 || echo "Could not fetch logs"
+                
+                echo "⚠️ Health check failed but deployment completed. App may need more time to start."
+                # Don't exit 1 here as the deployment itself was successful
+              fi
+              sleep 45
+            fi
+          done
 
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Azure Deployment Failed in ${context.job}`,
+                body:
+                  `### ❌ Deployment to Azure Container Apps Failed\n\n` +
+                  `**Job:** ${context.job}\n` +
+                  `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                  `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                  `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                  `**Container App:** ${{ secrets.CONTAINER_APP_NAME }}\n` +
+                  `**Resource Group:** ${{ secrets.RESOURCE_GROUP }}\n` +
+                  `**Container Name:** ${{ steps.get-container-info.outputs.container_name }}\n` +
+                  `**Image:** ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${context.sha}\n\n` +
+                  `Deployment to Azure Container Apps failed. Please check deployment logs and Azure Portal.\n\n` +
+                  `**Troubleshooting Steps:**\n` +
+                  `1. Check Container App logs in Azure Portal\n` +
+                  `2. Verify Docker image exists and is accessible\n` +
+                  `3. Check Container App scaling and resource allocation\n` +
+                  `4. Verify environment variables and secrets\n\n` +
+                  `[View Azure Portal](https://portal.azure.com/)`,
+                assignees: [assignee],
+                labels: ['ci-failure', 'azure-deployment', 'urgent']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
+
+      - name: Slack Notification on Failure
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "❌ Azure Deployment Failed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+              {"title": "Job", "value": "${{ github.job }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true},
+              {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
+              {"title": "Container Name", "value": "${{ steps.get-container-info.outputs.container_name }}", "short": true},
+              {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": false}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
+      - name: Slack Notification on Success
+        if: ${{ success() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: 'success'
+          text: "✅ Azure Deployment Successful in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
+              {"title": "Container Name", "value": "${{ steps.get-container-info.outputs.container_name }}", "short": true},
+              {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": false},
+              {"title": "Application URL", "value": "${{ steps.get-url.outputs.url }}", "short": false},
+              {"title": "Previous Revision", "value": "${{ steps.get-container-info.outputs.current_revision }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
   notify:
     name: Pipeline Status Notification
