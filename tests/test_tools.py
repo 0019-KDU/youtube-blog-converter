@@ -105,6 +105,29 @@ class TestOpenAIClientContext:
             
             mock_gc_collect.assert_called_once()
 
+    @patch('src.tool.gc.collect')
+    def test_openai_client_context_cleanup_called(self, mock_gc_collect):
+        """Test that cleanup is called in finally block"""
+        with patch('builtins.__import__') as mock_import:
+            mock_openai_module = Mock()
+            mock_openai_class = Mock()
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            mock_openai_module.OpenAI = mock_openai_class
+            
+            def import_side_effect(name, *args, **kwargs):
+                if name == 'openai':
+                    return mock_openai_module
+                return __import__(name, *args, **kwargs)
+            
+            mock_import.side_effect = import_side_effect
+            
+            with openai_client_context():
+                pass
+            
+            mock_gc_collect.assert_called_once()
+
+
 
 class TestYouTubeTranscriptTool:
     """Test YouTube transcript tool"""
@@ -279,9 +302,49 @@ class TestYouTubeTranscriptTool:
         
         mock_session.close.assert_called_once()
 
+    def test_log_error_on_missing_supadata_key(self):
+        """Test logger error when Supadata API key is missing"""
+        # Temporarily patch the module-level variable to None
+        with patch('src.tool.SUPADATA_API_KEY', None):
+            with patch('src.tool.logger') as mock_logger:
+                with pytest.raises(RuntimeError, match="Supadata API key not configured"):
+                    YouTubeTranscriptTool()
+                mock_logger.error.assert_called_once_with(
+                    "Supadata API key not found in environment variables"
+                )
+
+    def test_blog_generation_success_log(self, sample_transcript):
+        """Test success logging after blog generation - covers line 128"""
+        with patch('src.tool.openai_client_context') as mock_context:
+            mock_client = Mock()
+            mock_response = Mock()
+            mock_response.choices = [Mock()]
+            mock_response.choices[0].message.content = "# Test Blog\n\nContent"
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_context.return_value.__enter__.return_value = mock_client
+            
+            with patch('src.tool.logger') as mock_logger:
+                tool = BlogGeneratorTool()
+                tool._run(sample_transcript)
+                
+                # Check for success log message
+                success_calls = [call for call in mock_logger.info.call_args_list 
+                                if "✅ Blog generation successful" in call[0][0]]
+                assert len(success_calls) == 1
 
 class TestBlogGeneratorTool:
     """Test blog generator tool"""
+    
+    def test_log_error_on_missing_openai_key(self):
+        """Test logger error when OpenAI API key is missing"""
+        # Temporarily patch the module-level variable to None
+        with patch('src.tool.OPENAI_API_KEY', None):
+            with patch('src.tool.logger') as mock_logger:
+                with pytest.raises(RuntimeError, match="OpenAI API key not configured"):
+                    BlogGeneratorTool()
+                mock_logger.error.assert_called_once_with(
+                    "OpenAI API key not found in environment variables"
+                )
     @patch('src.tool.OPENAI_API_KEY', None)
     def test_init_no_api_key(self):
         """Test initialization without API key - covers line 76"""
@@ -746,6 +809,40 @@ Another paragraph here."""
         # Verify gc.collect was still called
         mock_gc_collect.assert_called_once()
 
+    def test_generate_pdf_bytes_with_empty_content(self):
+        """Test PDF generation with empty content creates default document"""
+        with patch('src.tool.FPDF') as mock_fpdf_class:
+            mock_pdf = Mock()
+            mock_pdf.output.return_value = b'empty pdf content'
+            mock_pdf.w = 210
+            mock_pdf.get_y.return_value = 50
+            mock_fpdf_class.return_value = mock_pdf
+            
+            tool = PDFGeneratorTool()
+            result = tool.generate_pdf_bytes('')
+            
+            # Empty content should still generate a PDF (with default title)
+            assert isinstance(result, bytes)
+            assert result == b'empty pdf content'
+
+
+    def test_generate_pdf_bytes_unicode_title(self):
+        """Test PDF generation with Unicode in title - covers line 371"""
+        content = "# Title with em\u2014dash\nContent"
+        with patch('src.tool.FPDF') as mock_fpdf_class:
+            mock_pdf = Mock()
+            mock_pdf.output.return_value = b'pdf content'
+            mock_pdf.w = 210
+            mock_pdf.get_y.return_value = 50
+            mock_fpdf_class.return_value = mock_pdf
+            
+            tool = PDFGeneratorTool()
+            tool.generate_pdf_bytes(content)
+            
+            # Verify title cleaning was called
+            title_arg = mock_pdf.cell.call_args_list[0][0][2]
+            assert '--' in title_arg  # em dash should be replaced
+            assert '\u2014' not in title_arg
 
 class TestCleanupResources:
     """Test cleanup resources function"""
@@ -790,6 +887,14 @@ class TestCleanupResources:
         
         mock_gc.collect.assert_called_once()
         # set_debug should not be called since it doesn't exist
+        
+    def test_cleanup_resources_with_set_debug(self):
+        """Test cleanup_resources calls gc.set_debug(0) when available"""
+        with patch('src.tool.gc.collect') as mock_collect, \
+            patch('src.tool.gc.set_debug') as mock_set_debug:
+            cleanup_resources()
+        mock_collect.assert_called_once()
+        mock_set_debug.assert_called_once_with(0)    
 
 class TestEnvironmentVariables:
     """Test environment variable loading"""
@@ -834,7 +939,14 @@ class TestEnvironmentVariables:
         # Optional: Test that it matches expected pattern for OpenAI keys
         if OPENAI_API_KEY:
             assert OPENAI_API_KEY.startswith('sk-')
-    
+            
+    def test_openai_model_name_default(self):
+        """Test OPENAI_MODEL_NAME default value when not set - covers default parameter"""
+        with patch.dict('os.environ', {}, clear=True):
+            import importlib
+            import src.tool
+            importlib.reload(src.tool)
+            assert src.tool.OPENAI_MODEL_NAME == "gpt-4o-mini"
     def test_openai_model_name_default(self):
         """Test OPENAI_MODEL_NAME has default value"""
         assert OPENAI_MODEL_NAME == os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")

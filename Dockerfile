@@ -1,91 +1,36 @@
-# syntax=docker/dockerfile:1.3
-##################################
-### Stage 1: Build wheels ###
-##################################
-FROM python:3.12-slim AS builder
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
-# Create proper APT sources
-RUN echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list && \
-    echo "deb http://deb.debian.org/debian bookworm-updates main" >> /etc/apt/sources.list && \
-    echo "deb http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list
+# Install minimal system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        && rm -rf /var/lib/apt/lists/*
 
-# Install build dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      chromium \
-      chromium-driver \
-      libxml2-dev \
-      libxslt-dev \
-      build-essential \
-      libssl-dev \
-      pkg-config \
-      cargo \
-      libffi-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt ./
-
-# Build wheels with retries
+# Copy and install Python dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip wheel --no-cache-dir --wheel-dir=/wheels -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    pip cache purge
 
-##################################
-### Stage 2: Optimized runtime ###
-##################################
-FROM python:3.12-slim AS runtime
+# Copy application code
+COPY app.py .
+COPY src/ ./src/
+COPY auth/ ./auth/
+COPY templates/ ./templates/
+COPY static/ ./static/
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app:$PYTHONPATH
-
-WORKDIR /app
-
-# Create proper APT sources
-RUN echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list && \
-    echo "deb http://deb.debian.org/debian bookworm-updates main" >> /etc/apt/sources.list && \
-    echo "deb http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list
-
-# Install only RUNTIME dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      chromium \
-      chromium-driver \
-      libgomp1 \
-      libffi8 \
-      ca-certificates && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-COPY --from=builder /wheels /wheels
-COPY requirements.txt ./
-
-# Install from wheels
-RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt && \
-    rm -rf /wheels && \
-    find /usr/local/lib/python3.12 -depth \( -type d -name __pycache__ -o -name '*.pyc' \) -exec rm -rf '{}' + && \
-    rm -rf /root/.cache
-
-# Setup application
-RUN mkdir -p /app/.flask_session /app/logs && \
-    chmod 755 /app/.flask_session /app/logs
-
-# Copy the entire project BEFORE creating user
-COPY . .
-
-# Ensure __init__.py files exist for modules to be recognized
+# Ensure Python can find modules
 RUN touch auth/__init__.py src/__init__.py
 
-# Create non-root user and set ownership
-RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+# Create non-root user
+RUN useradd -m appuser && \
+    mkdir -p /app/.flask_session /app/logs && \
     chown -R appuser:appuser /app
 
 USER appuser
 
-EXPOSE 5000 8000
+EXPOSE 5000
 
-CMD ["python", "app.py"]
+# Use gunicorn for production
+CMD ["python", "-m", "flask", "run", "--host=0.0.0.0"]
