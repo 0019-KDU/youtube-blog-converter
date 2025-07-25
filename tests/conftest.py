@@ -216,3 +216,19 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "unit: marks tests as unit tests"
     )
+    
+    
+@pytest.fixture(autouse=True)
+def setup_ga_test_environment():
+    """Set up Google Analytics test environment"""
+    with patch.dict(os.environ, {
+        'GA_MEASUREMENT_ID': 'G-TEST123456',
+        'FLASK_ENV': 'testing'
+    }):
+        yield
+
+@pytest.fixture
+def app_with_ga_config(app):
+    """App fixture with GA configuration"""
+    app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+    return app

@@ -2,6 +2,10 @@
 
 {% block title %}Sign Up - BlogGen Pro{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+{% endblock %}
+
 {% block content %}
 <section class="auth-section">
     <div class="container">
@@ -68,6 +72,13 @@
 
 {% block extra_scripts %}
 <script>
+function trackSignUp() {
+    gtag('event', 'sign_up', {
+        'event_category': 'Authentication',
+        'method': 'email'
+    });
+}
+
 document.getElementById('registerForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
@@ -110,6 +121,9 @@ document.getElementById('registerForm').addEventListener('submit', async functio
         const data = await response.json();
         
         if (data.success && response.ok) {
+            // Track successful registration
+            trackSignUp();
+            
             localStorage.setItem('access_token', data.access_token);
             
             try {
@@ -122,10 +136,6 @@ document.getElementById('registerForm').addEventListener('submit', async functio
                 });
             } catch (sessionError) {
                 console.log('Session token error (non-critical):', sessionError);
-            }
-            
-            if (typeof showToast === 'function') {
-                showToast('Registration successful! Redirecting...', 'success');
             }
             
             setTimeout(() => {

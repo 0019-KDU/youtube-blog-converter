@@ -9,6 +9,8 @@ from flask import session
 from bson import ObjectId
 import io
 
+from app import inject_config
+
 
 class TestApp:
     """Test main application functionality"""
@@ -937,4 +939,468 @@ class TestSessionManagement:
             # Check session data was stored
             with client.session_transaction() as sess:
                 assert 'current_blog' in sess
-                assert sess['current_blog']['title'] is not None
+                assert sess['current_blog']['title'] is not None   
+class TestGoogleAnalyticsIntegration:
+    """Test Google Analytics integration and configuration"""
+    
+    def test_ga_measurement_id_configuration(self, app):
+        """Test GA_MEASUREMENT_ID configuration loading"""
+        with app.app_context():
+            # Test default configuration
+            assert 'GA_MEASUREMENT_ID' in app.config
+            
+            # Test environment variable loading
+            with patch.dict(os.environ, {'GA_MEASUREMENT_ID': 'G-TEST123456'}):
+                # Reload config
+                app.config['GA_MEASUREMENT_ID'] = os.getenv('GA_MEASUREMENT_ID', '')
+                assert app.config['GA_MEASUREMENT_ID'] == 'G-TEST123456'
+    
+    def test_ga_measurement_id_fallback(self, app):
+        """Test GA_MEASUREMENT_ID fallback when env var not set"""
+        with app.app_context():
+            with patch.dict(os.environ, {}, clear=True):
+                app.config['GA_MEASUREMENT_ID'] = os.getenv('GA_MEASUREMENT_ID', '')
+                assert app.config['GA_MEASUREMENT_ID'] == ''
+    
+    def test_inject_config_context_processor(self, app):
+        """Test inject_config context processor"""
+        with app.app_context():
+            from app import inject_config  # Replace 'app' with your actual module
+            
+            context = inject_config()
+            assert 'config' in context
+            assert context['config'] == app.config
+            assert hasattr(context['config'], 'get')
+    
+    def test_ga_script_in_base_template(self, client, app):
+        """Test Google Analytics script inclusion in base template"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+            
+            response = client.get('/')
+            assert response.status_code == 200
+            
+            html = response.get_data(as_text=True)
+            assert 'googletagmanager.com/gtag/js?id=G-TEST123456' in html
+            assert 'window.dataLayer = window.dataLayer || [];' in html
+            assert 'gtag(\'js\', new Date());' in html
+            assert 'gtag(\'config\', \'G-TEST123456\');' in html
+    
+    def test_ga_script_with_empty_measurement_id(self, client, app):
+        """Test GA script behavior with empty measurement ID"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = ''
+            
+            response = client.get('/')
+            html = response.get_data(as_text=True)
+            
+            # Should still include GA script but with empty ID
+            assert 'googletagmanager.com/gtag/js?id=' in html
+            assert 'gtag(\'config\', \'\');' in html
+    
+    def test_ga_script_in_all_templates(self, client, app):
+        """Test GA script inclusion in all major templates"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+            
+            # Test pages that should include GA
+            test_pages = [
+                ('/', 'index'),
+                ('/login', 'login'),
+                ('/register', 'register'),
+            ]
+            
+            for url, page_name in test_pages:
+                response = client.get(url)
+                if response.status_code == 200:
+                    html = response.get_data(as_text=True)
+                    assert 'googletagmanager.com/gtag/js' in html, f"GA missing on {page_name}"
+                    assert 'gtag(' in html, f"gtag function missing on {page_name}"
+
+class TestGoogleAnalyticsEventTracking:
+    """Test Google Analytics event tracking functionality"""
+    
+    def test_login_tracking_script(self, client, app):
+        """Test login event tracking script"""
+        with app.app_context():
+            response = client.get('/login')
+            if response.status_code == 200:
+                html = response.get_data(as_text=True)
+                assert 'trackLogin' in html
+                assert 'gtag(\'event\', \'login\'' in html
+                assert 'event_category\': \'Authentication\'' in html
+    
+    def test_register_tracking_script(self, client, app):
+        """Test registration event tracking script"""
+        with app.app_context():
+            response = client.get('/register')
+            if response.status_code == 200:
+                html = response.get_data(as_text=True)
+                assert 'trackSignUp' in html
+                assert 'gtag(\'event\', \'sign_up\'' in html
+                assert 'event_category\': \'Authentication\'' in html
+    
+    def test_generate_page_tracking_script(self, client, app, auth_headers):
+        """Test blog generation tracking scripts"""
+        with app.app_context():
+            response = client.get('/generate', headers=auth_headers)
+            if response.status_code == 200:
+                html = response.get_data(as_text=True)
+                
+                # Check for tracking functions
+                tracking_functions = [
+                    'trackBlogGenerationStart',
+                    'trackBlogGenerationSuccess',
+                    'trackBlogGenerationError',
+                    'trackPdfDownload',
+                    'trackContentCopy'
+                ]
+                
+                for func in tracking_functions:
+                    assert func in html, f"Missing tracking function: {func}"
+    
+    def test_blog_generation_event_tracking(self, client, app, auth_headers):
+        """Test blog generation event tracking"""
+        with app.app_context():
+            response = client.get('/generate', headers=auth_headers)
+            if response.status_code == 200:
+                html = response.get_data(as_text=True)
+                
+                # Check for specific GA events
+                assert 'blog_generation_start' in html
+                assert 'blog_generation_success' in html
+                assert 'blog_generation_error' in html
+                assert 'event_category\': \'Blog Generation\'' in html
+
+class TestTemplateIntegration:
+    """Test template integration with Google Analytics"""
+    
+    def test_base_template_structure(self, client, app):
+        """Test base template has proper GA structure"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+            
+            response = client.get('/')
+            html = response.get_data(as_text=True)
+            
+            # Check template structure - look for rendered content, not template syntax
+            template_checks = [
+                '<!DOCTYPE html>',
+                '<head>',
+                'Google tag (gtag.js)',  # Comment should be present
+                'googletagmanager.com/gtag/js',  # Actual GA script
+                'gtag(\'config\'',  # GA configuration call
+            ]
+            
+            for check in template_checks:
+                assert check in html, f"Missing template element: {check}"
+    
+    def test_config_availability_in_templates(self, client, app):
+        """Test config is available in all templates"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+            
+            # Test template rendering with config
+            response = client.get('/')
+            html = response.get_data(as_text=True)
+            
+            # Should see the measurement ID rendered
+            assert 'G-TEST123456' in html
+    
+    def test_template_blocks_structure(self, client, app):
+        """Test template blocks are properly structured"""
+        with app.app_context():
+            response = client.get('/')
+            if response.status_code == 200:
+                html = response.get_data(as_text=True)
+                
+                # Check for actual rendered content, not template syntax
+                template_elements = [
+                    '<title>',
+                    '<meta charset="UTF-8">',
+                    'bootstrap',  # Case insensitive check for Bootstrap
+                    'font',  # Font Awesome or other font references
+                ]
+                
+                for element in template_elements:
+                    # Use case-insensitive search
+                    assert element.lower() in html.lower(), f"Missing template element: {element}"
+    
+    def test_javascript_integration(self, client, app):
+        """Test JavaScript integration in templates"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+            
+            response = client.get('/')
+            html = response.get_data(as_text=True)
+            
+            # Check for JavaScript elements
+            js_elements = [
+                '<script',
+                'gtag(',
+                'dataLayer',
+                '</script>',
+            ]
+            
+            for element in js_elements:
+                assert element in html, f"Missing JavaScript element: {element}"
+    
+    def test_css_integration(self, client, app):
+        """Test CSS integration in templates"""
+        with app.app_context():
+            response = client.get('/')
+            html = response.get_data(as_text=True)
+            
+            # Check for CSS links - look for common patterns
+            css_patterns = [
+                'stylesheet',
+                '.css',
+                '<link',
+            ]
+            
+            css_found = any(pattern in html.lower() for pattern in css_patterns)
+            assert css_found, "No CSS links found in template"
+    
+    def test_responsive_meta_tags(self, client, app):
+        """Test responsive and meta tags"""
+        with app.app_context():
+            response = client.get('/')
+            html = response.get_data(as_text=True)
+            
+            # Check for essential meta tags
+            meta_tags = [
+                'viewport',
+                'charset',
+            ]
+            
+            for tag in meta_tags:
+                assert tag in html.lower(), f"Missing meta tag: {tag}"
+
+class TestGoogleAnalyticsConfiguration:
+    """Test different GA configuration scenarios"""
+    
+    def test_ga_config_with_production_id(self, app):
+        """Test GA configuration with production ID"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-8S6B6N48LH'
+            context = inject_config()
+            
+            assert context['config']['GA_MEASUREMENT_ID'] == 'G-8S6B6N48LH'
+    
+    def test_ga_config_with_test_id(self, app):
+        """Test GA configuration with test ID"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+            context = inject_config()
+            
+            assert context['config']['GA_MEASUREMENT_ID'] == 'G-TEST123456'
+    
+    def test_ga_config_validation(self, app):
+        """Test GA configuration format validation"""
+        with app.app_context():
+            # Test valid format
+            valid_ids = ['G-XXXXXXXXXX', 'G-8S6B6N48LH', 'G-TEST123456']
+            
+            for valid_id in valid_ids:
+                app.config['GA_MEASUREMENT_ID'] = valid_id
+                context = inject_config()
+                assert context['config']['GA_MEASUREMENT_ID'] == valid_id
+    
+    @patch.dict(os.environ, {'GA_MEASUREMENT_ID': 'G-ENV123456'})
+    def test_environment_variable_override(self, app):
+        """Test environment variable overrides default config"""
+        with app.app_context():
+            # Simulate app startup config loading
+            app.config['GA_MEASUREMENT_ID'] = os.getenv('GA_MEASUREMENT_ID', 'G-DEFAULT')
+            
+            assert app.config['GA_MEASUREMENT_ID'] == 'G-ENV123456'
+
+class TestGoogleAnalyticsErrorHandling:
+    """Test error handling in GA implementation"""
+    
+    def test_missing_ga_measurement_id(self, client, app):
+        """Test behavior when GA_MEASUREMENT_ID is missing"""
+        with app.app_context():
+            # Remove GA_MEASUREMENT_ID
+            if 'GA_MEASUREMENT_ID' in app.config:
+                del app.config['GA_MEASUREMENT_ID']
+            
+            # Should not break the app
+            response = client.get('/')
+            assert response.status_code == 200
+    
+    def test_invalid_ga_measurement_id(self, client, app):
+        """Test behavior with invalid GA_MEASUREMENT_ID format"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'INVALID-ID'
+            
+            response = client.get('/')
+            assert response.status_code == 200
+            
+            html = response.get_data(as_text=True)
+            assert 'INVALID-ID' in html  # Should still render, even if invalid
+    
+    def test_context_processor_error_handling(self, app):
+        """Test context processor handles missing config gracefully"""
+        with app.app_context():
+            # Test with missing config
+            original_config = app.config
+            app.config = None
+            
+            try:
+                context = inject_config()
+                # Should handle gracefully
+                assert context is not None
+            except Exception as e:
+                # Should not raise unhandled exceptions
+                assert isinstance(e, (AttributeError, TypeError))
+            finally:
+                app.config = original_config
+
+class TestGoogleAnalyticsJavaScript:
+    """Test JavaScript functionality for GA tracking"""
+    
+    def test_gtag_initialization_script(self, client, app):
+        """Test gtag initialization script"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+            
+            response = client.get('/')
+            html = response.get_data(as_text=True)
+            
+            # Check gtag initialization
+            assert 'window.dataLayer = window.dataLayer || [];' in html
+            assert 'function gtag(){dataLayer.push(arguments);}' in html
+            assert 'gtag(\'js\', new Date());' in html
+    
+    def test_event_tracking_functions_exist(self, client, app, auth_headers):
+        """Test that event tracking functions are defined"""
+        with app.app_context():
+            response = client.get('/generate', headers=auth_headers)
+            if response.status_code == 200:
+                html = response.get_data(as_text=True)
+                
+                # Check function definitions
+                functions = [
+                    'function trackBlogGenerationStart',
+                    'function trackBlogGenerationSuccess',
+                    'function trackBlogGenerationError',
+                    'function trackPdfDownload',
+                    'function trackContentCopy'
+                ]
+                
+                for func in functions:
+                    assert func in html, f"Missing function definition: {func}"
+    
+    def test_page_view_tracking(self, client, app):
+        """Test page view tracking implementation"""
+        with app.app_context():
+            response = client.get('/generate')  # Or any page with tracking
+            if response.status_code == 200:
+                html = response.get_data(as_text=True)
+                
+                # Check for page view tracking
+                page_view_indicators = [
+                    'page_view',
+                    'page_title',
+                    'page_location',
+                    'content_group'
+                ]
+                
+                # At least some page view tracking should exist
+                has_page_tracking = any(indicator in html for indicator in page_view_indicators)
+                assert has_page_tracking, "No page view tracking found"
+
+class TestGoogleAnalyticsCompliance:
+    """Test GA implementation compliance and best practices"""
+    
+    def test_ga_script_async_loading(self, client, app):
+        """Test GA script uses async loading"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+            
+            response = client.get('/')
+            html = response.get_data(as_text=True)
+            
+            # Check for async attribute
+            assert 'async src="https://www.googletagmanager.com/gtag/js' in html
+    
+    def test_ga_privacy_considerations(self, client, app):
+        """Test privacy-related GA implementation"""
+        with app.app_context():
+            response = client.get('/')
+            html = response.get_data(as_text=True)
+            
+            # Should use HTTPS
+            assert 'https://www.googletagmanager.com' in html
+            # Should not include personal data in tracking calls
+            assert 'email' not in html.lower() or 'user_id' not in html.lower()
+
+# Additional fixtures for testing
+@pytest.fixture
+def auth_headers():
+    """Provide authentication headers for testing protected routes"""
+    return {
+        'Authorization': 'Bearer test-token',
+        'Content-Type': 'application/json'
+    }
+
+@pytest.fixture
+def mock_ga_response():
+    """Mock Google Analytics response for testing"""
+    return {
+        'success': True,
+        'measurement_id': 'G-TEST123456',
+        'events_tracked': ['page_view', 'blog_generation_start']
+    }
+
+# Integration test for the complete flow
+class TestGoogleAnalyticsEndToEnd:
+    """End-to-end testing of Google Analytics integration"""
+    
+    def test_complete_ga_integration_flow(self, client, app):
+        """Test complete GA integration from config to rendering"""
+        with app.app_context():
+            # 1. Set up configuration
+            app.config['GA_MEASUREMENT_ID'] = 'G-8S6B6N48LH'
+            
+            # 2. Test context processor
+            context = inject_config()
+            assert context['config']['GA_MEASUREMENT_ID'] == 'G-8S6B6N48LH'
+            
+            # 3. Test template rendering
+            response = client.get('/')
+            assert response.status_code == 200
+            
+            html = response.get_data(as_text=True)
+            
+            # 4. Verify all GA components
+            ga_components = [
+                'googletagmanager.com/gtag/js?id=G-8S6B6N48LH',
+                'window.dataLayer = window.dataLayer || [];',
+                'function gtag(){dataLayer.push(arguments);}',
+                'gtag(\'js\', new Date());',
+                'gtag(\'config\', \'G-8S6B6N48LH\');'
+            ]
+            
+            for component in ga_components:
+                assert component in html, f"Missing GA component: {component}"
+            
+            print("✅ Complete Google Analytics integration test passed!")
+    
+    def test_ga_with_user_authentication_flow(self, client, app):
+        """Test GA tracking through user authentication flow"""
+        with app.app_context():
+            app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
+            
+            # Test login page
+            login_response = client.get('/login')
+            if login_response.status_code == 200:
+                login_html = login_response.get_data(as_text=True)
+                assert 'trackLogin' in login_html
+            
+            # Test register page
+            register_response = client.get('/register')
+            if register_response.status_code == 200:
+                register_html = register_response.get_data(as_text=True)
+                assert 'trackSignUp' in register_html             

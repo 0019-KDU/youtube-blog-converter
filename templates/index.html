@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 
+{% block title %}Home – BlogGen Pro{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+{% endblock %}
+
 {% block content %}
 <!-- Hero Section -->
 <section class="hero-section">
@@ -11,8 +17,12 @@
                     <div class="hero-badge mb-4">
                         <span class="badge bg-orange">AI-Powered</span>
                     </div>
-                    <h1 class="hero-title">Transform YouTube Videos into <span class="text-orange">Engaging Blogs</span></h1>
-                    <p class="hero-subtitle">Generate professional blog posts from any YouTube video in seconds using advanced AI technology.</p>
+                    <h1 class="hero-title">
+                        Transform YouTube Videos into <span class="text-orange">Engaging Blogs</span>
+                    </h1>
+                    <p class="hero-subtitle">
+                        Generate professional blog posts from any YouTube video in seconds using advanced AI technology.
+                    </p>
                     
                     <div class="hero-stats mb-4">
                         <div class="stat-item">
@@ -29,7 +39,7 @@
                         </div>
                     </div>
                     
-                    {% if user_logged_in %}
+                    {% if current_user.is_authenticated %}
                     <div class="hero-buttons">
                         <a href="{{ url_for('generate_page') }}" class="btn btn-orange btn-lg me-3">
                             <i class="fas fa-rocket me-2"></i>Start Generating
@@ -77,60 +87,50 @@
     <div class="container">
         <div class="text-center mb-5">
             <h2 class="section-title">Why Choose BlogGen Pro?</h2>
-            <p class="section-subtitle">Powerful features that make blog generation effortless</p>
+            <p class="section-subtitle">
+                Powerful features that make blog generation effortless
+            </p>
         </div>
         
         <div class="row g-4">
             <div class="col-md-6 col-lg-4">
                 <div class="feature-card">
-                    <div class="feature-icon">
-                        <i class="fas fa-bolt"></i>
-                    </div>
+                    <div class="feature-icon"><i class="fas fa-bolt"></i></div>
                     <h4>Lightning Fast</h4>
                     <p>Generate high-quality blog posts from YouTube videos in under 60 seconds.</p>
                 </div>
             </div>
             <div class="col-md-6 col-lg-4">
                 <div class="feature-card">
-                    <div class="feature-icon">
-                        <i class="fas fa-brain"></i>
-                    </div>
+                    <div class="feature-icon"><i class="fas fa-brain"></i></div>
                     <h4>AI-Powered</h4>
                     <p>Advanced AI algorithms ensure coherent, engaging, and well-structured content.</p>
                 </div>
             </div>
             <div class="col-md-6 col-lg-4">
                 <div class="feature-card">
-                    <div class="feature-icon">
-                        <i class="fas fa-file-pdf"></i>
-                    </div>
+                    <div class="feature-icon"><i class="fas fa-file-pdf"></i></div>
                     <h4>PDF Export</h4>
                     <p>Download your generated blogs as beautifully formatted PDF documents.</p>
                 </div>
             </div>
             <div class="col-md-6 col-lg-4">
                 <div class="feature-card">
-                    <div class="feature-icon">
-                        <i class="fas fa-globe"></i>
-                    </div>
+                    <div class="feature-icon"><i class="fas fa-globe"></i></div>
                     <h4>Multi-Language</h4>
                     <p>Support for multiple languages to reach a global audience.</p>
                 </div>
             </div>
             <div class="col-md-6 col-lg-4">
                 <div class="feature-card">
-                    <div class="feature-icon">
-                        <i class="fas fa-cloud"></i>
-                    </div>
+                    <div class="feature-icon"><i class="fas fa-cloud"></i></div>
                     <h4>Cloud Storage</h4>
                     <p>All your generated blogs are safely stored in the cloud for easy access.</p>
                 </div>
             </div>
             <div class="col-md-6 col-lg-4">
                 <div class="feature-card">
-                    <div class="feature-icon">
-                        <i class="fas fa-shield-alt"></i>
-                    </div>
+                    <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
                     <h4>Secure & Private</h4>
                     <p>Your data is protected with enterprise-grade security and privacy measures.</p>
                 </div>
@@ -144,16 +144,16 @@
     <div class="container">
         <div class="text-center mb-5">
             <h2 class="section-title text-light">How It Works</h2>
-            <p class="section-subtitle text-light-50">Simple 3-step process to generate amazing blogs</p>
+            <p class="section-subtitle text-light-50">
+                Simple 3-step process to generate amazing blogs
+            </p>
         </div>
         
         <div class="row g-4">
             <div class="col-lg-4">
                 <div class="step-card">
                     <div class="step-number">1</div>
-                    <div class="step-icon">
-                        <i class="fab fa-youtube"></i>
-                    </div>
+                    <div class="step-icon"><i class="fab fa-youtube"></i></div>
                     <h4>Paste YouTube URL</h4>
                     <p>Simply paste any YouTube video URL into our intelligent system.</p>
                 </div>
@@ -161,9 +161,7 @@
             <div class="col-lg-4">
                 <div class="step-card">
                     <div class="step-number">2</div>
-                    <div class="step-icon">
-                        <i class="fas fa-magic"></i>
-                    </div>
+                    <div class="step-icon"><i class="fas fa-magic"></i></div>
                     <h4>AI Processing</h4>
                     <p>Our AI analyzes the video content and generates a comprehensive blog post.</p>
                 </div>
@@ -171,9 +169,7 @@
             <div class="col-lg-4">
                 <div class="step-card">
                     <div class="step-number">3</div>
-                    <div class="step-icon">
-                        <i class="fas fa-download"></i>
-                    </div>
+                    <div class="step-icon"><i class="fas fa-download"></i></div>
                     <h4>Download & Share</h4>
                     <p>Get your blog post as HTML or PDF and share it with the world.</p>
                 </div>
@@ -183,7 +179,7 @@
 </section>
 
 <!-- CTA Section -->
-{% if not user_logged_in %}
+{% if not current_user.is_authenticated %}
 <section class="cta-section py-5">
     <div class="container">
         <div class="cta-card">
