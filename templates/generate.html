@@ -2,6 +2,10 @@
 
 {% block title %}Generate Blog - BlogGen Pro{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+{% endblock %}
+
 {% block content %}
 <section class="generate-section">
     <div class="container-fluid">
@@ -165,11 +169,59 @@
 <script>
 let generatedBlogData = null;
 
+// Google Analytics tracking functions
+function trackBlogGenerationStart(youtubeUrl) {
+    gtag('event', 'blog_generation_start', {
+        'event_category': 'Blog Generation',
+        'event_label': youtubeUrl,
+        'custom_parameter_1': 'youtube_url'
+    });
+}
+
+function trackBlogGenerationSuccess(youtubeUrl, wordCount, generationTime) {
+    gtag('event', 'blog_generation_success', {
+        'event_category': 'Blog Generation',
+        'event_label': youtubeUrl,
+        'custom_parameter_1': wordCount,
+        'custom_parameter_2': generationTime
+    });
+}
+
+function trackBlogGenerationError(youtubeUrl, errorMessage) {
+    gtag('event', 'blog_generation_error', {
+        'event_category': 'Blog Generation',
+        'event_label': youtubeUrl,
+        'custom_parameter_1': errorMessage
+    });
+}
+
+function trackPdfDownload(blogTitle) {
+    gtag('event', 'pdf_download', {
+        'event_category': 'Downloads',
+        'event_label': blogTitle || 'Unknown Blog',
+        'file_extension': 'pdf'
+    });
+}
+
+function trackContentCopy(blogTitle) {
+    gtag('event', 'content_copy', {
+        'event_category': 'Content Interaction',
+        'event_label': blogTitle || 'Unknown Blog'
+    });
+}
+
 // Initialize page when loaded
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Generate page initialized');
     initializeVideoPreview();
     initializeForm();
+    
+    // Track page view
+    gtag('event', 'page_view', {
+        'page_title': 'Generate Blog Page',
+        'page_location': window.location.href,
+        'content_group1': 'Blog Generation'
+    });
 });
 
 function initializeVideoPreview() {
@@ -184,6 +236,12 @@ function initializeVideoPreview() {
             if (videoId) {
                 frame.src = `https://www.youtube.com/embed/${videoId}`;
                 preview.style.display = 'block';
+                
+                // Track video preview
+                gtag('event', 'video_preview', {
+                    'event_category': 'User Interaction',
+                    'event_label': url
+                });
             } else {
                 preview.style.display = 'none';
             }
@@ -219,6 +277,12 @@ function handleFormSubmit(e) {
     
     console.log('Submitting URL:', youtubeUrl);
     
+    // Track generation start
+    trackBlogGenerationStart(youtubeUrl);
+    
+    // Record start time for performance tracking
+    const startTime = Date.now();
+    
     // Get token from localStorage
     const token = localStorage.getItem('access_token');
     
@@ -237,15 +301,24 @@ function handleFormSubmit(e) {
     .then(data => {
         console.log('Response data:', data);
         
+        const processingTime = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
+        
         if (data.success) {
+            // Track successful generation
+            trackBlogGenerationSuccess(youtubeUrl, data.word_count, processingTime);
+            
             // Show results
-            showResults(data.blog_content, data.generation_time, data.word_count, data.title);
+            showResults(data.blog_content, data.generation_time || processingTime, data.word_count, data.title);
+            
             if (typeof showToast === 'function') {
                 showToast('Blog generated successfully!', 'success');
             }
         } else {
-            // Show error
+            // Track generation error
             const errorMsg = data.message || 'Failed to generate blog';
+            trackBlogGenerationError(youtubeUrl, errorMsg);
+            
+            // Show error
             errorAlert.textContent = errorMsg;
             errorAlert.classList.remove('d-none');
             
@@ -258,6 +331,10 @@ function handleFormSubmit(e) {
     .catch(error => {
         console.error('Generation error:', error);
         const errorMsg = 'Failed to generate blog. Please try again.';
+        
+        // Track network/system error
+        trackBlogGenerationError(youtubeUrl, 'Network/System Error');
+        
         errorAlert.textContent = errorMsg;
         errorAlert.classList.remove('d-none');
         
@@ -311,6 +388,14 @@ function showResults(blogContent, generationTime, wordCount, title) {
         resultsState.style.opacity = '1';
     }, 100);
     
+    // Track results display
+    gtag('event', 'blog_results_displayed', {
+        'event_category': 'User Experience',
+        'event_label': title || 'Unknown Blog',
+        'custom_parameter_1': wordCount,
+        'custom_parameter_2': generationTime
+    });
+    
     console.log('Results displayed successfully');
 }
 
@@ -327,6 +412,9 @@ function formatBlogContent(content) {
     
     // Bold text
     formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    
+    // Italic text
+    formatted = formatted.replace(/\*(.+?)\*/g, '<em>$1</em>');
     
     // Line breaks - convert double newlines to paragraphs
     const paragraphs = formatted.split('\n\n');
@@ -348,11 +436,20 @@ function copyBlogContent() {
     if (generatedBlogData && generatedBlogData.content) {
         const textContent = generatedBlogData.content;
         
+        // Track copy attempt
+        trackContentCopy(generatedBlogData.title);
+        
         if (navigator.clipboard) {
             navigator.clipboard.writeText(textContent).then(function() {
                 if (typeof showToast === 'function') {
                     showToast('Blog content copied to clipboard!', 'success');
                 }
+                
+                // Track successful copy
+                gtag('event', 'content_copy_success', {
+                    'event_category': 'Content Interaction',
+                    'event_label': generatedBlogData.title || 'Unknown Blog'
+                });
             }).catch(function() {
                 fallbackCopy(textContent);
             });
@@ -363,6 +460,12 @@ function copyBlogContent() {
         if (typeof showToast === 'function') {
             showToast('No content to copy', 'error');
         }
+        
+        // Track copy failure
+        gtag('event', 'content_copy_error', {
+            'event_category': 'Content Interaction',
+            'event_label': 'No content available'
+        });
     }
 }
 
@@ -379,11 +482,23 @@ function fallbackCopy(text) {
         if (typeof showToast === 'function') {
             showToast('Blog content copied to clipboard!', 'success');
         }
+        
+        // Track successful fallback copy
+        gtag('event', 'content_copy_fallback_success', {
+            'event_category': 'Content Interaction',
+            'event_label': generatedBlogData?.title || 'Unknown Blog'
+        });
     } catch (err) {
         console.error('Copy failed:', err);
         if (typeof showToast === 'function') {
             showToast('Copy failed', 'error');
         }
+        
+        // Track copy failure
+        gtag('event', 'content_copy_fallback_error', {
+            'event_category': 'Content Interaction',
+            'event_label': 'Fallback copy failed'
+        });
     }
     
     document.body.removeChild(textArea);
@@ -410,18 +525,62 @@ function extractVideoId(url) {
 // Download button handler
 document.addEventListener('click', function(e) {
     if (e.target.closest('#downloadBtn')) {
+        e.preventDefault();
+        
         const btn = e.target.closest('#downloadBtn');
         const originalHTML = btn.innerHTML;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>PDF...';
         
+        // Track PDF download attempt
+        if (generatedBlogData && generatedBlogData.title) {
+            trackPdfDownload(generatedBlogData.title);
+        }
+        
+        // Simulate download process (replace with actual download logic)
         setTimeout(() => {
             btn.innerHTML = '<i class="fas fa-check me-1"></i>Done!';
+            
+            // Track successful PDF generation
+            gtag('event', 'pdf_generation_success', {
+                'event_category': 'Downloads',
+                'event_label': generatedBlogData?.title || 'Unknown Blog'
+            });
+            
             setTimeout(() => {
                 btn.innerHTML = originalHTML;
             }, 2000);
         }, 1000);
     }
 });
+
+// Track user engagement (time spent on page)
+let pageStartTime = Date.now();
+let engagementTracked = false;
+
+window.addEventListener('beforeunload', function() {
+    if (!engagementTracked) {
+        const timeSpent = Math.round((Date.now() - pageStartTime) / 1000);
+        gtag('event', 'page_engagement', {
+            'event_category': 'User Engagement',
+            'event_label': 'Generate Page',
+            'custom_parameter_1': timeSpent
+        });
+        engagementTracked = true;
+    }
+});
+
+// Track engagement after 30 seconds
+setTimeout(() => {
+    if (!engagementTracked) {
+        const timeSpent = Math.round((Date.now() - pageStartTime) / 1000);
+        gtag('event', 'engaged_session', {
+            'event_category': 'User Engagement',
+            'event_label': 'Generate Page',
+            'custom_parameter_1': timeSpent
+        });
+        engagementTracked = true;
+    }
+}, 30000);
 
 // Make functions available globally
 window.copyBlogContent = copyBlogContent;

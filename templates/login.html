@@ -2,6 +2,10 @@
 
 {% block title %}Login - BlogGen Pro{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+{% endblock %}
+
 {% block content %}
 <section class="auth-section">
     <div class="container">
@@ -59,6 +63,13 @@
 
 {% block extra_scripts %}
 <script>
+function trackLogin() {
+    gtag('event', 'login', {
+        'event_category': 'Authentication',
+        'method': 'email'
+    });
+}
+
 document.getElementById('loginForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
@@ -91,6 +102,9 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
         const data = await response.json();
         
         if (data.success && response.ok) {
+            // Track successful login
+            trackLogin();
+            
             localStorage.setItem('access_token', data.access_token);
             
             try {
@@ -103,10 +117,6 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
                 });
             } catch (sessionError) {
                 console.log('Session token error (non-critical):', sessionError);
-            }
-            
-            if (typeof showToast === 'function') {
-                showToast('Login successful! Redirecting...', 'success');
             }
             
             setTimeout(() => {

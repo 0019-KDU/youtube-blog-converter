@@ -474,6 +474,7 @@ jobs:
             -e FLASK_DEBUG="false" \
             -e FLASK_HOST="0.0.0.0" \
             -e OPENAI_MODEL_NAME="${{ secrets.OPENAI_MODEL_NAME }}" \
+            -e GA_MEASUREMENT_ID="${{ secrets.GA_MEASUREMENT_ID }}" \
             -p 5000:5000 \
             youtube-blog-converter:${{ github.sha }}
           # wait for Flask to boot

@@ -62,6 +62,15 @@ Session(app)
 # Initialize JWT
 jwt = JWTManager(app)
 
+
+# Add this after your existing app configurations (around line 60-70)
+app.config['GA_MEASUREMENT_ID'] = os.getenv('GA_MEASUREMENT_ID', '')
+
+# Make config available in templates (add this context processor)
+@app.context_processor
+def inject_config():
+    return dict(config=app.config)
+
 # Import application components
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
