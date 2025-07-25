@@ -63,8 +63,9 @@ def setup_logging():
     """Configure application logging with environment-aware file outputs"""
     
     # Determine log directory based on environment
-    if os.getenv('TESTING') == 'true' or os.getenv('FLASK_ENV') == 'testing':
-        # Use temp directory for testing
+    if os.getenv('TESTING') == 'true' or os.getenv('FLASK_ENV') == 'testing' or os.getenv('CI') == 'true':
+        # Use temp directory for testing/CI
+        import tempfile
         log_dir = Path(tempfile.gettempdir()) / 'flask-app-test-logs'
     elif os.getenv('LOG_TO_FILE', 'true').lower() == 'false':
         # Skip file logging (for Azure/cloud environments)
@@ -152,6 +153,7 @@ except PermissionError:
     logging.basicConfig(level=logging.INFO)
     access_logger = logging.getLogger('access')
     print("Warning: File logging disabled due to permissions. Using console logging only.")
+
 
 logger = logging.getLogger(__name__)
 

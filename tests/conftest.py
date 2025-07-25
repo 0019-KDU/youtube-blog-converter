@@ -272,12 +272,14 @@ def setup_test_environment():
     """Setup test environment before any tests run"""
     os.environ['TESTING'] = 'true'
     os.environ['FLASK_ENV'] = 'testing'
+    os.environ['CI'] = 'true'
     os.environ['LOG_TO_FILE'] = 'false'
     os.environ['LOG_LEVEL'] = 'DEBUG'
     
     yield
     
     # Cleanup
-    for key in ['TESTING', 'FLASK_ENV', 'LOG_TO_FILE', 'LOG_LEVEL']:
-        os.environ.pop(key, None)            
+    for key in ['TESTING', 'FLASK_ENV', 'CI', 'LOG_TO_FILE', 'LOG_LEVEL']:
+        os.environ.pop(key, None)
+         
             

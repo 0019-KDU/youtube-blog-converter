@@ -150,6 +150,12 @@ jobs:
           pip install pytest pytest-cov
       
       - name: Run tests with coverage
+        env:
+          TESTING: true
+          FLASK_ENV: testing
+          CI: true
+          LOG_TO_FILE: false
+          LOG_LEVEL: DEBUG
         run: pytest --cov=src --cov-report=xml:coverage.xml -v tests/
         
       - name: Upload coverage report
