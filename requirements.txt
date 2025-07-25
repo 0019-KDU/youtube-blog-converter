@@ -14,4 +14,4 @@ gunicorn
 browser-cookie3
 Flask-JWT-Extended
 pymongo
-prometheus-client
+python-json-logger

@@ -2,10 +2,11 @@ FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
-# Install minimal system dependencies
+# Install system dependencies including curl for health checks
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python dependencies
 COPY requirements.txt .
@@ -23,14 +24,27 @@ COPY static/ ./static/
 # Ensure Python can find modules
 RUN touch auth/__init__.py src/__init__.py
 
-# Create non-root user
-RUN useradd -m appuser && \
-    mkdir -p /app/.flask_session /app/logs && \
-    chown -R appuser:appuser /app
+# Create directories for logs and sessions with proper permissions
+RUN mkdir -p /var/log/flask-app /app/.flask_session /app/logs && \
+    chmod 755 /var/log/flask-app /app/.flask_session /app/logs
 
+# Create non-root user and set ownership
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app /var/log/flask-app
+
+# Switch to non-root user
 USER appuser
 
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# Expose port
 EXPOSE 5000
 
-# Use gunicorn for production
+# Environment variables for logging (can be overridden at runtime)
+ENV LOG_LEVEL=INFO
+ENV LOG_TO_FILE=true
+ENV PYTHONUNBUFFERED=1
+
 CMD ["python", "-m", "flask", "run", "--host=0.0.0.0"]

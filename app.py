@@ -4,21 +4,125 @@ import sys
 import io
 import uuid
 import logging
+import logging.handlers
 import time
 import datetime
 import gc
+import json
 from pathlib import Path
+from cachelib import FileSystemCache
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, send_file, redirect, url_for, session, jsonify
+from flask import Flask, render_template, request, send_file, redirect, url_for, session, jsonify, g
 from flask_session import Session
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, verify_jwt_in_request, decode_token
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# Custom JSON formatter for structured logging
+class JSONFormatter(logging.Formatter):
+    """Custom JSON formatter for structured logging"""
+    
+    def format(self, record):
+        log_entry = {
+            'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+            'module': record.module,
+            'function': record.funcName,
+            'line': record.lineno,
+            'process_id': os.getpid(),
+            'thread_id': record.thread,
+        }
+        
+        # Add exception info if present
+        if record.exc_info:
+            log_entry['exception'] = self.formatException(record.exc_info)
+        
+        # Add extra fields from Flask context
+        if hasattr(record, 'user_id'):
+            log_entry['user_id'] = record.user_id
+        if hasattr(record, 'youtube_url'):
+            log_entry['youtube_url'] = record.youtube_url
+        if hasattr(record, 'blog_generation_time'):
+            log_entry['blog_generation_time'] = record.blog_generation_time
+        if hasattr(record, 'request_id'):
+            log_entry['request_id'] = record.request_id
+        if hasattr(record, 'method'):
+            log_entry['method'] = record.method
+        if hasattr(record, 'path'):
+            log_entry['path'] = record.path
+        if hasattr(record, 'status_code'):
+            log_entry['status_code'] = record.status_code
+        if hasattr(record, 'remote_addr'):
+            log_entry['remote_addr'] = record.remote_addr
+            
+        return json.dumps(log_entry)
+
+def setup_logging():
+    """Configure application logging with file outputs"""
+    
+    # Create logs directory
+    log_dir = Path('/var/log/flask-app')
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create formatters
+    json_formatter = JSONFormatter()
+    console_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Remove existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(console_formatter)
+    console_handler.setLevel(logging.INFO)
+    root_logger.addHandler(console_handler)
+    
+    # File handler for all logs
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_dir / 'app.log',
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setFormatter(json_formatter)
+    file_handler.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+    
+    # Error file handler
+    error_handler = logging.handlers.RotatingFileHandler(
+        log_dir / 'error.log',
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    error_handler.setFormatter(json_formatter)
+    error_handler.setLevel(logging.ERROR)
+    root_logger.addHandler(error_handler)
+    
+    # Access log handler
+    access_handler = logging.handlers.RotatingFileHandler(
+        log_dir / 'access.log',
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    access_handler.setFormatter(json_formatter)
+    access_handler.setLevel(logging.INFO)
+    
+    # Create access logger
+    access_logger = logging.getLogger('access')
+    access_logger.addHandler(access_handler)
+    access_logger.propagate = False
+    
+    return access_logger
+
 # Initialize logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+access_logger = setup_logging()
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -52,21 +156,25 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(
     seconds=int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 86400))
 )
 
-# Configure server-side sessions
-app.config['SESSION_TYPE'] = 'filesystem'
-app.config['SESSION_FILE_DIR'] = './.flask_session/'
+# Configure server-side sessions - UPDATED
+app.config['SESSION_TYPE'] = 'cachelib'
+app.config['SESSION_CACHELIB'] = FileSystemCache(
+    cache_dir='./.flask_session/', 
+    threshold=500, 
+    default_timeout=300
+)
 app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_USE_SIGNER'] = False  # FIXED: Removed deprecated option
+
 Session(app)
 
 # Initialize JWT
 jwt = JWTManager(app)
 
-
-# Add this after your existing app configurations (around line 60-70)
+# Add GA configuration
 app.config['GA_MEASUREMENT_ID'] = os.getenv('GA_MEASUREMENT_ID', '')
 
-# Make config available in templates (add this context processor)
+# Make config available in templates
 @app.context_processor
 def inject_config():
     return dict(config=app.config)
@@ -84,6 +192,37 @@ except ImportError as e:
 
 # Register authentication blueprint
 app.register_blueprint(auth_bp, url_prefix='/auth')
+
+# Request middleware for logging
+@app.before_request
+def log_request():
+    """Log incoming requests"""
+    request_id = str(uuid.uuid4())
+    g.request_id = request_id
+    
+    access_logger.info(
+        'Request started',
+        extra={
+            'request_id': request_id,
+            'method': request.method,
+            'path': request.path,
+            'remote_addr': request.remote_addr,
+            'user_agent': request.headers.get('User-Agent', ''),
+        }
+    )
+
+@app.after_request
+def log_response(response):
+    """Log responses"""
+    access_logger.info(
+        'Request completed',
+        extra={
+            'request_id': getattr(g, 'request_id', 'unknown'),
+            'status_code': response.status_code,
+            'content_length': response.content_length,
+        }
+    )
+    return response
 
 # ========== CLEANUP FUNCTIONS ==========
 def cleanup_com_objects():
@@ -318,44 +457,79 @@ def generate_blog():
     start_time = time.time()
     blog_model = None
     user_model = None
+    request_id = getattr(g, 'request_id', 'unknown')
     
     try:
-        # Get current user
         current_user = get_current_user()
         if not current_user:
+            logger.warning('Unauthorized blog generation attempt', extra={'request_id': request_id})
             return jsonify({'success': False, 'message': 'Authentication required'}), 401
         
-        # Get form data
         youtube_url = request.form.get('youtube_url', '').strip()
         language = request.form.get('language', 'en')
         
+        logger.info(
+            'Blog generation started',
+            extra={
+                'request_id': request_id,
+                'user_id': current_user['_id'],
+                'youtube_url': youtube_url,
+                'language': language
+            }
+        )
+        
         if not youtube_url:
+            logger.warning('Empty YouTube URL provided', extra={'request_id': request_id})
             return jsonify({'success': False, 'message': 'YouTube URL is required'}), 400
         
         # Validate URL format
         if not re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', youtube_url):
+            logger.warning(
+                'Invalid YouTube URL format',
+                extra={'request_id': request_id, 'youtube_url': youtube_url}
+            )
             return jsonify({'success': False, 'message': 'Please enter a valid YouTube URL'}), 400
         
         # Extract video ID
         video_id = extract_video_id(youtube_url)
         if not video_id:
+            logger.warning(
+                'Could not extract video ID',
+                extra={'request_id': request_id, 'youtube_url': youtube_url}
+            )
             return jsonify({'success': False, 'message': 'Invalid YouTube URL'}), 400
         
-        logger.info(f"Starting blog generation for URL: {youtube_url} by user: {current_user['username']}")
-        
-        # Generate blog content with proper error handling
+        # Generate blog content
         blog_content = None
         try:
+            logger.info(
+                'Starting blog content generation',
+                extra={'request_id': request_id, 'video_id': video_id}
+            )
             blog_content = generate_blog_from_youtube(youtube_url, language)
         except Exception as gen_error:
-            logger.error(f"Blog generation failed: {str(gen_error)}")
+            logger.error(
+                'Blog generation failed',
+                extra={
+                    'request_id': request_id,
+                    'video_id': video_id,
+                    'error': str(gen_error)
+                },
+                exc_info=True
+            )
             return jsonify({'success': False, 'message': f'Failed to generate blog: {str(gen_error)}'}), 500
         finally:
-            # Force cleanup after generation to prevent Win32 exceptions
             cleanup_after_generation()
         
         # Check if generation was successful
         if not blog_content or len(blog_content) < 100:
+            logger.error(
+                'Blog generation produced insufficient content',
+                extra={
+                    'request_id': request_id,
+                    'content_length': len(blog_content) if blog_content else 0
+                }
+            )
             return jsonify({'success': False, 'message': 'Failed to generate blog content. Please try with a different video.'}), 500
         
         # Check for error responses
@@ -378,8 +552,26 @@ def generate_blog():
         )
         
         if not blog_post:
-            logger.error("Failed to save blog post to database")
+            logger.error(
+                'Failed to save blog post to database',
+                extra={'request_id': request_id}
+            )
             return jsonify({'success': False, 'message': 'Failed to save blog post'}), 500
+        
+        generation_time = time.time() - start_time
+        word_count = len(blog_content.split())
+        
+        logger.info(
+            'Blog generation completed successfully',
+            extra={
+                'request_id': request_id,
+                'user_id': current_user['_id'],
+                'blog_post_id': str(blog_post['_id']),
+                'blog_generation_time': generation_time,
+                'word_count': word_count,
+                'title': title
+            }
+        )
         
         # Store in session for PDF generation
         session['current_blog'] = {
@@ -387,34 +579,36 @@ def generate_blog():
             'youtube_url': youtube_url,
             'video_id': video_id,
             'title': title,
-            'generation_time': time.time() - start_time,
+            'generation_time': generation_time,
             'post_id': str(blog_post['_id']),
-            'word_count': len(blog_content.split())
+            'word_count': word_count
         }
         
-        duration = time.time() - start_time
-        logger.info(f"Blog generated successfully in {duration:.2f}s for user: {current_user['username']}")
-        
-        # Return JSON response for AJAX
         return jsonify({
             'success': True,
             'blog_content': blog_content,
-            'generation_time': f"{duration:.1f}s",
-            'word_count': len(blog_content.split()),
+            'generation_time': f"{generation_time:.1f}s",
+            'word_count': word_count,
             'title': title,
             'video_id': video_id
         })
         
     except Exception as e:
-        logger.error(f"Blog generation failed: {str(e)}", exc_info=True)
+        logger.error(
+            'Unexpected error in blog generation',
+            extra={'request_id': request_id},
+            exc_info=True
+        )
         return jsonify({'success': False, 'message': f'Error generating blog: {str(e)}'}), 500
     
     finally:
-        # Comprehensive cleanup to prevent memory leaks and Win32 exceptions
         try:
             full_cleanup(blog_model, user_model)
         except Exception as cleanup_error:
-            logger.warning(f"Final cleanup warning: {str(cleanup_error)}")
+            logger.warning(
+                'Cleanup error',
+                extra={'request_id': request_id, 'error': str(cleanup_error)}
+            )
 
 @app.route('/download')
 def download_pdf():
@@ -539,6 +733,33 @@ def contact():
         logger.error(f"Contact page error: {str(e)}")
         return render_template('error.html', 
                              error=f"Error loading contact page: {str(e)}"), 500
+
+# Health check endpoint for monitoring
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    try:
+        # Check if we can connect to database
+        from auth.models import mongo_manager
+        if mongo_manager.is_connected():
+            return jsonify({
+                'status': 'healthy',
+                'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+                'database': 'connected'
+            }), 200
+        else:
+            return jsonify({
+                'status': 'unhealthy',
+                'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+                'database': 'disconnected'
+            }), 503
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+            'error': str(e)
+        }), 503
 
 # Error handlers
 @app.errorhandler(401)
