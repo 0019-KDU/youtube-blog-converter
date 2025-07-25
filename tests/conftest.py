@@ -266,3 +266,18 @@ def mock_environment():
             os.environ.pop(key, None)
         else:
             os.environ[key] = original_value
+            
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_environment():
+    """Setup test environment before any tests run"""
+    os.environ['TESTING'] = 'true'
+    os.environ['FLASK_ENV'] = 'testing'
+    os.environ['LOG_TO_FILE'] = 'false'
+    os.environ['LOG_LEVEL'] = 'DEBUG'
+    
+    yield
+    
+    # Cleanup
+    for key in ['TESTING', 'FLASK_ENV', 'LOG_TO_FILE', 'LOG_LEVEL']:
+        os.environ.pop(key, None)            
+            

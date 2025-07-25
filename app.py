@@ -9,6 +9,7 @@ import time
 import datetime
 import gc
 import json
+import tempfile
 from pathlib import Path
 from cachelib import FileSystemCache
 from dotenv import load_dotenv
@@ -59,11 +60,18 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_entry)
 
 def setup_logging():
-    """Configure application logging with file outputs"""
+    """Configure application logging with environment-aware file outputs"""
     
-    # Create logs directory
-    log_dir = Path('/var/log/flask-app')
-    log_dir.mkdir(parents=True, exist_ok=True)
+    # Determine log directory based on environment
+    if os.getenv('TESTING') == 'true' or os.getenv('FLASK_ENV') == 'testing':
+        # Use temp directory for testing
+        log_dir = Path(tempfile.gettempdir()) / 'flask-app-test-logs'
+    elif os.getenv('LOG_TO_FILE', 'true').lower() == 'false':
+        # Skip file logging (for Azure/cloud environments)
+        log_dir = None
+    else:
+        # Production/development file logging
+        log_dir = Path('/var/log/flask-app')
     
     # Create formatters
     json_formatter = JSONFormatter()
@@ -79,50 +87,72 @@ def setup_logging():
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
-    # Console handler
+    # Console handler (always present)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(console_formatter)
     console_handler.setLevel(logging.INFO)
     root_logger.addHandler(console_handler)
     
-    # File handler for all logs
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_dir / 'app.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    file_handler.setFormatter(json_formatter)
-    file_handler.setLevel(logging.INFO)
-    root_logger.addHandler(file_handler)
-    
-    # Error file handler
-    error_handler = logging.handlers.RotatingFileHandler(
-        log_dir / 'error.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    error_handler.setFormatter(json_formatter)
-    error_handler.setLevel(logging.ERROR)
-    root_logger.addHandler(error_handler)
-    
-    # Access log handler
-    access_handler = logging.handlers.RotatingFileHandler(
-        log_dir / 'access.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    access_handler.setFormatter(json_formatter)
-    access_handler.setLevel(logging.INFO)
-    
-    # Create access logger
-    access_logger = logging.getLogger('access')
-    access_logger.addHandler(access_handler)
-    access_logger.propagate = False
+    # File handlers (only if log_dir is set and permissions allow)
+    if log_dir:
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            
+            # File handler for all logs
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_dir / 'app.log',
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5
+            )
+            file_handler.setFormatter(json_formatter)
+            file_handler.setLevel(logging.INFO)
+            root_logger.addHandler(file_handler)
+            
+            # Error file handler
+            error_handler = logging.handlers.RotatingFileHandler(
+                log_dir / 'error.log',
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5
+            )
+            error_handler.setFormatter(json_formatter)
+            error_handler.setLevel(logging.ERROR)
+            root_logger.addHandler(error_handler)
+            
+            # Access log handler
+            access_handler = logging.handlers.RotatingFileHandler(
+                log_dir / 'access.log',
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5
+            )
+            access_handler.setFormatter(json_formatter)
+            access_handler.setLevel(logging.INFO)
+            
+            # Create access logger
+            access_logger = logging.getLogger('access')
+            access_logger.addHandler(access_handler)
+            access_logger.propagate = False
+            
+        except PermissionError:
+            # Fallback to console-only logging
+            print(f"Warning: Cannot create log directory {log_dir}. Using console logging only.")
+            access_logger = logging.getLogger('access')
+            access_logger.propagate = False
+    else:
+        # Console-only setup for testing/cloud environments
+        access_logger = logging.getLogger('access')
+        access_logger.propagate = False
     
     return access_logger
 
-# Initialize logging
-access_logger = setup_logging()
+# Initialize logging with error handling
+try:
+    access_logger = setup_logging()
+except PermissionError:
+    # Fallback for testing/restricted environments
+    logging.basicConfig(level=logging.INFO)
+    access_logger = logging.getLogger('access')
+    print("Warning: File logging disabled due to permissions. Using console logging only.")
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -744,20 +774,20 @@ def health_check():
         if mongo_manager.is_connected():
             return jsonify({
                 'status': 'healthy',
-                'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'database': 'connected'
             }), 200
         else:
             return jsonify({
                 'status': 'unhealthy',
-                'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'database': 'disconnected'
             }), 503
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
         return jsonify({
             'status': 'unhealthy',
-            'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'error': str(e)
         }), 503
 
@@ -788,7 +818,7 @@ def cleanup_app_context(error):
 
 if __name__ == '__main__':
     # Create session directory
-    session_dir = app.config['SESSION_FILE_DIR']
+    session_dir = app.config.get('SESSION_CACHELIB').cache_dir if hasattr(app.config.get('SESSION_CACHELIB', {}), 'cache_dir') else './.flask_session/'
     if not os.path.exists(session_dir):
         os.makedirs(session_dir)
         logger.info(f"Created session directory: {session_dir}")
