@@ -231,4 +231,55 @@ def setup_ga_test_environment():
 def app_with_ga_config(app):
     """App fixture with GA configuration"""
     app.config['GA_MEASUREMENT_ID'] = 'G-TEST123456'
-    return app
+    return app   
+
+@pytest.fixture(scope="session")
+def temp_directory():
+    """Create a temporary directory for testing"""
+    temp_dir = tempfile.mkdtemp()
+    yield temp_dir
+    shutil.rmtree(temp_dir)
+
+@pytest.fixture
+def mock_environment():
+    """Mock environment variables for testing"""
+    test_env = {
+        'OPENAI_API_KEY': 'test-openai-key',
+        'SUPADATA_API_KEY': 'test-supadata-key',
+        'MONGODB_URI': 'mongodb://test-mongo:27017/test_db',
+        'JWT_SECRET_KEY': 'test-jwt-secret',
+        'LOG_LEVEL': 'DEBUG',
+        'LOGGING_ENABLED': 'true',
+        'LOKI_ENDPOINT': 'http://test-loki:3100'
+    }
+    
+    original_env = {}
+    for key, value in test_env.items():
+        original_env[key] = os.environ.get(key)
+        os.environ[key] = value
+    
+    yield test_env
+    
+    # Restore original environment
+    for key, original_value in original_env.items():
+        if original_value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = original_value
+            
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_environment():
+    """Setup test environment before any tests run"""
+    os.environ['TESTING'] = 'true'
+    os.environ['FLASK_ENV'] = 'testing'
+    os.environ['CI'] = 'true'
+    os.environ['LOG_TO_FILE'] = 'false'
+    os.environ['LOG_LEVEL'] = 'DEBUG'
+    
+    yield
+    
+    # Cleanup
+    for key in ['TESTING', 'FLASK_ENV', 'CI', 'LOG_TO_FILE', 'LOG_LEVEL']:
+        os.environ.pop(key, None)
+         
+            

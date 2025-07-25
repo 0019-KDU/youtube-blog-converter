@@ -150,6 +150,12 @@ jobs:
           pip install pytest pytest-cov
       
       - name: Run tests with coverage
+        env:
+          TESTING: true
+          FLASK_ENV: testing
+          CI: true
+          LOG_TO_FILE: false
+          LOG_LEVEL: DEBUG
         run: pytest --cov=src --cov-report=xml:coverage.xml -v tests/
         
       - name: Upload coverage report
@@ -475,6 +481,11 @@ jobs:
             -e FLASK_HOST="0.0.0.0" \
             -e OPENAI_MODEL_NAME="${{ secrets.OPENAI_MODEL_NAME }}" \
             -e GA_MEASUREMENT_ID="${{ secrets.GA_MEASUREMENT_ID }}" \
+            -e LOG_LEVEL="INFO" \
+            -e LOG_TO_FILE="true" \
+            -e LOKI_ENDPOINT="http://159.65.149.175:3100" \
+            -e GRAFANA_ENDPOINT="http://159.65.149.175:3000" \
+            -e LOGGING_ENABLED="true" \
             -p 5000:5000 \
             youtube-blog-converter:${{ github.sha }}
           # wait for Flask to boot

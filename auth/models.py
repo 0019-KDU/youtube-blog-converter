@@ -487,10 +487,13 @@ class BlogPost(BaseModel):
 def cleanup_mongodb_connections():
     """Cleanup MongoDB connections on application shutdown"""
     try:
-        mongo_manager.close_connection()
-        logger.info("MongoDB connections cleaned up successfully")
+        if mongo_manager and hasattr(mongo_manager, 'close_connection'):
+            mongo_manager.close_connection()
+            # Use print instead of logger to avoid closed file issues
+            print("MongoDB connections cleaned up successfully")
     except Exception as e:
-        logger.error(f"Error during MongoDB cleanup: {str(e)}")
+        print(f"Error during MongoDB cleanup: {str(e)}")
+
 
 # Register cleanup function
 atexit.register(cleanup_mongodb_connections)
