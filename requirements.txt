@@ -15,4 +15,3 @@ browser-cookie3
 Flask-JWT-Extended
 pymongo
 python-json-logger
-bson
