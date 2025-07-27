@@ -79,16 +79,18 @@ class MongoDBConnectionManager:
             raise
     
     def close_connection(self):
-        """Gracefully close MongoDB connection"""
+        """Close MongoDB connection safely"""
         try:
             if self.client:
-                logger.info("Closing MongoDB connection...")
+                # Use ASCII-safe messages for CI compatibility
+                print("Closing MongoDB connection...")
                 self.client.close()
                 self.client = None
                 self.db = None
-                logger.info("✅ MongoDB connection closed successfully")
+                print("MongoDB connection closed successfully")  # Remove emoji
         except Exception as e:
-            logger.error(f"Error closing MongoDB connection: {str(e)}")
+            print(f"Error closing MongoDB connection: {str(e)}")
+
     
     def get_database(self):
         """Get database instance"""

@@ -13,8 +13,9 @@ import datetime
 @pytest.fixture
 def app():
     """Create a Flask app configured for testing"""
-    os.environ['FLASK_SECRET_KEY'] = 'test-secret-key-for-testing'
-    os.environ['JWT_SECRET_KEY'] = 'test-jwt-secret-key'
+    # Set environment variables first
+    os.environ['FLASK_SECRET_KEY'] = 'test-secret-key-for-testing-super-secret-12345'
+    os.environ['JWT_SECRET_KEY'] = 'test-jwt-secret-key-super-secret-12345'
     os.environ['OPENAI_API_KEY'] = 'test-openai-key'
     os.environ['SUPADATA_API_KEY'] = 'test-supadata-key'
     os.environ['MONGODB_URI'] = 'mongodb://localhost:27017/test_db'
@@ -24,14 +25,25 @@ def app():
     app.config['TESTING'] = True
     app.config['WTF_CSRF_ENABLED'] = False
     app.config['SESSION_TYPE'] = 'filesystem'
-    app.config['SESSION_FILE_DIR'] = tempfile.mkdtemp()
+    
+    # Create a proper session directory
+    session_dir = tempfile.mkdtemp()
+    app.config['SESSION_FILE_DIR'] = session_dir
+    
+    # Ensure secret key is properly set and long enough
+    app.secret_key = 'test-secret-key-for-testing-super-secret-12345'
+    
+    # Initialize session
+    from flask_session import Session
+    Session(app)
     
     with app.app_context():
         yield app
     
     # Cleanup
-    if os.path.exists(app.config['SESSION_FILE_DIR']):
-        shutil.rmtree(app.config['SESSION_FILE_DIR'])
+    if os.path.exists(session_dir):
+        shutil.rmtree(session_dir)
+
 
 @pytest.fixture
 def client(app):
