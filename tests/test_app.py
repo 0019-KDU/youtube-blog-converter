@@ -401,8 +401,21 @@ class TestCleanupFunctions:
             cleanup_after_generation()
             
             assert mock_collect.call_count == 3
-            mock_com.assert_called_once()
             mock_memory.assert_called_once()
+            
+            # Only check COM cleanup on Windows platforms
+            with patch('sys.platform', 'win32'):
+                # Reset mocks and test Windows behavior
+                mock_com.reset_mock()
+                cleanup_after_generation()
+                mock_com.assert_called_once()
+            
+            # On non-Windows platforms, COM cleanup should not be called
+            with patch('sys.platform', 'linux'):
+                mock_com.reset_mock()
+                cleanup_after_generation()
+                # Don't assert COM cleanup on Linux - it's platform-specific
+
 
 
 class TestRoutes:
