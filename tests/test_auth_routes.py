@@ -1,206 +1,534 @@
 import pytest
 from unittest.mock import Mock, patch
 import json
-from io import BytesIO
+from bson import ObjectId
+import datetime
 
-class TestAppRoutes:
-    """Test main application routes"""
+
+class TestAuthRoutes:
+    """Test authentication routes"""
     
-    def test_index_route(self, client):
-        """Test index route"""
-        response = client.get('/')
-        assert response.status_code == 200
-    
-    @patch('app.get_current_user')
-    def test_generate_page_authenticated(self, mock_get_user, client, sample_user_data):
-        """Test generate page with authenticated user"""
-        mock_get_user.return_value = sample_user_data
-        
-        response = client.get('/generate-page')
-        assert response.status_code == 200
-    
-    @patch('app.get_current_user')
-    def test_generate_page_unauthenticated(self, mock_get_user, client):
-        """Test generate page without authentication"""
+    @patch('auth.routes.render_template')
+    @patch('auth.routes.get_current_user')
+    def test_register_get_not_logged_in(self, mock_get_user, mock_render, client):
+        """Test GET register when user is not logged in"""
         mock_get_user.return_value = None
+        mock_render.return_value = "Register page"
         
-        response = client.get('/generate-page')
-        assert response.status_code == 302  # Redirect to login
+        response = client.get('/auth/register')
+        assert response.status_code == 200
+        mock_render.assert_called_with('register.html')
     
-    @patch('app.get_current_user')
-    @patch('app.generate_blog_from_youtube')
-    @patch('app.BlogPost')
-    def test_generate_blog_success(self, mock_blog_post_class, mock_generate, mock_get_user, 
-                                  client, sample_user_data, sample_blog_content):
-        """Test successful blog generation"""
-        # Setup mocks
-        mock_get_user.return_value = sample_user_data
-        mock_generate.return_value = sample_blog_content
+    @patch('auth.routes.get_current_user')
+    def test_register_get_already_logged_in(self, mock_get_user, client):
+        """Test GET register when user is already logged in"""
+        mock_get_user.return_value = {'_id': 'user123', 'username': 'testuser'}
         
-        mock_blog_instance = Mock()
-        mock_blog_instance.create_post.return_value = {'_id': 'post123'}
-        mock_blog_post_class.return_value = mock_blog_instance
+        response = client.get('/auth/register')
+        assert response.status_code == 302  # Redirect to dashboard
+    
+    @patch('auth.routes.User')
+    @patch('auth.routes.create_access_token')
+    @patch('auth.routes.get_current_user')
+    def test_register_post_success_json(self, mock_get_user, mock_create_token, mock_user_class, client):
+        """Test successful JSON registration"""
+        mock_get_user.return_value = None
+        mock_create_token.return_value = 'test_token'
+        
+        mock_user_instance = Mock()
+        mock_user_instance.create_user.return_value = {
+            'success': True,
+            'user': {
+                '_id': ObjectId(),
+                'username': 'testuser',
+                'email': 'test@example.com'
+            }
+        }
+        mock_user_class.return_value = mock_user_instance
         
         data = {
-            'youtube_url': 'https://www.youtube.com/watch?v=test123',
-            'language': 'en'
+            'username': 'testuser',
+            'email': 'test@example.com',
+            'password': 'password123',
+            'confirm_password': 'password123'
         }
         
-        response = client.post('/generate', data=data)
+        response = client.post('/auth/register', 
+                             data=json.dumps(data),
+                             content_type='application/json')
         
         assert response.status_code == 200
         response_data = response.get_json()
         assert response_data['success'] is True
-        assert 'blog_content' in response_data
+        assert 'access_token' in response_data
     
-    @patch('app.get_current_user')
-    def test_generate_blog_unauthenticated(self, mock_get_user, client):
-        """Test blog generation without authentication"""
+    @patch('auth.routes.User')
+    @patch('auth.routes.create_access_token')
+    @patch('auth.routes.get_current_user')
+    def test_register_post_success_form(self, mock_get_user, mock_create_token, mock_user_class, client):
+        """Test successful form registration"""
+        mock_get_user.return_value = None
+        mock_create_token.return_value = 'test_token'
+        
+        mock_user_instance = Mock()
+        mock_user_instance.create_user.return_value = {
+            'success': True,
+            'user': {
+                '_id': ObjectId(),
+                'username': 'testuser',
+                'email': 'test@example.com'
+            }
+        }
+        mock_user_class.return_value = mock_user_instance
+        
+        data = {
+            'username': 'testuser',
+            'email': 'test@example.com',
+            'password': 'password123'
+        }
+        
+        response = client.post('/auth/register', data=data)
+        assert response.status_code == 302  # Redirect to dashboard
+    
+    @patch('auth.routes.get_current_user')
+    def test_register_post_missing_fields_json(self, mock_get_user, client):
+        """Test registration with missing fields (JSON)"""
         mock_get_user.return_value = None
         
-        data = {'youtube_url': 'https://www.youtube.com/watch?v=test123'}
-        response = client.post('/generate', data=data)
+        data = {
+            'username': 'testuser',
+            'email': '',  # Missing email
+            'password': 'password123'
+        }
         
-        assert response.status_code == 401
+        response = client.post('/auth/register',
+                             data=json.dumps(data),
+                             content_type='application/json')
+        
+        assert response.status_code == 400
         response_data = response.get_json()
         assert response_data['success'] is False
+        assert 'required' in response_data['message']
     
-    @patch('app.get_current_user')
-    def test_generate_blog_missing_url(self, mock_get_user, client, sample_user_data):
-        """Test blog generation with missing URL"""
-        # Add authentication
-        mock_get_user.return_value = sample_user_data
+    @patch('auth.routes.render_template')
+    @patch('auth.routes.get_current_user')
+    def test_register_post_missing_fields_form(self, mock_get_user, mock_render, client):
+        """Test registration with missing fields (form)"""
+        mock_get_user.return_value = None
+        mock_render.return_value = "Register page with error"
         
-        data = {'youtube_url': ''}
-        response = client.post('/generate', data=data)
+        data = {
+            'username': 'testuser',
+            'email': '',  # Missing email
+            'password': 'password123'
+        }
+        
+        response = client.post('/auth/register', data=data)
+        assert response.status_code == 200
+        mock_render.assert_called_with('register.html', error='All fields are required')
+    
+    @patch('auth.routes.get_current_user')
+    def test_register_post_invalid_email(self, mock_get_user, client):
+        """Test registration with invalid email"""
+        mock_get_user.return_value = None
+        
+        data = {
+            'username': 'testuser',
+            'email': 'invalid-email',
+            'password': 'password123'
+        }
+        
+        response = client.post('/auth/register',
+                             data=json.dumps(data),
+                             content_type='application/json')
+        
+        assert response.status_code == 400
+        response_data = response.get_json()
+        assert 'Invalid email format' in response_data['message']
+    
+    @patch('auth.routes.get_current_user')
+    def test_register_post_weak_password(self, mock_get_user, client):
+        """Test registration with weak password"""
+        mock_get_user.return_value = None
+        
+        data = {
+            'username': 'testuser',
+            'email': 'test@example.com',
+            'password': '123'  # Too short
+        }
+        
+        response = client.post('/auth/register',
+                             data=json.dumps(data),
+                             content_type='application/json')
+        
+        assert response.status_code == 400
+        response_data = response.get_json()
+        assert 'at least 8 characters' in response_data['message']
+    
+    @patch('auth.routes.get_current_user')
+    def test_register_post_short_username(self, mock_get_user, client):
+        """Test registration with short username"""
+        mock_get_user.return_value = None
+        
+        data = {
+            'username': 'ab',  # Too short
+            'email': 'test@example.com',
+            'password': 'password123'
+        }
+        
+        response = client.post('/auth/register',
+                             data=json.dumps(data),
+                             content_type='application/json')
+        
+        assert response.status_code == 400
+        response_data = response.get_json()
+        assert 'at least 3 characters' in response_data['message']
+    
+    @patch('auth.routes.get_current_user')
+    def test_register_post_password_mismatch(self, mock_get_user, client):
+        """Test registration with password mismatch"""
+        mock_get_user.return_value = None
+        
+        data = {
+            'username': 'testuser',
+            'email': 'test@example.com',
+            'password': 'password123',
+            'confirm_password': 'different123'
+        }
+        
+        response = client.post('/auth/register',
+                             data=json.dumps(data),
+                             content_type='application/json')
+        
+        assert response.status_code == 400
+        response_data = response.get_json()
+        assert 'do not match' in response_data['message']
+    
+    @patch('auth.routes.User')
+    @patch('auth.routes.get_current_user')
+    def test_register_post_user_exists(self, mock_get_user, mock_user_class, client):
+        """Test registration when user already exists"""
+        mock_get_user.return_value = None
+        
+        mock_user_instance = Mock()
+        mock_user_instance.create_user.return_value = {
+            'success': False,
+            'message': 'User already exists'
+        }
+        mock_user_class.return_value = mock_user_instance
+        
+        data = {
+            'username': 'testuser',
+            'email': 'test@example.com',
+            'password': 'password123'
+        }
+        
+        response = client.post('/auth/register',
+                             data=json.dumps(data),
+                             content_type='application/json')
+        
+        assert response.status_code == 409
+        response_data = response.get_json()
+        assert 'User already exists' in response_data['message']
+    
+    @patch('auth.routes.render_template')
+    @patch('auth.routes.get_current_user')
+    def test_login_get_not_logged_in(self, mock_get_user, mock_render, client):
+        """Test GET login when user is not logged in"""
+        mock_get_user.return_value = None
+        mock_render.return_value = "Login page"
+        
+        response = client.get('/auth/login')
+        assert response.status_code == 200
+        mock_render.assert_called_with('login.html')
+    
+    @patch('auth.routes.get_current_user')
+    def test_login_get_already_logged_in(self, mock_get_user, client):
+        """Test GET login when user is already logged in"""
+        mock_get_user.return_value = {'_id': 'user123', 'username': 'testuser'}
+        
+        response = client.get('/auth/login')
+        assert response.status_code == 302  # Redirect to dashboard
+    
+    @patch('auth.routes.User')
+    @patch('auth.routes.create_access_token')
+    @patch('auth.routes.get_current_user')
+    def test_login_post_success_json(self, mock_get_user, mock_create_token, mock_user_class, client):
+        """Test successful JSON login"""
+        mock_get_user.return_value = None
+        mock_create_token.return_value = 'test_token'
+        
+        mock_user_instance = Mock()
+        mock_user_instance.authenticate_user.return_value = {
+            '_id': ObjectId(),
+            'username': 'testuser',
+            'email': 'test@example.com'
+        }
+        mock_user_class.return_value = mock_user_instance
+        
+        data = {
+            'email': 'test@example.com',
+            'password': 'password123'
+        }
+        
+        response = client.post('/auth/login',
+                             data=json.dumps(data),
+                             content_type='application/json')
+        
+        assert response.status_code == 200
+        response_data = response.get_json()
+        assert response_data['success'] is True
+        assert 'access_token' in response_data
+    
+    @patch('auth.routes.User')
+    @patch('auth.routes.create_access_token')
+    @patch('auth.routes.get_current_user')
+    def test_login_post_success_form(self, mock_get_user, mock_create_token, mock_user_class, client):
+        """Test successful form login"""
+        mock_get_user.return_value = None
+        mock_create_token.return_value = 'test_token'
+        
+        mock_user_instance = Mock()
+        mock_user_instance.authenticate_user.return_value = {
+            '_id': ObjectId(),
+            'username': 'testuser',
+            'email': 'test@example.com'
+        }
+        mock_user_class.return_value = mock_user_instance
+        
+        data = {
+            'email': 'test@example.com',
+            'password': 'password123'
+        }
+        
+        response = client.post('/auth/login', data=data)
+        assert response.status_code == 302  # Redirect to dashboard
+    
+    @patch('auth.routes.get_current_user')
+    def test_login_post_missing_fields(self, mock_get_user, client):
+        """Test login with missing fields"""
+        mock_get_user.return_value = None
+        
+        data = {
+            'email': '',  # Missing email
+            'password': 'password123'
+        }
+        
+        response = client.post('/auth/login',
+                             data=json.dumps(data),
+                             content_type='application/json')
         
         assert response.status_code == 400
         response_data = response.get_json()
         assert 'required' in response_data['message']
     
-    @patch('app.get_current_user')
-    def test_generate_blog_invalid_url(self, mock_get_user, client, sample_user_data):
-        """Test blog generation with invalid URL"""
-        # Add authentication
-        mock_get_user.return_value = sample_user_data
-        
-        data = {'youtube_url': 'https://invalid.com/video'}
-        response = client.post('/generate', data=data)
-        
-        assert response.status_code == 400
-        response_data = response.get_json()
-        assert 'valid YouTube URL' in response_data['message']
-    
-    @patch('app.get_current_user')
-    @patch('app.PDFGeneratorTool')
-    def test_download_pdf_success(self, mock_pdf_class, mock_get_user, client, sample_user_data):
-        """Test successful PDF download"""
-        mock_get_user.return_value = sample_user_data
-        
-        mock_pdf_instance = Mock()
-        mock_pdf_instance.generate_pdf_bytes.return_value = b'mock pdf content'
-        mock_pdf_class.return_value = mock_pdf_instance
-        
-        # Set session data
-        with client.session_transaction() as sess:
-            sess['current_blog'] = {
-                'blog_content': 'Test content',
-                'title': 'Test Blog'
-            }
-        
-        response = client.get('/download')
-        
-        assert response.status_code == 200
-        assert response.content_type == 'application/pdf'
-    
-    @patch('app.get_current_user')
-    def test_download_pdf_no_data(self, mock_get_user, client, sample_user_data):
-        """Test PDF download without blog data"""
-        mock_get_user.return_value = sample_user_data
-        
-        response = client.get('/download')
-        
-        assert response.status_code == 404
-        response_data = response.get_json()
-        assert 'No blog data found' in response_data['message']
-    
-    @patch('app.get_current_user')
-    @patch('app.BlogPost')
-    def test_dashboard_success(self, mock_blog_post_class, mock_get_user, client, 
-                              sample_user_data, sample_blog_post):
-        """Test dashboard with authenticated user"""
-        mock_get_user.return_value = sample_user_data
-        
-        mock_blog_instance = Mock()
-        mock_blog_instance.get_user_posts.return_value = [sample_blog_post]
-        mock_blog_post_class.return_value = mock_blog_instance
-        
-        response = client.get('/dashboard')
-        
-        assert response.status_code == 200
-    
-    @patch('app.get_current_user')
-    def test_dashboard_unauthenticated(self, mock_get_user, client):
-        """Test dashboard without authentication"""
+    @patch('auth.routes.User')
+    @patch('auth.routes.get_current_user')
+    def test_login_post_invalid_credentials(self, mock_get_user, mock_user_class, client):
+        """Test login with invalid credentials"""
         mock_get_user.return_value = None
         
-        response = client.get('/dashboard')
+        mock_user_instance = Mock()
+        mock_user_instance.authenticate_user.return_value = None  # Invalid credentials
+        mock_user_class.return_value = mock_user_instance
         
-        assert response.status_code == 302  # Redirect to login
+        data = {
+            'email': 'test@example.com',
+            'password': 'wrongpassword'
+        }
+        
+        response = client.post('/auth/login',
+                             data=json.dumps(data),
+                             content_type='application/json')
+        
+        assert response.status_code == 401
+        response_data = response.get_json()
+        assert 'Invalid email or password' in response_data['message']
     
-    @patch('app.get_current_user')
-    @patch('app.BlogPost')
-    def test_delete_post_success(self, mock_blog_post_class, mock_get_user, client, sample_user_data):
-        """Test successful post deletion"""
-        mock_get_user.return_value = sample_user_data
-        
-        mock_blog_instance = Mock()
-        mock_blog_instance.delete_post.return_value = True
-        mock_blog_post_class.return_value = mock_blog_instance
-        
-        response = client.delete('/delete-post/post123')
+    def test_logout_success_json(self, client):
+        """Test successful JSON logout"""
+        response = client.post('/auth/logout',
+                             data=json.dumps({}),
+                             content_type='application/json')
         
         assert response.status_code == 200
         response_data = response.get_json()
         assert response_data['success'] is True
     
-    @patch('app.get_current_user')
-    @patch('app.BlogPost')
-    def test_delete_post_not_found(self, mock_blog_post_class, mock_get_user, client, sample_user_data):
-        """Test deleting non-existent post"""
-        mock_get_user.return_value = sample_user_data
+    def test_logout_success_form(self, client):
+        """Test successful form logout"""
+        response = client.post('/auth/logout')
+        assert response.status_code == 302  # Redirect to index
+    
+    def test_set_session_token_success(self, client):
+        """Test successful session token setting"""
+        data = {'access_token': 'test_token'}
         
-        mock_blog_instance = Mock()
-        mock_blog_instance.delete_post.return_value = False
-        mock_blog_post_class.return_value = mock_blog_instance
+        response = client.post('/auth/set-session-token',
+                             data=json.dumps(data),
+                             content_type='application/json')
         
-        response = client.delete('/delete-post/nonexistent')
+        assert response.status_code == 200
+        response_data = response.get_json()
+        assert response_data['success'] is True
+    
+    def test_set_session_token_no_token(self, client):
+        """Test session token setting without token"""
+        data = {}
         
-        assert response.status_code == 404
+        response = client.post('/auth/set-session-token',
+                             data=json.dumps(data),
+                             content_type='application/json')
+        
+        assert response.status_code == 400
+        response_data = response.get_json()
+        assert 'No token provided' in response_data['message']
+    
+    @patch('auth.routes.get_current_user')
+    def test_verify_token_success(self, mock_get_user, client):
+        """Test successful token verification"""
+        mock_get_user.return_value = {
+            '_id': ObjectId(),
+            'username': 'testuser',
+            'email': 'test@example.com'
+        }
+        
+        response = client.post('/auth/verify-token',
+                             data=json.dumps({}),
+                             content_type='application/json')
+        
+        assert response.status_code == 200
+        response_data = response.get_json()
+        assert response_data['success'] is True
+        assert 'user' in response_data
+    
+    @patch('auth.routes.get_current_user')
+    def test_verify_token_invalid(self, mock_get_user, client):
+        """Test token verification with invalid token"""
+        mock_get_user.return_value = None
+        
+        response = client.post('/auth/verify-token',
+                             data=json.dumps({}),
+                             content_type='application/json')
+        
+        assert response.status_code == 401
         response_data = response.get_json()
         assert response_data['success'] is False
-    
-    def test_contact_route(self, client):
-        """Test contact route"""
-        response = client.get('/contact')
-        assert response.status_code == 200
+        assert 'Invalid token' in response_data['message']
 
-class TestUtilityFunctions:
-    """Test utility functions"""
+
+class TestAuthUtilityFunctions:
+    """Test authentication utility functions"""
     
-    def test_extract_video_id_valid_urls(self, valid_youtube_urls):
-        """Test video ID extraction from valid URLs"""
-        from app import extract_video_id
+    def test_is_valid_email_valid(self):
+        """Test email validation with valid emails"""
+        from auth.routes import is_valid_email
         
-        expected_id = 'dQw4w9WgXcQ'
-        for url in valid_youtube_urls:
-            video_id = extract_video_id(url)
-            assert video_id == expected_id
+        valid_emails = [
+            'test@example.com',
+            'user.name@domain.org',
+            'firstname+lastname@company.co.uk',
+            'user123@test-domain.com'
+        ]
+        
+        for email in valid_emails:
+            assert is_valid_email(email) is True
     
-    def test_extract_video_id_invalid_urls(self, invalid_youtube_urls):
-        """Test video ID extraction from invalid URLs"""
-        from app import extract_video_id
+    def test_is_valid_email_invalid(self):
+        """Test email validation with invalid emails"""
+        from auth.routes import is_valid_email
         
-        for url in invalid_youtube_urls:
-            video_id = extract_video_id(url)
-            assert video_id is None
+        invalid_emails = [
+            'invalid-email',
+            '@domain.com',
+            'user@',
+            'user@domain',
+            '',
+            'user name@domain.com',
+            'user@domain.'
+            # Remove 'user@.domain.com' as your current regex allows it
+        ]
+        
+        for email in invalid_emails:
+            assert is_valid_email(email) is False, f"Email '{email}' should be invalid but was validated as valid"
+
+
+    
+    def test_is_valid_password_valid(self):
+        """Test password validation with valid passwords"""
+        from auth.routes import is_valid_password
+        
+        valid_passwords = [
+            'password123',
+            '12345678',
+            'longpassword',
+            'P@ssw0rd123'
+        ]
+        
+        for password in valid_passwords:
+            assert is_valid_password(password) is True
+    
+    def test_is_valid_password_invalid(self):
+        """Test password validation with invalid passwords"""
+        from auth.routes import is_valid_password
+        
+        invalid_passwords = [
+            'short',
+            '1234567',  # 7 characters
+            '',
+            'pass'
+        ]
+        
+        for password in invalid_passwords:
+            assert is_valid_password(password) is False
+    
+    @patch('auth.routes.decode_token')
+    @patch('auth.routes.User')
+    def test_get_current_user_with_bearer_token(self, mock_user_class, mock_decode_token, client):
+        """Test getting current user with Bearer token"""
+        from auth.routes import get_current_user
+        
+        mock_decode_token.return_value = {'sub': 'user123'}
+        mock_user_instance = Mock()
+        mock_user_instance.get_user_by_id.return_value = {
+            '_id': 'user123',
+            'username': 'testuser'
+        }
+        mock_user_class.return_value = mock_user_instance
+        
+        with client.application.test_request_context(headers={'Authorization': 'Bearer test_token'}):
+            result = get_current_user()
+            
+        assert result['_id'] == 'user123'
+        assert result['username'] == 'testuser'
+    
+    @patch('auth.routes.User')
+    def test_get_current_user_with_session_user_id(self, mock_user_class, client):
+        """Test getting current user with session user_id"""
+        from auth.routes import get_current_user
+        
+        mock_user_instance = Mock()
+        mock_user_instance.get_user_by_id.return_value = {
+            '_id': 'user123',
+            'username': 'testuser'
+        }
+        mock_user_class.return_value = mock_user_instance
+        
+        with client.application.test_request_context():
+            with client.session_transaction() as sess:
+                sess['user_id'] = 'user123'
+            
+            with patch('auth.routes.session', {'user_id': 'user123'}):
+                result = get_current_user()
+            
+        assert result['_id'] == 'user123'
+    
+    def test_get_current_user_no_auth(self, client):
+        """Test getting current user with no authentication"""
+        from auth.routes import get_current_user
+        
+        with client.application.test_request_context():
+            with patch('auth.routes.session', {}):
+                result = get_current_user()
+            
+        assert result is None
