@@ -3,12 +3,35 @@ from flask_jwt_extended import create_access_token, decode_token
 from .models import User, BlogPost
 import re
 import datetime
-import logging
 import sys
 from pathlib import Path
+import logging
+
+# Import metrics from main app
+from prometheus_client import Counter
 
 logger = logging.getLogger(__name__)
+
 auth_bp = Blueprint('auth', __name__, template_folder='../templates')
+
+# Metrics for authentication
+user_registrations = Counter(
+    'user_registrations_total',
+    'Total user registrations',
+    ['status']
+)
+
+user_logins = Counter(
+    'user_logins_total',
+    'Total user login attempts',
+    ['status']
+)
+
+authentication_errors = Counter(
+    'authentication_errors_total',
+    'Total authentication errors',
+    ['error_type']
+)
 
 # Helper function to get current user (local to auth module)
 def get_current_user():
@@ -43,15 +66,15 @@ def get_current_user():
                     user_model = User()
                     current_user = user_model.get_user_by_id(current_user_id)
                     return current_user
-            except Exception as e:
-                logger.warning(f"Token validation failed: {e}")
+            except Exception:
                 # Clear invalid token
                 session.pop('access_token', None)
         
         return None
         
     except Exception as e:
-        logger.error(f"Get current user error: {e}")
+        authentication_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Error getting current user: {e}")
         return None
 
 def is_valid_email(email):
@@ -65,7 +88,7 @@ def is_valid_password(password):
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
-    """User registration"""
+    """User registration with metrics tracking"""
     if request.method == 'GET':
         # Check if user is already logged in
         current_user = get_current_user()
@@ -94,24 +117,28 @@ def register():
         # Validation
         if not all([username, email, password]):
             error_msg = 'All fields are required'
+            user_registrations.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('register.html', error=error_msg)
         
         if not is_valid_email(email):
             error_msg = 'Invalid email format'
+            user_registrations.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('register.html', error=error_msg)
         
         if not is_valid_password(password):
             error_msg = 'Password must be at least 8 characters long'
+            user_registrations.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('register.html', error=error_msg)
         
         if len(username) < 3:
             error_msg = 'Username must be at least 3 characters long'
+            user_registrations.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('register.html', error=error_msg)
@@ -119,6 +146,7 @@ def register():
         # Password confirmation check (for JSON requests)
         if request.is_json and confirm_password and password != confirm_password:
             error_msg = 'Passwords do not match'
+            user_registrations.labels(status='failed_validation').inc()
             return jsonify({'success': False, 'message': error_msg}), 400
         
         # Create user
@@ -127,6 +155,7 @@ def register():
         
         if not result.get('success'):
             error_msg = result.get('message', 'Registration failed')
+            user_registrations.labels(status='failed_exists').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 409
             return render_template('register.html', error=error_msg)
@@ -142,8 +171,9 @@ def register():
         # Store in session
         session['access_token'] = access_token
         session['user_id'] = str(user['_id'])
-        session.permanent = True
         
+        # Track successful registration
+        user_registrations.labels(status='success').inc()
         logger.info(f"User registered successfully: {user['username']}")
         
         if request.is_json:
@@ -161,6 +191,8 @@ def register():
             return redirect(url_for('dashboard'))
             
     except Exception as e:
+        user_registrations.labels(status='failed_error').inc()
+        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Registration error: {str(e)}")
         error_msg = 'Registration failed. Please try again.'
         if request.is_json:
@@ -169,7 +201,7 @@ def register():
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
-    """User login"""
+    """User login with metrics tracking"""
     if request.method == 'GET':
         # Check if user is already logged in
         current_user = get_current_user()
@@ -192,6 +224,7 @@ def login():
         
         if not email or not password:
             error_msg = 'Email and password are required'
+            user_logins.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('login.html', error=error_msg)
@@ -210,8 +243,9 @@ def login():
             # Store in session
             session['access_token'] = access_token
             session['user_id'] = str(user['_id'])
-            session.permanent = True
             
+            # Track successful login
+            user_logins.labels(status='success').inc()
             logger.info(f"User logged in successfully: {user['username']}")
             
             if request.is_json:
@@ -229,11 +263,14 @@ def login():
                 return redirect(url_for('dashboard'))
         else:
             error_msg = 'Invalid email or password'
+            user_logins.labels(status='failed_credentials').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 401
             return render_template('login.html', error=error_msg)
             
     except Exception as e:
+        user_logins.labels(status='failed_error').inc()
+        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Login error: {str(e)}")
         error_msg = 'Login failed. Please try again.'
         if request.is_json:
@@ -244,6 +281,10 @@ def login():
 def logout():
     """User logout"""
     try:
+        user_id = session.get('user_id')
+        if user_id:
+            logger.info(f"User logged out: {user_id}")
+        
         # Clear session
         session.clear()
         
@@ -253,6 +294,7 @@ def logout():
             return redirect(url_for('index'))
             
     except Exception as e:
+        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Logout error: {str(e)}")
         if request.is_json:
             return jsonify({'success': False, 'message': 'Logout failed'}), 500
@@ -274,6 +316,7 @@ def set_session_token():
             return jsonify({'success': False, 'message': 'No token provided'}), 400
             
     except Exception as e:
+        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Set session token error: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -295,5 +338,6 @@ def verify_token():
             return jsonify({'success': False, 'message': 'Invalid token'}), 401
             
     except Exception as e:
+        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Token verification error: {str(e)}")
         return jsonify({'success': False, 'message': 'Token verification failed'}), 500

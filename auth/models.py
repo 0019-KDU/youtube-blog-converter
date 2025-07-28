@@ -71,10 +71,11 @@ class MongoDBConnectionManager:
             
             # Test connection
             self.client.admin.command('ping')
-            logger.info(f"✅ MongoDB connected successfully to database: {self._mongodb_db_name}")
+            # Remove emoji for Windows compatibility
+            logger.info(f"MongoDB connected successfully to database: {self._mongodb_db_name}")
             
         except Exception as e:
-            logger.error(f"❌ MongoDB connection failed: {str(e)}")
+            logger.error(f"MongoDB connection failed: {str(e)}")
             self.close_connection()
             raise
     
@@ -82,15 +83,13 @@ class MongoDBConnectionManager:
         """Close MongoDB connection safely"""
         try:
             if self.client:
-                # Use ASCII-safe messages for CI compatibility
-                print("Closing MongoDB connection...")
+                logger.info("Closing MongoDB connection...")
                 self.client.close()
                 self.client = None
                 self.db = None
-                print("MongoDB connection closed successfully")  # Remove emoji
+                logger.info("MongoDB connection closed successfully")
         except Exception as e:
-            print(f"Error closing MongoDB connection: {str(e)}")
-
+            logger.error(f"Error closing MongoDB connection: {str(e)}")
     
     def get_database(self):
         """Get database instance"""
@@ -197,7 +196,7 @@ class User(BaseModel):
                     # Convert ObjectId to string and remove sensitive data
                     user['_id'] = str(user['_id'])
                     user.pop('password_hash', None)
-                    logger.info(f"✅ User created successfully: {username}")
+                    logger.info(f"User created successfully: {username}")
                     
                     return {
                         'success': True,
@@ -217,7 +216,6 @@ class User(BaseModel):
                 'message': f'Database error: {str(e)}'
             }
         finally:
-            # No need to close collection as it's managed by connection manager
             collection = None
     
     def authenticate_user(self, email, password):
@@ -233,10 +231,10 @@ class User(BaseModel):
                 # Convert ObjectId to string and remove sensitive data
                 user['_id'] = str(user['_id'])
                 user.pop('password_hash', None)
-                logger.info(f"✅ User authenticated successfully: {email}")
+                logger.info(f"User authenticated successfully: {email}")
                 return user
             
-            logger.warning(f"❌ Authentication failed for: {email}")
+            logger.warning(f"Authentication failed for: {email}")
             return None
             
         except Exception as e:
@@ -335,7 +333,7 @@ class BlogPost(BaseModel):
                 # Convert ObjectIds to strings
                 post_data['_id'] = str(result.inserted_id)
                 post_data['user_id'] = str(post_data['user_id'])
-                logger.info(f"✅ Blog post created successfully: {title}")
+                logger.info(f"Blog post created successfully: {title}")
                 return post_data
             
             return None
@@ -454,10 +452,10 @@ class BlogPost(BaseModel):
             })
             
             if result.deleted_count > 0:
-                logger.info(f"✅ Blog post deleted successfully: {post_id}")
+                logger.info(f"Blog post deleted successfully: {post_id}")
                 return True
             else:
-                logger.warning(f"❌ No blog post found to delete: {post_id}")
+                logger.warning(f"No blog post found to delete: {post_id}")
                 return False
             
         except Exception as e:
@@ -491,11 +489,9 @@ def cleanup_mongodb_connections():
     try:
         if mongo_manager and hasattr(mongo_manager, 'close_connection'):
             mongo_manager.close_connection()
-            # Use print instead of logger to avoid closed file issues
-            print("MongoDB connections cleaned up successfully")
+            logger.info("MongoDB connections cleaned up successfully")
     except Exception as e:
-        print(f"Error during MongoDB cleanup: {str(e)}")
-
+        logger.error(f"Error during MongoDB cleanup: {str(e)}")
 
 # Register cleanup function
 atexit.register(cleanup_mongodb_connections)
