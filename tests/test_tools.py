@@ -6,6 +6,12 @@ from pathlib import Path
 import gc
 import sys
 from io import BytesIO
+
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 from src.tool import (
     YouTubeTranscriptTool, 
     BlogGeneratorTool, 
@@ -888,6 +894,353 @@ class TestPDFGeneratorTool:
             title_arg = mock_pdf.cell.call_args_list[0][0][2]
             assert '--' in title_arg  # em dash should be replaced
             assert '\u2014' not in title_arg
+            
+    def test_clean_unicode_text_extended_chars(self):
+        """Test cleaning extended Unicode characters - covers additional character mappings"""
+        tool = PDFGeneratorTool()
+        
+        # Test all the additional characters from your mapping
+        unicode_chars = {
+            '\u00e9': 'e',  # é
+            '\u00e8': 'e',  # è
+            '\u00ea': 'e',  # ê
+            '\u00e0': 'a',  # à
+            '\u00e1': 'a',  # á
+            '\u00e2': 'a',  # â
+            '\u00f1': 'n',  # ñ
+            '\u00fc': 'u',  # ü
+            '\u00f6': 'o',  # ö
+            '\u00e4': 'a',  # ä
+            '\u00df': 'ss', # ß
+            '\u00c7': 'C',  # Ç
+            '\u00e7': 'c',  # ç
+        }
+        
+        for unicode_char, expected in unicode_chars.items():
+            text = f"Text with {unicode_char} character"
+            cleaned = tool._clean_unicode_text(text)
+            assert unicode_char not in cleaned
+            assert expected in cleaned
+
+    def test_clean_unicode_text_non_ascii_fallback(self):
+        """Test non-ASCII character fallback to '?' - covers the ord(char) < 128 check"""
+        tool = PDFGeneratorTool()
+        
+        # Use a character not in the replacement dict
+        text = "Text with \u03B1 (alpha) character"  # Greek alpha
+        cleaned = tool._clean_unicode_text(text)
+        
+        assert '\u03B1' not in cleaned
+        assert '?' in cleaned  # Should be replaced with ?
+
+    def test_clean_unicode_text_preserve_spaces(self):
+        """Test preserving whitespace characters - covers char.isspace() check"""
+        tool = PDFGeneratorTool()
+        
+        # Non-ASCII space character
+        text = "Text\u00A0with\u00A0non-breaking\u00A0spaces"
+        cleaned = tool._clean_unicode_text(text)
+        
+        # Non-breaking spaces should be converted to regular spaces
+        assert 'Text with non-breaking spaces' in cleaned
+
+    @patch('src.tool.FPDF')
+    def test_handle_bold_italic_text(self, mock_fpdf_class):
+        """Test bold and italic text handling - covers _handle_bold_italic_text method"""
+        mock_pdf = Mock()
+        mock_fpdf_class.return_value = mock_pdf
+        
+        tool = PDFGeneratorTool()
+        
+        # Test bold text
+        tool._handle_bold_italic_text("**Bold text**", mock_pdf)
+        
+        # Test italic text
+        tool._handle_bold_italic_text("*Italic text*", mock_pdf)
+        
+        # Test mixed text
+        tool._handle_bold_italic_text("Normal **bold** and *italic* text", mock_pdf)
+        
+        # Verify font changes were called
+        assert mock_pdf.set_font.called
+        assert mock_pdf.write.called
+
+    @patch('src.tool.FPDF')
+    def test_handle_bold_italic_text_empty(self, mock_fpdf_class):
+        """Test bold/italic handler with empty text"""
+        mock_pdf = Mock()
+        mock_fpdf_class.return_value = mock_pdf
+        
+        tool = PDFGeneratorTool()
+        tool._handle_bold_italic_text("", mock_pdf)
+        tool._handle_bold_italic_text(None, mock_pdf)
+        
+        # Should not call any PDF methods for empty text
+        mock_pdf.set_font.assert_not_called()
+        mock_pdf.write.assert_not_called()
+
+    @patch('src.tool.FPDF')
+    def test_add_header_footer(self, mock_fpdf_class):
+        """Test header and footer addition - covers _add_header_footer method"""
+        mock_pdf = Mock()
+        mock_pdf.w = 210  # A4 width
+        mock_pdf.page_no.return_value = 1
+        mock_fpdf_class.return_value = mock_pdf
+        
+        tool = PDFGeneratorTool()
+        tool._add_header_footer(mock_pdf)
+        
+        # Verify header/footer elements were added
+        mock_pdf.set_y.assert_called()
+        mock_pdf.set_draw_color.assert_called()
+        mock_pdf.set_line_width.assert_called()
+        mock_pdf.line.assert_called()
+        mock_pdf.set_font.assert_called()
+        mock_pdf.cell.assert_called()
+
+    @patch('src.tool.FPDF')
+    def test_generate_pdf_bytes_long_title_multiline(self, mock_fpdf_class):
+        """Test PDF generation with very long title - covers title breaking logic"""
+        mock_pdf = Mock()
+        mock_pdf.output.return_value = b'pdf content'
+        mock_pdf.w = 210
+        mock_pdf.h = 297
+        mock_pdf.l_margin = 15
+        mock_pdf.r_margin = 15
+        mock_pdf.get_y.return_value = 50
+        mock_pdf.get_string_width.side_effect = lambda text: len(text) * 5  # Mock width calculation
+        mock_pdf.page_no.return_value = 1
+        mock_fpdf_class.return_value = mock_pdf
+        
+        # Create content with very long title
+        long_title = "This is a very long title that should definitely exceed the page width and need to be broken into multiple lines"
+        content = f"# {long_title}\n\nSome content here."
+        
+        tool = PDFGeneratorTool()
+        result = tool.generate_pdf_bytes(content)
+        
+        assert isinstance(result, bytes)
+        # Verify multiple cell calls for multi-line title
+        assert mock_pdf.cell.call_count >= 2
+
+    @patch('src.tool.FPDF')
+    def test_generate_pdf_bytes_long_headings(self, mock_fpdf_class):
+        """Test PDF generation with long headings - covers heading breaking logic"""
+        mock_pdf = Mock()
+        mock_pdf.output.return_value = b'pdf content'
+        mock_pdf.w = 210
+        mock_pdf.h = 297
+        mock_pdf.l_margin = 15
+        mock_pdf.r_margin = 15
+        mock_pdf.get_y.return_value = 50
+        mock_pdf.get_string_width.side_effect = lambda text: len(text) * 5
+        mock_pdf.page_no.return_value = 1
+        mock_fpdf_class.return_value = mock_pdf
+        
+        content = """# Title
+## This is a very long section heading that should exceed the page width
+### This is another very long subsection heading that needs breaking
+Content here."""
+        
+        tool = PDFGeneratorTool()
+        result = tool.generate_pdf_bytes(content)
+        
+        assert isinstance(result, bytes)
+        # Should call multi_cell for long headings
+        mock_pdf.multi_cell.assert_called()
+
+    @patch('src.tool.FPDF')
+    def test_generate_pdf_bytes_bullet_lists_with_indentation(self, mock_fpdf_class):
+        """Test PDF generation with bullet lists - covers list indentation logic"""
+        mock_pdf = Mock()
+        mock_pdf.output.return_value = b'pdf content'
+        mock_pdf.w = 210
+        mock_pdf.h = 297
+        mock_pdf.l_margin = 15
+        mock_pdf.r_margin = 15
+        mock_pdf.get_y.return_value = 50
+        mock_pdf.get_string_width.return_value = 50
+        mock_pdf.page_no.return_value = 1
+        mock_fpdf_class.return_value = mock_pdf
+        
+        content = """# Title
+- First bullet item with some text
+- Second bullet item
+  - Nested item
+- Third item"""
+        
+        tool = PDFGeneratorTool()
+        result = tool.generate_pdf_bytes(content)
+        
+        assert isinstance(result, bytes)
+        # Should handle bullet formatting
+        mock_pdf.set_x.assert_called()  # For indentation
+        mock_pdf.multi_cell.assert_called()
+
+    @patch('src.tool.FPDF')
+    def test_generate_pdf_bytes_numbered_lists_with_calculation(self, mock_fpdf_class):
+        """Test PDF generation with numbered lists - covers number width calculation"""
+        mock_pdf = Mock()
+        mock_pdf.output.return_value = b'pdf content'
+        mock_pdf.w = 210
+        mock_pdf.h = 297
+        mock_pdf.l_margin = 15
+        mock_pdf.r_margin = 15
+        mock_pdf.get_y.return_value = 50
+        mock_pdf.get_string_width.return_value = 20  # Mock number width
+        mock_pdf.page_no.return_value = 1
+        mock_fpdf_class.return_value = mock_pdf
+        
+        content = """# Title
+1. First numbered item
+2. Second numbered item with longer text
+10. Tenth item with double digits"""
+        
+        tool = PDFGeneratorTool()
+        result = tool.generate_pdf_bytes(content)
+        
+        assert isinstance(result, bytes)
+        # Should handle number positioning
+        mock_pdf.cell.assert_called()  # For numbers
+        mock_pdf.set_x.assert_called()  # For positioning
+
+    @patch('src.tool.FPDF')
+    def test_generate_pdf_bytes_justified_paragraphs(self, mock_fpdf_class):
+        """Test PDF generation with justified paragraphs - covers align='J' parameter"""
+        mock_pdf = Mock()
+        mock_pdf.output.return_value = b'pdf content'
+        mock_pdf.w = 210
+        mock_pdf.h = 297
+        mock_pdf.l_margin = 15
+        mock_pdf.r_margin = 15
+        mock_pdf.get_y.return_value = 50
+        mock_pdf.get_string_width.return_value = 50
+        mock_pdf.page_no.return_value = 1
+        mock_fpdf_class.return_value = mock_pdf
+        
+        content = """# Title
+
+This is a long paragraph that should be justified when rendered in the PDF. It contains enough text to span multiple lines and demonstrate the justification feature."""
+        
+        tool = PDFGeneratorTool()
+        result = tool.generate_pdf_bytes(content)
+        
+        assert isinstance(result, bytes)
+        # Check if multi_cell was called with align='J'
+        multi_cell_calls = mock_pdf.multi_cell.call_args_list
+        justified_call = any('J' in str(call) for call in multi_cell_calls)
+        assert justified_call
+
+    @patch('src.tool.FPDF')
+    def test_generate_pdf_bytes_multipage_with_header_footer(self, mock_fpdf_class):
+        """Test PDF generation with multiple pages - covers page numbering logic"""
+        mock_pdf = Mock()
+        mock_pdf.output.return_value = b'pdf content'
+        mock_pdf.w = 210
+        mock_pdf.h = 297
+        mock_pdf.l_margin = 15
+        mock_pdf.r_margin = 15
+        mock_pdf.get_y.return_value = 50
+        mock_pdf.get_string_width.return_value = 50
+        mock_pdf.page_no.side_effect = [1, 2, 2]  # Simulate multi-page
+        mock_fpdf_class.return_value = mock_pdf
+        
+        # Create very long content to trigger multiple pages
+        long_content = "# Title\n\n" + "This is a paragraph.\n\n" * 50
+        
+        tool = PDFGeneratorTool()
+        result = tool.generate_pdf_bytes(long_content)
+        
+        assert isinstance(result, bytes)
+
+    @patch('src.tool.FPDF')
+    def test_generate_pdf_bytes_output_exception_fallback(self, mock_fpdf_class):
+        """Test PDF output with exception and fallback - covers output error handling"""
+        mock_pdf = Mock()
+        mock_pdf.w = 210
+        mock_pdf.h = 297
+        mock_pdf.l_margin = 15
+        mock_pdf.r_margin = 15
+        mock_pdf.get_y.return_value = 50
+        mock_pdf.get_string_width.return_value = 50
+        mock_pdf.page_no.return_value = 1
+        
+        # First output call fails, second succeeds
+        mock_pdf.output.side_effect = [Exception("Output failed"), b'fallback pdf content']
+        mock_fpdf_class.return_value = mock_pdf
+        
+        tool = PDFGeneratorTool()
+        result = tool.generate_pdf_bytes("# Test Content")
+        
+        assert isinstance(result, bytes)
+        assert result == b'fallback pdf content'
+        # Should be called twice (first fails, second succeeds)
+        assert mock_pdf.output.call_count == 2
+
+    def test_generate_pdf_with_metadata(self):
+        """Test PDF generation with metadata - covers generate_pdf_with_metadata method"""
+        with patch.object(PDFGeneratorTool, 'generate_pdf_bytes') as mock_generate:
+            mock_generate.return_value = b'pdf with metadata'
+            
+            tool = PDFGeneratorTool()
+            result = tool.generate_pdf_with_metadata(
+                "# Test Content", 
+                title="Test Title", 
+                author="Test Author"
+            )
+            
+            assert result == b'pdf with metadata'
+            mock_generate.assert_called_once_with("# Test Content")
+
+    def test_generate_pdf_with_metadata_error(self):
+        """Test PDF metadata generation error handling"""
+        with patch.object(PDFGeneratorTool, 'generate_pdf_bytes') as mock_generate:
+            mock_generate.side_effect = Exception("Metadata generation failed")
+            
+            tool = PDFGeneratorTool()
+            
+            with pytest.raises(RuntimeError, match="PDF metadata generation error"):
+                tool.generate_pdf_with_metadata("# Test Content")
+
+    @patch('src.tool.logger')
+    def test_generate_pdf_with_metadata_logging(self, mock_logger):
+        """Test PDF metadata generation error logging"""
+        with patch.object(PDFGeneratorTool, 'generate_pdf_bytes') as mock_generate:
+            mock_generate.side_effect = Exception("Metadata failed")
+            
+            tool = PDFGeneratorTool()
+            
+            with pytest.raises(RuntimeError):
+                tool.generate_pdf_with_metadata("# Test Content")
+            
+            mock_logger.error.assert_called_once()
+            assert "PDF generation with metadata failed" in str(mock_logger.error.call_args)
+
+
+# Add test for the imports at module level
+class TestReportLabImports:
+    """Test ReportLab imports are available"""
+    
+    def test_reportlab_imports(self):
+        """Test that ReportLab components can be imported"""
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+        
+        # Verify imports work
+        assert letter is not None
+        assert A4 is not None
+        assert SimpleDocTemplate is not None
+        assert Paragraph is not None
+        assert Spacer is not None
+        assert getSampleStyleSheet is not None
+        assert ParagraphStyle is not None
+        assert inch is not None
+        assert TA_LEFT is not None
+        assert TA_CENTER is not None
+        assert TA_JUSTIFY is not None
 class TestCleanupResources:
     """Test cleanup resources function"""
     
