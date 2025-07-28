@@ -40,7 +40,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
 # Expose port
-EXPOSE 5000
+EXPOSE 5000 8000
 
 # Environment variables for logging (can be overridden at runtime)
 ENV LOG_LEVEL=INFO

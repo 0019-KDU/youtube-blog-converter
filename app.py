@@ -1126,6 +1126,59 @@ def health_check():
             'secret_key_set': bool(app.secret_key)
         }), 503
 
+# Add this new route for Prometheus health metrics
+@app.route('/health-metrics')
+@track_requests
+def health_metrics():
+    """Prometheus-compatible health metrics endpoint"""
+    try:
+        from auth.models import mongo_manager
+        
+        # Get system information
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        # Check database connection
+        db_connected = mongo_manager.is_connected()
+        
+        # Generate Prometheus metrics format
+        metrics = []
+        
+        # Health status (1 = healthy, 0 = unhealthy)
+        health_status = 1 if db_connected else 0
+        metrics.append(f'azure_app_health_status {health_status}')
+        
+        # Database status (1 = connected, 0 = disconnected)
+        db_status = 1 if db_connected else 0
+        metrics.append(f'azure_app_database_status {db_status}')
+        
+        # System metrics
+        metrics.append(f'azure_app_cpu_percent {cpu_percent}')
+        metrics.append(f'azure_app_memory_percent {memory.percent}')
+        metrics.append(f'azure_app_memory_used_bytes {memory.used}')
+        metrics.append(f'azure_app_memory_total_bytes {memory.total}')
+        metrics.append(f'azure_app_disk_percent {round((disk.used / disk.total) * 100, 2)}')
+        metrics.append(f'azure_app_disk_used_bytes {disk.used}')
+        metrics.append(f'azure_app_disk_total_bytes {disk.total}')
+        
+        # Application metrics
+        metrics.append(f'azure_app_temp_storage_items {len(app.temp_storage)}')
+        metrics.append(f'azure_app_uptime_seconds {int(time.time() - app.start_time) if hasattr(app, "start_time") else 0}')
+        
+        # Join all metrics
+        response_text = '\n'.join(metrics) + '\n'
+        
+        return Response(response_text, mimetype='text/plain')
+        
+    except Exception as e:
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Health metrics error: {e}")
+        # Return error metric
+        error_response = f'azure_app_health_status 0\nazure_app_error {{error="{str(e)}"}} 1\n'
+        return Response(error_response, mimetype='text/plain'), 503
+
+
 # Error handlers
 @app.errorhandler(401)
 def unauthorized(error):
