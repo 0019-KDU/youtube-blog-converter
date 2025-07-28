@@ -11,7 +11,8 @@ import datetime
 from flask import Flask, session, g, request
 from werkzeug.test import Client
 from werkzeug.serving import WSGIRequestHandler
-
+import psutil
+from flask import Response
 # Add the parent directory to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -49,6 +50,15 @@ def app():
             app_module.app.config['SECRET_KEY'] = 'test-secret-key'
             
             yield app_module.app
+
+@pytest.fixture
+def client(self):
+    """Create test client"""
+    app.config['TESTING'] = True
+    app.temp_storage = {}  # Initialize temp_storage for tests
+    with app.test_client() as client:
+        yield client
+
 
 @pytest.fixture
 def client(app):
@@ -139,7 +149,6 @@ class TestUtilityFunctions:
         except (TypeError, AttributeError):
             # If the function doesn't handle None, that's also acceptable
             pass
-
 
 class TestSessionManagement:
     """Test session management functions"""
@@ -883,6 +892,413 @@ class TestRoutes:
         
         assert response.status_code == 200
         assert response.mimetype == 'application/pdf'
+
+class TestHealthMetricsEndpoint:
+    """Test cases for the new /health-metrics endpoint"""
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    @patch('app.time.time')
+    def test_health_metrics_success_all_healthy(self, mock_time, mock_disk, mock_memory, mock_cpu, client):
+        """Test health metrics endpoint when all systems are healthy"""
+        # Setup mocks
+        mock_cpu.return_value = 25.5
+        mock_memory.return_value = Mock(
+            percent=60.2,
+            used=8589934592,  # 8GB
+            total=17179869184  # 16GB
+        )
+        mock_disk.return_value = Mock(
+            used=107374182400,  # 100GB
+            total=536870912000  # 500GB
+        )
+        mock_time.return_value = 1000.0
+        
+        # Set app start time and temp storage
+        client.application.start_time = 500.0
+        client.application.temp_storage = {'item1': 'data1', 'item2': 'data2'}
+        
+        # Mock the mongo_manager import inside the route
+        with patch('auth.models.mongo_manager') as mock_mongo_manager:
+            mock_mongo_manager.is_connected.return_value = True
+            
+            response = client.get('/health-metrics')
+        
+        assert response.status_code == 200
+        assert response.mimetype == 'text/plain'
+        
+        response_text = response.get_data(as_text=True)
+        
+        # Verify all expected metrics are present
+        assert 'azure_app_health_status 1' in response_text
+        assert 'azure_app_database_status 1' in response_text
+        assert 'azure_app_cpu_percent 25.5' in response_text
+        assert 'azure_app_memory_percent 60.2' in response_text
+        assert 'azure_app_memory_used_bytes 8589934592' in response_text
+        assert 'azure_app_memory_total_bytes 17179869184' in response_text
+        assert 'azure_app_disk_percent 20.0' in response_text  # (100GB/500GB)*100
+        assert 'azure_app_disk_used_bytes 107374182400' in response_text
+        assert 'azure_app_disk_total_bytes 536870912000' in response_text
+        assert 'azure_app_temp_storage_items 2' in response_text
+        assert 'azure_app_uptime_seconds 500' in response_text  # 1000 - 500
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    @patch('app.time.time')
+    def test_health_metrics_database_disconnected(self, mock_time, mock_disk, mock_memory, mock_cpu, client):
+        """Test health metrics when database is disconnected"""
+        # Setup mocks
+        mock_cpu.return_value = 45.8
+        mock_memory.return_value = Mock(
+            percent=80.5,
+            used=12884901888,  # 12GB
+            total=17179869184   # 16GB
+        )
+        mock_disk.return_value = Mock(
+            used=268435456000,  # 250GB
+            total=536870912000  # 500GB
+        )
+        mock_time.return_value = 2000.0
+        
+        client.application.start_time = 1500.0
+        client.application.temp_storage = {}
+        
+        # Mock database as disconnected
+        with patch('auth.models.mongo_manager') as mock_mongo_manager:
+            mock_mongo_manager.is_connected.return_value = False
+            
+            response = client.get('/health-metrics')
+        
+        assert response.status_code == 200
+        assert response.mimetype == 'text/plain'
+        
+        response_text = response.get_data(as_text=True)
+        
+        # Health should be unhealthy when DB is disconnected
+        assert 'azure_app_health_status 0' in response_text
+        assert 'azure_app_database_status 0' in response_text
+        assert 'azure_app_cpu_percent 45.8' in response_text
+        assert 'azure_app_memory_percent 80.5' in response_text
+        assert 'azure_app_disk_percent 50.0' in response_text  # (250GB/500GB)*100
+        assert 'azure_app_temp_storage_items 0' in response_text
+        assert 'azure_app_uptime_seconds 500' in response_text  # 2000 - 1500
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    def test_health_metrics_no_start_time(self, mock_disk, mock_memory, mock_cpu, client):
+        """Test health metrics when app.start_time is not set"""
+        # Setup mocks
+        mock_cpu.return_value = 15.2
+        mock_memory.return_value = Mock(
+            percent=45.1,
+            used=4294967296,   # 4GB
+            total=17179869184  # 16GB
+        )
+        mock_disk.return_value = Mock(
+            used=53687091200,  # 50GB
+            total=536870912000 # 500GB
+        )
+        
+        # Remove start_time attribute if it exists
+        if hasattr(client.application, 'start_time'):
+            delattr(client.application, 'start_time')
+        
+        client.application.temp_storage = {'single_item': 'data'}
+        
+        with patch('auth.models.mongo_manager') as mock_mongo_manager:
+            mock_mongo_manager.is_connected.return_value = True
+            
+            response = client.get('/health-metrics')
+        
+        assert response.status_code == 200
+        response_text = response.get_data(as_text=True)
+        
+        # Should show 0 uptime when start_time is not available
+        assert 'azure_app_uptime_seconds 0' in response_text
+        assert 'azure_app_temp_storage_items 1' in response_text
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    def test_health_metrics_edge_case_disk_calculation(self, mock_disk, mock_memory, mock_cpu, client):
+        """Test disk percentage calculation with edge cases"""
+        # Setup mocks
+        mock_cpu.return_value = 99.9
+        mock_memory.return_value = Mock(
+            percent=99.9,
+            used=17179869183,   # Almost full memory
+            total=17179869184   # 16GB
+        )
+        # Test with exact division and rounding
+        mock_disk.return_value = Mock(
+            used=161061273600,  # 150GB - should result in 33.33% when divided by 450GB
+            total=483183820800  # 450GB
+        )
+        
+        client.application.temp_storage = {}
+        
+        with patch('auth.models.mongo_manager') as mock_mongo_manager:
+            mock_mongo_manager.is_connected.return_value = True
+            
+            response = client.get('/health-metrics')
+        
+        assert response.status_code == 200
+        response_text = response.get_data(as_text=True)
+        
+        # Verify disk percentage is properly rounded
+        assert 'azure_app_disk_percent 33.33' in response_text
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.logger')
+    def test_health_metrics_psutil_memory_error(self, mock_logger, mock_cpu, client):
+        """Test error handling when psutil.virtual_memory() fails"""
+        mock_cpu.return_value = 50.0
+        
+        # Mock application_errors
+        with patch('app.application_errors') as mock_app_errors:
+            mock_error_counter = Mock()
+            mock_app_errors.labels.return_value = mock_error_counter
+            
+            # Make virtual_memory raise an exception
+            with patch('app.psutil.virtual_memory', side_effect=Exception("Memory access failed")):
+                response = client.get('/health-metrics')
+        
+        assert response.status_code == 503
+        assert response.mimetype == 'text/plain'
+        
+        response_text = response.get_data(as_text=True)
+        assert 'azure_app_health_status 0' in response_text
+        assert 'azure_app_error {error="Memory access failed"} 1' in response_text
+        
+        # Verify error logging and metrics
+        mock_logger.error.assert_called_once()
+        mock_app_errors.labels.assert_called_once_with(error_type='Exception')
+        mock_error_counter.inc.assert_called_once()
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.logger')
+    def test_health_metrics_disk_usage_error(self, mock_logger, mock_memory, mock_cpu, client):
+        """Test error handling when psutil.disk_usage() fails"""
+        mock_cpu.return_value = 30.0
+        mock_memory.return_value = Mock(percent=50.0, used=1000, total=2000)
+        
+        with patch('app.application_errors') as mock_app_errors:
+            mock_error_counter = Mock()
+            mock_app_errors.labels.return_value = mock_error_counter
+            
+            # Make disk_usage raise an exception
+            with patch('app.psutil.disk_usage', side_effect=OSError("Disk not accessible")):
+                response = client.get('/health-metrics')
+        
+        assert response.status_code == 503
+        response_text = response.get_data(as_text=True)
+        assert 'azure_app_health_status 0' in response_text
+        assert 'azure_app_error {error="Disk not accessible"} 1' in response_text
+        
+        mock_logger.error.assert_called_once()
+        mock_app_errors.labels.assert_called_once_with(error_type='OSError')
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    @patch('app.logger')
+    def test_health_metrics_mongo_manager_import_error(self, mock_logger, mock_disk, mock_memory, mock_cpu, client):
+        """Test error handling when mongo_manager import fails"""
+        mock_cpu.return_value = 40.0
+        mock_memory.return_value = Mock(percent=60.0, used=2000, total=4000)
+        mock_disk.return_value = Mock(used=1000, total=5000)
+        
+        with patch('app.application_errors') as mock_app_errors:
+            mock_error_counter = Mock()
+            mock_app_errors.labels.return_value = mock_error_counter
+            
+            # Mock import failure at the route level
+            with patch('builtins.__import__', side_effect=ImportError("Cannot import auth.models")):
+                response = client.get('/health-metrics')
+        
+        assert response.status_code == 503
+        response_text = response.get_data(as_text=True)
+        assert 'azure_app_health_status 0' in response_text
+        assert 'azure_app_error {error="Cannot import auth.models"} 1' in response_text
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    @patch('app.logger')
+    def test_health_metrics_database_connection_error(self, mock_logger, mock_disk, mock_memory, mock_cpu, client):
+        """Test error handling when database connection check fails"""
+        mock_cpu.return_value = 35.0
+        mock_memory.return_value = Mock(percent=70.0, used=3000, total=5000)
+        mock_disk.return_value = Mock(used=2000, total=8000)
+        
+        with patch('app.application_errors') as mock_app_errors:
+            mock_error_counter = Mock()
+            mock_app_errors.labels.return_value = mock_error_counter
+            
+            # Make database connection check fail
+            with patch('auth.models.mongo_manager') as mock_mongo_manager:
+                mock_mongo_manager.is_connected.side_effect = ConnectionError("Database connection failed")
+                
+                response = client.get('/health-metrics')
+        
+        assert response.status_code == 503
+        response_text = response.get_data(as_text=True)
+        assert 'azure_app_health_status 0' in response_text
+        assert 'azure_app_error {error="Database connection failed"} 1' in response_text
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    def test_health_metrics_large_temp_storage(self, mock_disk, mock_memory, mock_cpu, client):
+        """Test health metrics with large temp storage"""
+        mock_cpu.return_value = 20.0
+        mock_memory.return_value = Mock(percent=40.0, used=1500, total=4000)
+        mock_disk.return_value = Mock(used=500, total=2000)
+        
+        # Create large temp storage
+        client.application.temp_storage = {f'item_{i}': f'data_{i}' for i in range(1000)}
+        
+        with patch('auth.models.mongo_manager') as mock_mongo_manager:
+            mock_mongo_manager.is_connected.return_value = True
+            
+            response = client.get('/health-metrics')
+        
+        assert response.status_code == 200
+        response_text = response.get_data(as_text=True)
+        assert 'azure_app_temp_storage_items 1000' in response_text
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    def test_health_metrics_missing_temp_storage(self, mock_disk, mock_memory, mock_cpu, client):
+        """Test health metrics when temp_storage attribute is missing"""
+        mock_cpu.return_value = 25.0
+        mock_memory.return_value = Mock(percent=55.0, used=2200, total=4000)
+        mock_disk.return_value = Mock(used=800, total=3000)
+        
+        # Remove temp_storage attribute
+        if hasattr(client.application, 'temp_storage'):
+            delattr(client.application, 'temp_storage')
+        
+        with patch('auth.models.mongo_manager') as mock_mongo_manager:
+            mock_mongo_manager.is_connected.return_value = True
+            
+            # The missing temp_storage will cause an AttributeError
+            # which should be handled by the exception handler
+            response = client.get('/health-metrics')
+        
+        # When temp_storage is missing, it should cause an exception
+        # and return 503 (service unavailable)
+        assert response.status_code == 503
+        response_text = response.get_data(as_text=True)
+        assert 'azure_app_health_status 0' in response_text
+        # Should contain error information about the missing attribute
+        assert 'azure_app_error' in response_text
+
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    @patch('app.time.time')
+    def test_health_metrics_response_format(self, mock_time, mock_disk, mock_memory, mock_cpu, client):
+        """Test that the response format is correct Prometheus format"""
+        mock_cpu.return_value = 10.5
+        mock_memory.return_value = Mock(percent=30.2, used=1000, total=3000)
+        mock_disk.return_value = Mock(used=400, total=2000)
+        mock_time.return_value = 1500.0
+        
+        client.application.start_time = 1000.0
+        client.application.temp_storage = {'test': 'data'}
+        
+        with patch('auth.models.mongo_manager') as mock_mongo_manager:
+            mock_mongo_manager.is_connected.return_value = True
+            
+            response = client.get('/health-metrics')
+        
+        assert response.status_code == 200
+        response_text = response.get_data(as_text=True)
+        
+        # Verify response format
+        lines = response_text.strip().split('\n')
+        
+        # Each line should be a valid Prometheus metric
+        for line in lines:
+            if line.strip():  # Skip empty lines
+                assert ' ' in line  # Should have metric_name value format
+                parts = line.split(' ', 1)
+                assert len(parts) == 2
+                metric_name, value = parts
+                assert metric_name.startswith('azure_app_')
+                # Value should be a number (int or float)
+                try:
+                    float(value)
+                except ValueError:
+                    pytest.fail(f"Invalid metric value: {value}")
+
+    def test_health_metrics_track_requests_decorator(self, client):
+        """Test that the @track_requests decorator is applied"""
+        # Mock all required prometheus metrics
+        with patch('app.http_requests_total') as mock_requests_total, \
+             patch('app.http_request_duration_seconds') as mock_duration, \
+             patch('app.psutil.cpu_percent', return_value=50.0), \
+             patch('app.psutil.virtual_memory', return_value=Mock(percent=50.0, used=1000, total=2000)), \
+             patch('app.psutil.disk_usage', return_value=Mock(used=500, total=1000)), \
+             patch('auth.models.mongo_manager') as mock_mongo_manager:
+            
+            mock_requests_total.labels.return_value.inc = Mock()
+            mock_duration.labels.return_value.observe = Mock()
+            mock_mongo_manager.is_connected.return_value = True
+            
+            response = client.get('/health-metrics')
+            
+            assert response.status_code == 200
+            # Verify the request was tracked (decorator functionality)
+            mock_requests_total.labels.assert_called()
+            mock_requests_total.labels.return_value.inc.assert_called()
+
+    @patch('app.psutil.cpu_percent')
+    @patch('app.psutil.virtual_memory')
+    @patch('app.psutil.disk_usage')
+    @patch('app.logger')
+    def test_health_metrics_specific_exception_types(self, mock_logger, mock_disk, mock_memory, mock_cpu, client):
+        """Test error handling with specific exception types"""
+        mock_cpu.return_value = 40.0
+        mock_memory.return_value = Mock(percent=60.0, used=2000, total=4000)
+        mock_disk.return_value = Mock(used=1000, total=5000)
+        
+        with patch('app.application_errors') as mock_app_errors:
+            mock_error_counter = Mock()
+            mock_app_errors.labels.return_value = mock_error_counter
+            
+            # Test with ValueError
+            with patch('auth.models.mongo_manager') as mock_mongo_manager:
+                mock_mongo_manager.is_connected.side_effect = ValueError("Invalid connection parameters")
+                
+                response = client.get('/health-metrics')
+        
+        assert response.status_code == 503
+        mock_app_errors.labels.assert_called_once_with(error_type='ValueError')
+        mock_error_counter.inc.assert_called_once()
+
+    def test_health_metrics_content_type_header(self, client):
+        """Test that the correct content type is returned"""
+        with patch('app.psutil.cpu_percent', return_value=30.0), \
+             patch('app.psutil.virtual_memory', return_value=Mock(percent=40.0, used=1500, total=4000)), \
+             patch('app.psutil.disk_usage', return_value=Mock(used=600, total=2000)), \
+             patch('auth.models.mongo_manager') as mock_mongo_manager:
+            
+            mock_mongo_manager.is_connected.return_value = True
+            
+            response = client.get('/health-metrics')
+            
+            assert response.status_code == 200
+            assert response.content_type == 'text/plain; charset=utf-8'
+            assert response.mimetype == 'text/plain'
+
 
 class TestMetricsAndHealth:
     """Test metrics and health endpoints"""
