@@ -132,10 +132,10 @@
                         </div>
                         
                         <div class="post-actions mt-3">
-                            <button class="btn btn-sm btn-outline-light" onclick="editPost('{{ post._id }}')">
-                                <i class="fas fa-edit me-1"></i>Edit
+                            <button class="btn btn-sm btn-outline-light" onclick="viewPost('{{ post._id }}', '{{ post.title }}')">
+                                <i class="fas fa-eye me-1"></i>View
                             </button>
-                            <button class="btn btn-sm btn-outline-light" onclick="downloadPost('{{ post._id }}')">
+                            <button class="btn btn-sm btn-outline-light" onclick="downloadOldPost('{{ post._id }}', '{{ post.title }}')">
                                 <i class="fas fa-download me-1"></i>PDF
                             </button>
                             <button class="btn btn-sm btn-outline-danger" onclick="deletePost('{{ post._id }}')">
@@ -241,29 +241,138 @@ function deletePost(postId) {
     }
 }
 
-function viewPost(postId) {
-    // Implement view post functionality
-    showToast('View post feature coming soon!', 'info');
+function viewPost(postId, postTitle) {
+    // Create a modal or new page to show the blog content
+    fetch(`/get-post/${postId}`, {
+        headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show the blog content in a modal or redirect to a view page
+            showBlogModal(data.post.title, data.post.content);
+        } else {
+            showToast('Failed to load blog post', 'error');
+        }
+    })
+    .catch(error => {
+        showToast('Error loading blog post', 'error');
+    });
 }
 
-function editPost(postId) {
-    showToast('Edit post feature coming soon!', 'info');
+function downloadOldPost(postId, postTitle) {
+    const btn = event.target.closest('button');
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>PDF...';
+    btn.disabled = true;
+
+    // Create a form to download the specific post
+    const form = document.createElement('form');
+    form.method = 'GET';
+    form.action = `/download-post/${postId}`;
+    form.style.display = 'none';
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+
+    // Reset button
+    setTimeout(() => {
+        btn.innerHTML = originalHTML;
+        btn.disabled = false;
+    }, 2000);
 }
 
-function downloadPost(postId) {
-    showToast('Individual post download coming soon!', 'info');
+function showBlogModal(title, content) {
+    // Create a modal to show blog content
+    const modal = document.createElement('div');
+    modal.className = 'modal fade';
+    modal.innerHTML = `
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">${title}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="blog-content-display">
+                        ${formatBlogContentForModal(content)}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-orange" onclick="copyModalContent()">Copy Content</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    const bootstrapModal = new bootstrap.Modal(modal);
+    bootstrapModal.show();
+    
+    // Remove modal from DOM when closed
+    modal.addEventListener('hidden.bs.modal', () => {
+        document.body.removeChild(modal);
+    });
 }
 
-function refreshPosts() {
-    location.reload();
+function formatBlogContentForModal(content) {
+    if (!content) return '';
+    
+    let formatted = content;
+    
+    // Convert markdown to HTML (same as in generate.html)
+    formatted = formatted.replace(/^# (.+)$/gm, '<h2 class="blog-h2">$1</h2>');
+    formatted = formatted.replace(/^## (.+)$/gm, '<h3 class="blog-h3">$1</h3>');
+    formatted = formatted.replace(/^### (.+)$/gm, '<h4 class="blog-h4">$1</h4>');
+    formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    formatted = formatted.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    
+    const paragraphs = formatted.split('\n\n');
+    formatted = paragraphs.map(p => {
+        if (p.trim() && !p.startsWith('<h')) {
+            return `<p>${p.trim()}</p>`;
+        }
+        return p;
+    }).join('');
+    
+    formatted = formatted.replace(/<p><h([2-4])/g, '<h$1');
+    formatted = formatted.replace(/<\/h([2-4])><\/p>/g, '</h$1>');
+    
+    return formatted;
 }
 
-function loadMorePosts() {
-    showToast('Load more functionality coming soon!', 'info');
+function copyModalContent() {
+    const modalContent = document.querySelector('.modal-body .blog-content-display');
+    if (modalContent) {
+        const textContent = modalContent.innerText;
+        
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(textContent).then(() => {
+                showToast('Content copied to clipboard!', 'success');
+            });
+        } else {
+            // Fallback copy method
+            const textArea = document.createElement('textarea');
+            textArea.value = textContent;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            showToast('Content copied to clipboard!', 'success');
+        }
+    }
 }
 
-function showComingSoon() {
-    showToast('This feature is coming soon!', 'info');
-}
+// Remove or comment out the old editPost function
+// function editPost(postId) {
+//     showToast('Edit post feature coming soon!', 'info');
+// }
+
+// Keep the existing deletePost and other functions as they are
+
+
 </script>
 {% endblock %}

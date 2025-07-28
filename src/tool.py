@@ -9,7 +9,11 @@ from contextlib import contextmanager
 from dotenv import load_dotenv
 from pathlib import Path
 from fpdf import FPDF
-
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 # Initialize logging
 logger = logging.getLogger(__name__)
 
@@ -259,15 +263,72 @@ class PDFGeneratorTool:
             '\u2192': '->',      # rightwards arrow
             '\u2191': '^',       # upwards arrow
             '\u2193': 'v',       # downwards arrow
+            # Additional common characters
+            '\u00e9': 'e',       # é
+            '\u00e8': 'e',       # è
+            '\u00ea': 'e',       # ê
+            '\u00e0': 'a',       # à
+            '\u00e1': 'a',       # á
+            '\u00e2': 'a',       # â
+            '\u00f1': 'n',       # ñ
+            '\u00fc': 'u',       # ü
+            '\u00f6': 'o',       # ö
+            '\u00e4': 'a',       # ä
+            '\u00df': 'ss',      # ß
+            '\u00c7': 'C',       # Ç
+            '\u00e7': 'c',       # ç
         }
         
         for unicode_char, replacement in unicode_replacements.items():
             text = text.replace(unicode_char, replacement)
         
-        # Remove any remaining non-ASCII characters
-        text = ''.join(char if ord(char) < 128 else '?' for char in text)
+        # Remove any remaining non-ASCII characters but keep basic punctuation
+        cleaned_text = ''
+        for char in text:
+            if ord(char) < 128:
+                cleaned_text += char
+            elif char.isspace():
+                cleaned_text += ' '
+            else:
+                cleaned_text += '?'  # Replace unknown chars with ?
         
-        return text
+        return cleaned_text
+    
+    def _handle_bold_italic_text(self, text: str, pdf: FPDF) -> None:
+        """Handle bold and italic formatting in text"""
+        if not text:
+            return
+        
+        # Simple markdown-style formatting
+        parts = re.split(r'(\*\*.*?\*\*|\*.*?\*)', text)
+        
+        for part in parts:
+            if part.startswith('**') and part.endswith('**'):
+                # Bold text
+                pdf.set_font('Arial', 'B', 11)
+                pdf.write(7, part[2:-2])
+            elif part.startswith('*') and part.endswith('*'):
+                # Italic text
+                pdf.set_font('Arial', 'I', 11)
+                pdf.write(7, part[1:-1])
+            else:
+                # Regular text
+                pdf.set_font('Arial', '', 11)
+                pdf.write(7, part)
+    
+    def _add_header_footer(self, pdf: FPDF) -> None:
+        """Add header and footer to PDF"""
+        # Add a subtle header line
+        pdf.set_y(10)
+        pdf.set_draw_color(200, 200, 200)
+        pdf.set_line_width(0.2)
+        pdf.line(15, 12, pdf.w - 15, 12)
+        
+        # Add page number in footer
+        pdf.set_y(-20)
+        pdf.set_font('Arial', 'I', 8)
+        pdf.set_text_color(128, 128, 128)
+        pdf.cell(0, 10, f'Page {pdf.page_no()}', 0, 0, 'C')
     
     def generate_pdf_bytes(self, content: str) -> bytes:
         """Generate PDF with proper width and formatting"""
@@ -292,9 +353,40 @@ class PDFGeneratorTool:
             title = title_match.group(1) if title_match else "Generated Blog Article"
             title = self._clean_unicode_text(title)
             
-            # Title formatting
-            pdf.set_font('Arial', 'B', 20)
-            pdf.cell(0, 15, title, ln=True, align='C')
+            # Title formatting with better spacing
+            pdf.set_font('Arial', 'B', 18)  # Slightly smaller to prevent overflow
+            pdf.set_text_color(44, 62, 80)  # Dark color
+            
+            # Check if title is too long and break it if necessary
+            title_width = pdf.get_string_width(title)
+            if title_width > effective_width:
+                # Break long titles into multiple lines
+                words = title.split()
+                lines = []
+                current_line = ""
+                
+                for word in words:
+                    test_line = current_line + (" " if current_line else "") + word
+                    if pdf.get_string_width(test_line) <= effective_width:
+                        current_line = test_line
+                    else:
+                        if current_line:
+                            lines.append(current_line)
+                            current_line = word
+                        else:
+                            lines.append(word)
+                
+                if current_line:
+                    lines.append(current_line)
+                
+                # Output multi-line title
+                for i, line in enumerate(lines):
+                    pdf.cell(0, 12, line, ln=True, align='C')
+                    if i < len(lines) - 1:
+                        pdf.ln(2)
+            else:
+                pdf.cell(0, 15, title, ln=True, align='C')
+            
             pdf.ln(10)
             
             # Add a separator line
@@ -320,20 +412,30 @@ class PDFGeneratorTool:
                 # Handle main headings (##)
                 if line.startswith('## '):
                     pdf.ln(6)
-                    pdf.set_font('Arial', 'B', 16)
+                    pdf.set_font('Arial', 'B', 14)  # Reduced from 16
                     pdf.set_text_color(44, 62, 80)  # Dark blue-gray
                     heading_text = self._clean_unicode_text(line[3:])
-                    pdf.cell(0, 10, heading_text, ln=True)
+                    
+                    # Check heading width and break if necessary
+                    if pdf.get_string_width(heading_text) > effective_width:
+                        pdf.multi_cell(0, 8, heading_text)
+                    else:
+                        pdf.cell(0, 10, heading_text, ln=True)
                     pdf.ln(4)
                     continue
                     
                 # Handle sub-headings (###)
                 elif line.startswith('### '):
                     pdf.ln(4)
-                    pdf.set_font('Arial', 'B', 14)
+                    pdf.set_font('Arial', 'B', 12)  # Reduced from 14
                     pdf.set_text_color(52, 73, 94)  # Medium gray
                     heading_text = self._clean_unicode_text(line[4:])
-                    pdf.cell(0, 8, heading_text, ln=True)
+                    
+                    # Check heading width and break if necessary
+                    if pdf.get_string_width(heading_text) > effective_width:
+                        pdf.multi_cell(0, 7, heading_text)
+                    else:
+                        pdf.cell(0, 8, heading_text, ln=True)
                     pdf.ln(3)
                     continue
                 
@@ -349,7 +451,8 @@ class PDFGeneratorTool:
                     pdf.set_x(30)  # Text starts after bullet
                     
                     # Use multi_cell for wrapping with proper width
-                    pdf.multi_cell(effective_width - 15, 6, list_text)
+                    available_width = effective_width - 15
+                    pdf.multi_cell(available_width, 6, list_text)
                     pdf.ln(2)
                     continue
                 
@@ -366,9 +469,12 @@ class PDFGeneratorTool:
                         
                         # Proper indentation for numbered lists
                         pdf.set_x(25)
-                        pdf.cell(10, 6, number, ln=False)
-                        pdf.set_x(35)
-                        pdf.multi_cell(effective_width - 20, 6, text)
+                        number_width = pdf.get_string_width(number)
+                        pdf.cell(number_width + 2, 6, number, ln=False)
+                        pdf.set_x(25 + number_width + 2)
+                        
+                        available_width = effective_width - (number_width + 12)
+                        pdf.multi_cell(available_width, 6, text)
                         pdf.ln(2)
                     continue
                 
@@ -380,11 +486,20 @@ class PDFGeneratorTool:
                     
                     if paragraph_text:
                         # Use full width for paragraphs
-                        pdf.multi_cell(0, 7, paragraph_text)
+                        pdf.multi_cell(0, 7, paragraph_text, align='J')  # Justified text
                         pdf.ln(4)
             
-            # Generate PDF bytes with proper handling
-            pdf_output = pdf.output(dest='S')
+            # Add page numbers for multi-page documents
+            if pdf.page_no() > 1:
+                self._add_header_footer(pdf)
+            
+            # Generate PDF bytes with proper error handling
+            try:
+                pdf_output = pdf.output(dest='S')
+            except Exception as output_error:
+                logger.error(f"PDF output generation failed: {str(output_error)}")
+                # Try alternative output method
+                pdf_output = pdf.output()
             
             # Handle different return types from FPDF
             if isinstance(pdf_output, bytes):
@@ -392,9 +507,11 @@ class PDFGeneratorTool:
             elif isinstance(pdf_output, bytearray):
                 return bytes(pdf_output)
             elif isinstance(pdf_output, str):
+                # For older FPDF versions that return string
                 return pdf_output.encode('latin1')
             else:
-                return bytes(pdf_output)
+                # Last resort conversion
+                return bytes(str(pdf_output), 'latin1')
         
         except Exception as e:
             logger.error(f"PDF generation failed: {str(e)}")
@@ -404,6 +521,19 @@ class PDFGeneratorTool:
             if pdf:
                 pdf = None
             gc.collect()
+    
+    def generate_pdf_with_metadata(self, content: str, title: str = None, author: str = None) -> bytes:
+        """Generate PDF with metadata"""
+        try:
+            pdf_bytes = self.generate_pdf_bytes(content)
+            
+            # For adding metadata, you might want to use a different library like PyPDF2
+            # This is a basic implementation
+            return pdf_bytes
+            
+        except Exception as e:
+            logger.error(f"PDF generation with metadata failed: {str(e)}")
+            raise RuntimeError(f"PDF metadata generation error: {str(e)}")
 
 # Helper function to safely cleanup resources
 def cleanup_resources():

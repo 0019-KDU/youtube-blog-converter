@@ -3,208 +3,331 @@ import re
 import sys
 import io
 import uuid
-import logging
-import logging.handlers
 import time
 import datetime
 import gc
 import json
 import tempfile
+import logging
 from pathlib import Path
-from cachelib import FileSystemCache
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, send_file, redirect, url_for, session, jsonify, g
-from flask_session import Session
+from flask import Flask, render_template, request, send_file, redirect, url_for, session, jsonify, g, Response
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, verify_jwt_in_request, decode_token
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# Custom JSON formatter for Loki
-class LokiJSONFormatter(logging.Formatter):
-    """Enhanced JSON formatter optimized for Loki ingestion"""
-    
-    def format(self, record):
-        # Base log entry structure
-        log_entry = {
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-            "line": record.lineno,
-            "process_id": os.getpid(),
-            "thread_id": record.thread,
-        }
-        
-        # Add exception info if present
-        if record.exc_info:
-            log_entry['exception'] = self.formatException(record.exc_info)
-        
-        # Add Flask request context if available
-        try:
-            from flask import has_request_context, request, g
-            if has_request_context():
-                log_entry.update({
-                    'method': request.method,
-                    'path': request.path,
-                    'remote_addr': request.remote_addr,
-                    'user_agent': request.headers.get('User-Agent', ''),
-                    'request_id': getattr(g, 'request_id', None)
-                })
-        except:
-            pass
-        
-        # Add custom fields from extra
-        for key in ['user_id', 'youtube_url', 'blog_generation_time', 'status_code', 'word_count', 'blog_post_id']:
-            if hasattr(record, key):
-                log_entry[key] = getattr(record, key)
-        
-        return json.dumps(log_entry, ensure_ascii=False)
+# Prometheus metrics imports
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CollectorRegistry, CONTENT_TYPE_LATEST
+import psutil
+import threading
+from functools import wraps
 
-def setup_logging():
-    """Configure application logging optimized for Loki"""
-    
-    # Determine log directory
-    log_to_file = os.getenv('LOG_TO_FILE', 'true').lower() == 'true'
-    log_format = os.getenv('LOG_FORMAT', 'json').lower()
-    
-    if os.getenv('TESTING') == 'true' or os.getenv('FLASK_ENV') == 'testing':
-        log_dir = Path(tempfile.gettempdir()) / 'flask-app-test-logs'
-    elif log_to_file:
-        log_dir = Path('/var/log/flask-app')
-    else:
-        log_dir = None
-    
-    # Create formatters
-    if log_format == 'json':
-        json_formatter = LokiJSONFormatter()
-        console_formatter = LokiJSONFormatter()
-    else:
-        console_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        json_formatter = LokiJSONFormatter()
-    
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    
-    # Remove existing handlers
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-    
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(console_formatter)
-    console_handler.setLevel(logging.INFO)
-    root_logger.addHandler(console_handler)
-    
-    # File handlers if enabled
-    if log_dir:
-        try:
-            log_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Main application log
-            app_handler = logging.handlers.RotatingFileHandler(
-                log_dir / 'app.log',
-                maxBytes=50*1024*1024,  # 50MB
-                backupCount=10
-            )
-            app_handler.setFormatter(json_formatter)
-            app_handler.setLevel(logging.INFO)
-            root_logger.addHandler(app_handler)
-            
-            # Error log
-            error_handler = logging.handlers.RotatingFileHandler(
-                log_dir / 'error.log',
-                maxBytes=50*1024*1024,  # 50MB
-                backupCount=10
-            )
-            error_handler.setFormatter(json_formatter)
-            error_handler.setLevel(logging.ERROR)
-            root_logger.addHandler(error_handler)
-            
-            # Access log
-            access_handler = logging.handlers.RotatingFileHandler(
-                log_dir / 'access.log',
-                maxBytes=50*1024*1024,  # 50MB
-                backupCount=10
-            )
-            access_handler.setFormatter(json_formatter)
-            access_handler.setLevel(logging.INFO)
-            
-            access_logger = logging.getLogger('access')
-            access_logger.addHandler(access_handler)
-            access_logger.propagate = False
-            
-            print(f"✅ File logging enabled: {log_dir}")
-            
-        except PermissionError:
-            print(f"⚠️ Cannot create log directory {log_dir}. Using console logging only.")
-            access_logger = logging.getLogger('access')
-            access_logger.propagate = False
-    else:
-        access_logger = logging.getLogger('access')
-        access_logger.propagate = False
-    
-    return access_logger
-
-# Initialize logging
-try:
-    access_logger = setup_logging()
-    print("✅ Logging system initialized")
-except Exception as e:
-    logging.basicConfig(level=logging.INFO)
-    access_logger = logging.getLogger('access')
-    print(f"⚠️ Fallback logging enabled: {e}")
-
-logger = logging.getLogger(__name__)
-
-# Load environment variables
+# Load environment variables FIRST - before any Flask operations
 env_path = Path(__file__).resolve().parent / '.env'
 if env_path.exists():
     load_dotenv(dotenv_path=env_path)
-    logger.info("Environment variables loaded from .env file")
+    print(f"Loaded .env from: {env_path}")
 else:
     load_dotenv()
+    print("Loaded .env from default location")
+
+# Configure logging for better observability
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - %(filename)s:%(lineno)d',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('/var/log/flask-app/app.log') if os.path.exists('/var/log/flask-app') 
+        else logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+def get_secret_key():
+    """Get Flask secret key from environment with guaranteed fallback"""
+    # Try multiple environment variable names
+    secret_key = (
+        os.getenv('JWT_SECRET_KEY') or 
+        os.getenv('FLASK_SECRET_KEY') or 
+        os.getenv('SECRET_KEY')
+    )
+    
+    if not secret_key:
+        logger.warning("No Flask secret key found in environment variables!")
+        logger.warning("Checked: JWT_SECRET_KEY, FLASK_SECRET_KEY, SECRET_KEY")
+        
+        # Generate a secure random key
+        import secrets
+        secret_key = secrets.token_urlsafe(32)
+        logger.info("Generated secure temporary secret key")
+        logger.warning("For production, set JWT_SECRET_KEY in your environment variables")
+        
+        # Save to environment for consistency
+        os.environ['JWT_SECRET_KEY'] = secret_key
+    else:
+        logger.info("Secret key loaded successfully from environment")
+    
+    # Ensure minimum length
+    if len(secret_key) < 16:
+        logger.warning("Secret key too short, generating secure replacement")
+        import secrets
+        secret_key = secrets.token_urlsafe(32)
+        os.environ['JWT_SECRET_KEY'] = secret_key
+    
+    return secret_key
+
+# Get the secret key BEFORE creating Flask app
+SECRET_KEY = get_secret_key()
+logger.info(f"Secret key length: {len(SECRET_KEY)} characters")
 
 # Initialize Flask app
 app = Flask(__name__)
 
-def get_secret_key():
-    """Get Flask secret key from environment"""
-    secret_key = os.getenv('JWT_SECRET_KEY') or os.getenv('FLASK_SECRET_KEY')
-    
-    if not secret_key:
-        logger.warning("No Flask secret key found in environment variables")
-        import secrets
-        secret_key = secrets.token_hex(32)
-        logger.warning("Generated temporary secret key")
-    
-    return secret_key
+# Set secret key IMMEDIATELY after Flask app creation
+app.secret_key = SECRET_KEY
+logger.info("Flask secret key set successfully")
 
-app.secret_key = get_secret_key()
+# Verify secret key is accessible
+if not app.secret_key:
+    raise RuntimeError("Failed to set Flask secret key!")
 
 # JWT Configuration
-app.config['JWT_SECRET_KEY'] = get_secret_key()
+app.config['JWT_SECRET_KEY'] = SECRET_KEY
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(
     seconds=int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 86400))
 )
 
-# Configure server-side sessions
-app.config['SESSION_TYPE'] = 'cachelib'
-app.config['SESSION_CACHELIB'] = FileSystemCache(
-    cache_dir='./.flask_session/', 
-    threshold=500, 
-    default_timeout=300
-)
+# Optimized session configuration to prevent large cookies
 app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_COOKIE_NAME'] = 'session'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['MAX_COOKIE_SIZE'] = 4000  # Stay well under the 4093 byte limit
 
-Session(app)
-jwt = JWTManager(app)
+logger.info("Using Flask's built-in session management with size optimization")
+
+# Initialize JWT
+try:
+    jwt = JWTManager(app)
+    logger.info("JWT Manager initialized successfully")
+except Exception as e:
+    logger.error(f"Error initializing JWT: {e}")
+    raise
 
 # Add GA configuration
 app.config['GA_MEASUREMENT_ID'] = os.getenv('GA_MEASUREMENT_ID', '')
+
+# In-memory storage for large session data (temporary solution)
+# In production, use Redis or database storage
+app.temp_storage = {}
+
+# ========== PROMETHEUS METRICS SETUP ==========
+# Create a custom registry for our metrics
+REGISTRY = CollectorRegistry()
+
+# Application metrics
+http_requests_total = Counter(
+    'flask_http_requests_total',
+    'Total HTTP requests',
+    ['method', 'endpoint', 'status_code'],
+    registry=REGISTRY
+)
+
+http_request_duration_seconds = Histogram(
+    'flask_http_request_duration_seconds',
+    'HTTP request duration in seconds',
+    ['method', 'endpoint'],
+    registry=REGISTRY
+)
+
+blog_generation_requests = Counter(
+    'blog_generation_requests_total',
+    'Total blog generation requests',
+    ['status'],
+    registry=REGISTRY
+)
+
+blog_generation_duration = Histogram(
+    'blog_generation_duration_seconds',
+    'Blog generation duration in seconds',
+    registry=REGISTRY
+)
+
+active_users = Gauge(
+    'active_users',
+    'Number of active users',
+    registry=REGISTRY
+)
+
+youtube_urls_processed = Counter(
+    'youtube_urls_processed_total',
+    'Total YouTube URLs processed',
+    ['status'],
+    registry=REGISTRY
+)
+
+openai_tokens_used = Counter(
+    'openai_tokens_used_total',
+    'Total OpenAI tokens used',
+    registry=REGISTRY
+)
+
+pdf_downloads = Counter(
+    'pdf_downloads_total',
+    'Total PDF downloads',
+    registry=REGISTRY
+)
+
+database_operations = Counter(
+    'database_operations_total',
+    'Total database operations',
+    ['operation', 'collection', 'status'],
+    registry=REGISTRY
+)
+
+# System metrics
+cpu_usage = Gauge(
+    'system_cpu_usage_percent',
+    'CPU usage percentage',
+    registry=REGISTRY
+)
+
+memory_usage = Gauge(
+    'system_memory_usage_bytes',
+    'Memory usage in bytes',
+    registry=REGISTRY
+)
+
+memory_usage_percent = Gauge(
+    'system_memory_usage_percent',
+    'Memory usage percentage',
+    registry=REGISTRY
+)
+
+disk_usage = Gauge(
+    'system_disk_usage_percent',
+    'Disk usage percentage',
+    registry=REGISTRY
+)
+
+# User activity metrics
+user_sessions = Gauge(
+    'user_sessions_active',
+    'Number of active user sessions',
+    registry=REGISTRY
+)
+
+blog_posts_created = Counter(
+    'blog_posts_created_total',
+    'Total blog posts created',
+    registry=REGISTRY
+)
+
+user_registrations = Counter(
+    'user_registrations_total',
+    'Total user registrations',
+    ['status'],
+    registry=REGISTRY
+)
+
+user_logins = Counter(
+    'user_logins_total',
+    'Total user login attempts',
+    ['status'],
+    registry=REGISTRY
+)
+
+# Error metrics
+application_errors = Counter(
+    'application_errors_total',
+    'Total application errors',
+    ['error_type'],
+    registry=REGISTRY
+)
+
+api_errors = Counter(
+    'api_errors_total',
+    'Total API errors',
+    ['api', 'error_type'],
+    registry=REGISTRY
+)
+
+# System metrics collection thread
+def collect_system_metrics():
+    """Collect system metrics periodically"""
+    while True:
+        try:
+            # CPU usage
+            cpu_percent = psutil.cpu_percent(interval=1)
+            cpu_usage.set(cpu_percent)
+            
+            # Memory usage
+            memory = psutil.virtual_memory()
+            memory_usage.set(memory.used)
+            memory_usage_percent.set(memory.percent)
+            
+            # Disk usage
+            disk = psutil.disk_usage('/')
+            disk_usage.set((disk.used / disk.total) * 100)
+            
+            # Active sessions (estimate from temp storage)
+            user_sessions.set(len(app.temp_storage))
+            
+            time.sleep(30)  # Collect every 30 seconds
+        except Exception as e:
+            logger.error(f"Error collecting system metrics: {e}")
+            time.sleep(30)
+
+# Start system metrics collection thread
+metrics_thread = threading.Thread(target=collect_system_metrics, daemon=True)
+metrics_thread.start()
+
+# Decorators for metrics collection
+def track_requests(f):
+    """Decorator to track HTTP requests"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        start_time = time.time()
+        
+        try:
+            response = f(*args, **kwargs)
+            
+            # Extract status code
+            if isinstance(response, tuple):
+                status_code = str(response[1]) if len(response) > 1 else '200'
+            elif hasattr(response, 'status_code'):
+                status_code = str(response.status_code)
+            else:
+                status_code = '200'
+            
+            # Track metrics
+            http_requests_total.labels(
+                method=request.method,
+                endpoint=request.endpoint or 'unknown',
+                status_code=status_code
+            ).inc()
+            
+            duration = time.time() - start_time
+            http_request_duration_seconds.labels(
+                method=request.method,
+                endpoint=request.endpoint or 'unknown'
+            ).observe(duration)
+            
+            return response
+            
+        except Exception as e:
+            # Track error
+            http_requests_total.labels(
+                method=request.method,
+                endpoint=request.endpoint or 'unknown',
+                status_code='500'
+            ).inc()
+            
+            application_errors.labels(error_type=type(e).__name__).inc()
+            raise
+    
+    return decorated_function
 
 # Make config available in templates
 @app.context_processor
@@ -218,56 +341,56 @@ try:
     from src.tool import PDFGeneratorTool
     from auth.models import User, BlogPost
     from auth.routes import auth_bp
-    logger.info("✅ Application modules imported successfully")
+    logger.info("All imports successful")
 except ImportError as e:
-    logger.error(f"❌ Module import failed: {str(e)}")
+    logger.error(f"Import error: {str(e)}")
     raise
 
 # Register authentication blueprint
 app.register_blueprint(auth_bp, url_prefix='/auth')
 
-# Enhanced request middleware for structured logging
+# Request middleware
 @app.before_request
 def log_request():
-    """Enhanced request logging with structured data"""
+    """Log incoming requests"""
     request_id = str(uuid.uuid4())
     g.request_id = request_id
     g.start_time = time.time()
     
-    # Log request with structured data
-    logger.info(
-        "Request started",
-        extra={
-            'event_type': 'request_start',
-            'request_id': request_id,
-            'method': request.method,
-            'path': request.path,
-            'remote_addr': request.remote_addr,
-            'user_agent': request.headers.get('User-Agent', ''),
-            'content_type': request.content_type,
-            'content_length': request.content_length
-        }
-    )
+    # Log request details
+    logger.info(f"Request {request_id}: {request.method} {request.url}")
 
 @app.after_request
 def log_response(response):
-    """Enhanced response logging with performance metrics"""
+    """Log responses"""
     duration = time.time() - getattr(g, 'start_time', time.time())
-    
-    logger.info(
-        "Request completed",
-        extra={
-            'event_type': 'request_end',
-            'request_id': getattr(g, 'request_id', 'unknown'),
-            'status_code': response.status_code,
-            'content_length': response.content_length,
-            'duration_ms': round(duration * 1000, 2),
-            'response_size': len(response.get_data()) if hasattr(response, 'get_data') else None
-        }
-    )
+    logger.info(f"Response {getattr(g, 'request_id', 'unknown')}: {response.status_code} - {duration:.3f}s")
     return response
 
-# Cleanup functions remain the same as your original code
+# Enhanced database operations tracking
+def track_db_operation(operation, collection, func):
+    """Track database operations"""
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        try:
+            result = func(*args, **kwargs)
+            database_operations.labels(
+                operation=operation,
+                collection=collection,
+                status='success'
+            ).inc()
+            return result
+        except Exception as e:
+            database_operations.labels(
+                operation=operation,
+                collection=collection,
+                status='error'
+            ).inc()
+            logger.error(f"Database operation failed: {operation} on {collection}: {e}")
+            raise
+    return wrapper
+
+# ========== CLEANUP FUNCTIONS ==========
 def cleanup_com_objects():
     """Cleanup COM objects on Windows to prevent Win32 exceptions"""
     try:
@@ -280,19 +403,20 @@ def cleanup_com_objects():
                 pass
             except Exception:
                 pass
-    except Exception as e:
-        logger.debug(f"COM cleanup warning: {str(e)}")
+    except Exception:
+        pass
 
 def cleanup_memory():
     """Force garbage collection and memory cleanup"""
     try:
         collected = gc.collect()
-        logger.debug(f"Garbage collection freed {collected} objects")
         gc.collect()
+        
         if hasattr(gc, 'set_debug'):
             gc.set_debug(0)
-    except Exception as e:
-        logger.debug(f"Memory cleanup warning: {str(e)}")
+            
+    except Exception:
+        pass
 
 def cleanup_database_connections(model_objects):
     """Cleanup database model objects"""
@@ -303,8 +427,8 @@ def cleanup_database_connections(model_objects):
                     obj = None
         elif model_objects:
             model_objects = None
-    except Exception as e:
-        logger.debug(f"Database cleanup warning: {str(e)}")
+    except Exception:
+        pass
 
 def full_cleanup(*args):
     """Comprehensive cleanup function"""
@@ -312,21 +436,60 @@ def full_cleanup(*args):
         cleanup_database_connections(args)
         cleanup_com_objects()
         cleanup_memory()
-    except Exception as e:
-        logger.warning(f"Full cleanup warning: {str(e)}")
+    except Exception:
+        pass
 
 def cleanup_after_generation():
     """Helper function to clean up resources after blog generation"""
     try:
         for _ in range(3):
             gc.collect()
+        
         if sys.platform.startswith('win'):
             cleanup_com_objects()
+        
         cleanup_memory()
-    except Exception as e:
-        logger.warning(f"Resource cleanup warning: {str(e)}")
+                
+    except Exception:
+        pass
 
-# Utility functions remain the same as your original code
+# ========== SESSION MANAGEMENT FUNCTIONS ==========
+def store_large_data(key, data, user_id=None):
+    """Store large data outside of session to avoid cookie size limits"""
+    storage_key = f"{user_id}_{key}" if user_id else key
+    app.temp_storage[storage_key] = {
+        'data': data,
+        'timestamp': time.time()
+    }
+    # Clean old data (older than 1 hour)
+    cleanup_old_storage()
+    return storage_key
+
+def retrieve_large_data(key, user_id=None):
+    """Retrieve large data from temporary storage"""
+    storage_key = f"{user_id}_{key}" if user_id else key
+    stored_item = app.temp_storage.get(storage_key)
+    if stored_item:
+        # Check if data is not too old (1 hour)
+        if time.time() - stored_item['timestamp'] < 3600:
+            return stored_item['data']
+        else:
+            # Remove expired data
+            app.temp_storage.pop(storage_key, None)
+    return None
+
+def cleanup_old_storage():
+    """Clean up old temporary storage data"""
+    current_time = time.time()
+    expired_keys = []
+    for key, item in app.temp_storage.items():
+        if current_time - item['timestamp'] > 3600:  # 1 hour
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        app.temp_storage.pop(key, None)
+
+# ========== UTILITY FUNCTIONS ==========
 def extract_video_id(url):
     """Extract video ID from YouTube URL"""
     patterns = [
@@ -349,19 +512,23 @@ def get_current_user():
     try:
         token = None
         
+        # Check Authorization header
         auth_header = request.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
             token = auth_header.split(' ')[1]
         
+        # Check session for token
         if not token:
             token = session.get('access_token')
         
+        # Check user_id directly in session as fallback
         if not token:
             user_id = session.get('user_id')
             if user_id:
                 user_model = User()
                 current_user = user_model.get_user_by_id(user_id)
                 if current_user:
+                    active_users.inc()
                     return current_user
         
         if token:
@@ -372,21 +539,22 @@ def get_current_user():
                 if current_user_id:
                     user_model = User()
                     current_user = user_model.get_user_by_id(current_user_id)
-                    return current_user
-            except Exception as e:
-                logger.warning(f"Token validation failed: {e}")
+                    if current_user:
+                        active_users.inc()
+                        return current_user
+            except Exception:
                 session.pop('access_token', None)
         
         return None
         
     except Exception as e:
-        logger.error(f"Get current user error: {e}")
+        application_errors.labels(error_type=type(e).__name__).inc()
         return None
     finally:
         if user_model:
             user_model = None
 
-# Context processor and template functions remain the same
+# Context processor to inject user into all templates
 @app.context_processor
 def inject_user():
     """Inject current user into all templates"""
@@ -396,6 +564,7 @@ def inject_user():
         user_logged_in=current_user is not None
     )
 
+# Template helper functions
 @app.template_global()
 def format_date(date_obj=None):
     """Format date for template use"""
@@ -445,42 +614,38 @@ def nl2br_filter(text):
         return ''
     return text.replace('\n', '<br>')
 
-# Routes remain mostly the same but with enhanced logging
+# ========== ROUTES ==========
 @app.route('/')
+@track_requests
 def index():
     """Render the main landing page"""
     try:
-        logger.info("Index page accessed", extra={'event_type': 'page_view', 'page': 'index'})
         return render_template('index.html')
     except Exception as e:
-        logger.error(f"Index page error: {str(e)}", extra={'event_type': 'error', 'page': 'index'})
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Error loading index page: {e}")
         return f"Error loading page: {str(e)}", 500
 
 @app.route('/generate-page')
+@track_requests
 def generate_page():
-    """Render the generate blog page"""
+    """Render the generate blog page with left/right layout"""
     try:
         current_user = get_current_user()
         if not current_user:
-            logger.warning("Unauthenticated access to generate page", extra={'event_type': 'auth_required'})
             return redirect(url_for('auth.login'))
         
-        logger.info(
-            "Generate page accessed", 
-            extra={
-                'event_type': 'page_view', 
-                'page': 'generate',
-                'user_id': current_user['_id']
-            }
-        )
         return render_template('generate.html')
     except Exception as e:
-        logger.error(f"Generate page error: {str(e)}", extra={'event_type': 'error', 'page': 'generate'})
-        return render_template('error.html', error=f"Error loading generate page: {str(e)}"), 500
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Error loading generate page: {e}")
+        return render_template('error.html', 
+                             error=f"Error loading generate page: {str(e)}"), 500
 
 @app.route('/generate', methods=['POST'])
+@track_requests
 def generate_blog():
-    """Process YouTube URL and generate blog with enhanced logging"""
+    """Process YouTube URL and generate blog - returns JSON for AJAX"""
     start_time = time.time()
     blog_model = None
     user_model = None
@@ -489,93 +654,65 @@ def generate_blog():
     try:
         current_user = get_current_user()
         if not current_user:
-            logger.warning(
-                'Unauthorized blog generation attempt', 
-                extra={'event_type': 'auth_failed', 'request_id': request_id}
-            )
+            user_logins.labels(status='failed').inc()
             return jsonify({'success': False, 'message': 'Authentication required'}), 401
         
         youtube_url = request.form.get('youtube_url', '').strip()
         language = request.form.get('language', 'en')
         
-        logger.info(
-            'Blog generation started',
-            extra={
-                'event_type': 'blog_generation_start',
-                'request_id': request_id,
-                'user_id': current_user['_id'],
-                'youtube_url': youtube_url,
-                'language': language
-            }
-        )
-        
         if not youtube_url:
-            logger.warning(
-                'Empty YouTube URL provided', 
-                extra={'event_type': 'validation_error', 'request_id': request_id}
-            )
+            blog_generation_requests.labels(status='failed').inc()
             return jsonify({'success': False, 'message': 'YouTube URL is required'}), 400
         
         # Validate URL format
         if not re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', youtube_url):
-            logger.warning(
-                'Invalid YouTube URL format',
-                extra={'event_type': 'validation_error', 'request_id': request_id, 'youtube_url': youtube_url}
-            )
+            blog_generation_requests.labels(status='failed').inc()
             return jsonify({'success': False, 'message': 'Please enter a valid YouTube URL'}), 400
         
         # Extract video ID
         video_id = extract_video_id(youtube_url)
         if not video_id:
-            logger.warning(
-                'Could not extract video ID',
-                extra={'event_type': 'validation_error', 'request_id': request_id, 'youtube_url': youtube_url}
-            )
+            blog_generation_requests.labels(status='failed').inc()
+            youtube_urls_processed.labels(status='invalid').inc()
             return jsonify({'success': False, 'message': 'Invalid YouTube URL'}), 400
+        
+        youtube_urls_processed.labels(status='valid').inc()
+        
+        # Track blog generation start
+        generation_start = time.time()
         
         # Generate blog content
         blog_content = None
         try:
-            logger.info(
-                'Starting blog content generation',
-                extra={'event_type': 'content_generation_start', 'request_id': request_id, 'video_id': video_id}
-            )
             blog_content = generate_blog_from_youtube(youtube_url, language)
+            
+            # Estimate tokens used (rough calculation)
+            estimated_tokens = len(blog_content.split()) * 1.3  # Rough estimate
+            openai_tokens_used.inc(estimated_tokens)
+            
         except Exception as gen_error:
-            logger.error(
-                'Blog generation failed',
-                extra={
-                    'event_type': 'content_generation_error',
-                    'request_id': request_id,
-                    'video_id': video_id,
-                    'error': str(gen_error)
-                },
-                exc_info=True
-            )
+            blog_generation_requests.labels(status='failed').inc()
+            api_errors.labels(api='openai', error_type=type(gen_error).__name__).inc()
+            logger.error(f"Blog generation failed: {gen_error}")
             return jsonify({'success': False, 'message': f'Failed to generate blog: {str(gen_error)}'}), 500
         finally:
             cleanup_after_generation()
         
         # Check if generation was successful
         if not blog_content or len(blog_content) < 100:
-            logger.error(
-                'Blog generation produced insufficient content',
-                extra={
-                    'event_type': 'content_generation_insufficient',
-                    'request_id': request_id,
-                    'content_length': len(blog_content) if blog_content else 0
-                }
-            )
+            blog_generation_requests.labels(status='failed').inc()
             return jsonify({'success': False, 'message': 'Failed to generate blog content. Please try with a different video.'}), 500
         
         # Check for error responses
         if blog_content.startswith("ERROR:"):
+            blog_generation_requests.labels(status='failed').inc()
             error_msg = blog_content.replace("ERROR:", "").strip()
-            logger.error(
-                'Blog generation returned error',
-                extra={'event_type': 'content_generation_error', 'request_id': request_id, 'error': error_msg}
-            )
             return jsonify({'success': False, 'message': error_msg}), 500
+        
+        # Track successful generation
+        generation_duration = time.time() - generation_start
+        blog_generation_duration.observe(generation_duration)
+        blog_generation_requests.labels(status='success').inc()
         
         # Extract title from content
         title_match = re.search(r'^#\s+(.+)$', blog_content, re.MULTILINE)
@@ -583,40 +720,37 @@ def generate_blog():
         
         # Save blog post to database
         blog_model = BlogPost()
-        blog_post = blog_model.create_post(
-            user_id=current_user['_id'],
-            youtube_url=youtube_url,
-            title=title,
-            content=blog_content,
-            video_id=video_id
-        )
+        try:
+            blog_post = blog_model.create_post(
+                user_id=current_user['_id'],
+                youtube_url=youtube_url,
+                title=title,
+                content=blog_content,
+                video_id=video_id
+            )
+            database_operations.labels(
+                operation='create',
+                collection='blog_posts',
+                status='success'
+            ).inc()
+            blog_posts_created.inc()
+        except Exception as db_error:
+            database_operations.labels(
+                operation='create',
+                collection='blog_posts',
+                status='error'
+            ).inc()
+            logger.error(f"Database error creating blog post: {db_error}")
+            raise
         
         if not blog_post:
-            logger.error(
-                'Failed to save blog post to database',
-                extra={'event_type': 'database_error', 'request_id': request_id}
-            )
             return jsonify({'success': False, 'message': 'Failed to save blog post'}), 500
         
         generation_time = time.time() - start_time
         word_count = len(blog_content.split())
         
-        logger.info(
-            'Blog generation completed successfully',
-            extra={
-                'event_type': 'blog_generation_success',
-                'request_id': request_id,
-                'user_id': current_user['_id'],
-                'blog_post_id': str(blog_post['_id']),
-                'blog_generation_time': generation_time,
-                'word_count': word_count,
-                'title': title,
-                'video_id': video_id
-            }
-        )
-        
-        # Store in session for PDF generation
-        session['current_blog'] = {
+        # Store large blog data in temporary storage instead of session
+        blog_data = {
             'blog_content': blog_content,
             'youtube_url': youtube_url,
             'video_id': video_id,
@@ -625,6 +759,15 @@ def generate_blog():
             'post_id': str(blog_post['_id']),
             'word_count': word_count
         }
+        
+        # Store in temporary storage and keep only reference in session
+        storage_key = store_large_data('current_blog', blog_data, str(current_user['_id']))
+        
+        # Store only the storage key in session (much smaller)
+        session['blog_storage_key'] = storage_key
+        session['blog_created'] = time.time()
+        
+        logger.info(f"Blog generated successfully for user {current_user['username']}: {title}")
         
         return jsonify({
             'success': True,
@@ -636,28 +779,82 @@ def generate_blog():
         })
         
     except Exception as e:
-        logger.error(
-            'Unexpected error in blog generation',
-            extra={'event_type': 'unexpected_error', 'request_id': request_id},
-            exc_info=True
-        )
+        blog_generation_requests.labels(status='failed').inc()
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Error generating blog: {e}")
         return jsonify({'success': False, 'message': f'Error generating blog: {str(e)}'}), 500
     
     finally:
         try:
             full_cleanup(blog_model, user_model)
-        except Exception as cleanup_error:
-            logger.warning(
-                'Cleanup error',
-                extra={'event_type': 'cleanup_warning', 'request_id': request_id, 'error': str(cleanup_error)}
-            )
+        except Exception:
+            pass
 
-# Additional routes remain the same with similar logging enhancements...
-# [Include all your other routes here with similar logging patterns]
+@app.route('/download')
+@track_requests
+def download_pdf():
+    """Generate and download PDF"""
+    pdf_generator = None
+    
+    try:
+        current_user = get_current_user()
+        if not current_user:
+            return redirect(url_for('auth.login'))
+        
+        # Retrieve blog data from temporary storage
+        storage_key = session.get('blog_storage_key')
+        blog_data = None
+        
+        if storage_key:
+            blog_data = retrieve_large_data('current_blog', str(current_user['_id']))
+        
+        if not blog_data:
+            return jsonify({'success': False, 'message': 'No blog data found or expired'}), 404
+        
+        blog_content = blog_data['blog_content']
+        title = blog_data['title']
+        
+        # Clean filename
+        safe_title = re.sub(r'[^\w\s-]', '', title)[:50]
+        filename = f"{safe_title}_blog.pdf"
+        
+        # Generate PDF with proper cleanup
+        try:
+            pdf_generator = PDFGeneratorTool()
+            pdf_bytes = pdf_generator.generate_pdf_bytes(blog_content)
+            pdf_downloads.inc()
+            logger.info(f"PDF downloaded by user {current_user['username']}: {title}")
+        finally:
+            if pdf_generator:
+                pdf_generator = None
+            cleanup_after_generation()
+        
+        # Create in-memory file
+        mem_file = io.BytesIO()
+        mem_file.write(pdf_bytes)
+        mem_file.seek(0)
+        
+        return send_file(
+            mem_file,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/pdf'
+        )
+        
+    except Exception as e:
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"PDF generation failed: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'PDF generation failed: {str(e)}'
+        }), 500
+    finally:
+        full_cleanup(pdf_generator)
 
 @app.route('/dashboard')
+@track_requests
 def dashboard():
-    """User dashboard with enhanced logging"""
+    """User dashboard"""
     blog_model = None
     
     try:
@@ -665,131 +862,310 @@ def dashboard():
         
         if not current_user:
             session.clear()
-            logger.warning("Dashboard access denied - no valid user session", extra={'event_type': 'auth_failed'})
             return redirect(url_for('auth.login'))
         
-        logger.info(
-            "Dashboard accessed",
-            extra={
-                'event_type': 'page_view',
-                'page': 'dashboard',
-                'user_id': current_user['_id'],
-                'username': current_user.get('username', 'Unknown')
-            }
-        )
-        
         blog_model = BlogPost()
-        posts = blog_model.get_user_posts(current_user['_id'])
+        try:
+            posts = blog_model.get_user_posts(current_user['_id'])
+            database_operations.labels(
+                operation='read',
+                collection='blog_posts',
+                status='success'
+            ).inc()
+        except Exception as db_error:
+            database_operations.labels(
+                operation='read',
+                collection='blog_posts',
+                status='error'
+            ).inc()
+            logger.error(f"Database error retrieving posts: {db_error}")
+            posts = []
         
-        logger.info(
-            "Dashboard data loaded",
-            extra={
-                'event_type': 'dashboard_loaded',
-                'user_id': current_user['_id'],
-                'post_count': len(posts)
-            }
-        )
-        
-        return render_template('dashboard.html', user=current_user, posts=posts)
+        return render_template('dashboard.html', 
+                             user=current_user, 
+                             posts=posts)
         
     except Exception as e:
-        logger.error(
-            "Dashboard error",
-            extra={'event_type': 'dashboard_error'},
-            exc_info=True
-        )
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Dashboard error: {e}")
         session.clear()
         return redirect(url_for('auth.login'))
     finally:
         if blog_model:
             blog_model = None
 
-# Health check with enhanced monitoring
+@app.route('/delete-post/<post_id>', methods=['DELETE'])
+@track_requests
+def delete_post(post_id):
+    """Delete a blog post"""
+    blog_model = None
+    
+    try:
+        current_user = get_current_user()
+        if not current_user:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        blog_model = BlogPost()
+        try:
+            success = blog_model.delete_post(post_id, current_user['_id'])
+            database_operations.labels(
+                operation='delete',
+                collection='blog_posts',
+                status='success' if success else 'error'
+            ).inc()
+        except Exception as db_error:
+            database_operations.labels(
+                operation='delete',
+                collection='blog_posts',
+                status='error'
+            ).inc()
+            logger.error(f"Database error deleting post: {db_error}")
+            raise
+        
+        if success:
+            logger.info(f"Post deleted by user {current_user['username']}: {post_id}")
+            return jsonify({'success': True, 'message': 'Post deleted successfully'})
+        else:
+            return jsonify({'success': False, 'message': 'Post not found'}), 404
+            
+    except Exception as e:
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Error deleting post: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        if blog_model:
+            blog_model = None
+
+@app.route('/contact')
+@track_requests
+def contact():
+    """Contact page"""
+    try:
+        return render_template('contact.html')
+    except Exception as e:
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Error loading contact page: {e}")
+        return render_template('error.html', 
+                             error=f"Error loading contact page: {str(e)}"), 500
+
+@app.route('/get-post/<post_id>')
+@track_requests
+def get_post(post_id):
+    """Get a specific blog post for viewing"""
+    blog_model = None
+    
+    try:
+        current_user = get_current_user()
+        if not current_user:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        blog_model = BlogPost()
+        try:
+            post = blog_model.get_post_by_id(post_id, current_user['_id'])
+            database_operations.labels(
+                operation='read',
+                collection='blog_posts',
+                status='success'
+            ).inc()
+        except Exception as db_error:
+            database_operations.labels(
+                operation='read',
+                collection='blog_posts',
+                status='error'
+            ).inc()
+            logger.error(f"Database error retrieving post: {db_error}")
+            raise
+        
+        if post:
+            return jsonify({
+                'success': True,
+                'post': post
+            })
+        else:
+            return jsonify({'success': False, 'message': 'Post not found'}), 404
+            
+    except Exception as e:
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Error retrieving post: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        if blog_model:
+            blog_model = None
+
+@app.route('/download-post/<post_id>')
+@track_requests
+def download_post_pdf(post_id):
+    """Download PDF for a specific blog post"""
+    pdf_generator = None
+    blog_model = None
+    
+    try:
+        current_user = get_current_user()
+        if not current_user:
+            return redirect(url_for('auth.login'))
+        
+        blog_model = BlogPost()
+        try:
+            post = blog_model.get_post_by_id(post_id, current_user['_id'])
+            database_operations.labels(
+                operation='read',
+                collection='blog_posts',
+                status='success'
+            ).inc()
+        except Exception as db_error:
+            database_operations.labels(
+                operation='read',
+                collection='blog_posts',
+                status='error'
+            ).inc()
+            logger.error(f"Database error retrieving post for PDF: {db_error}")
+            raise
+        
+        if not post:
+            return jsonify({'success': False, 'message': 'Post not found'}), 404
+        
+        blog_content = post['content']
+        title = post['title']
+        
+        # Clean filename
+        safe_title = re.sub(r'[^\w\s-]', '', title)[:50]
+        filename = f"{safe_title}_blog.pdf"
+        
+        # Generate PDF
+        try:
+            pdf_generator = PDFGeneratorTool()
+            pdf_bytes = pdf_generator.generate_pdf_bytes(blog_content)
+            pdf_downloads.inc()
+            logger.info(f"PDF downloaded for post {post_id} by user {current_user['username']}")
+        finally:
+            if pdf_generator:
+                pdf_generator = None
+            cleanup_after_generation()
+        
+        # Create in-memory file
+        mem_file = io.BytesIO()
+        mem_file.write(pdf_bytes)
+        mem_file.seek(0)
+        
+        return send_file(
+            mem_file,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/pdf'
+        )
+        
+    except Exception as e:
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"PDF generation failed for post {post_id}: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'PDF generation failed: {str(e)}'
+        }), 500
+    finally:
+        if blog_model:
+            blog_model = None
+        full_cleanup(pdf_generator, blog_model)
+
+# ========== METRICS ENDPOINT ==========
+@app.route('/metrics')
+def metrics():
+    """Prometheus metrics endpoint"""
+    try:
+        return Response(generate_latest(REGISTRY), mimetype=CONTENT_TYPE_LATEST)
+    except Exception as e:
+        logger.error(f"Error generating metrics: {e}")
+        return "Error generating metrics", 500
+
+# Health check endpoint for monitoring
 @app.route('/health')
+@track_requests
 def health_check():
-    """Enhanced health check endpoint"""
+    """Health check endpoint with detailed system information"""
     try:
         from auth.models import mongo_manager
+        
+        # Check database connection
         db_connected = mongo_manager.is_connected()
+        
+        # Get system information
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
         
         health_data = {
             'status': 'healthy' if db_connected else 'unhealthy',
             'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'database': 'connected' if db_connected else 'disconnected',
-            'version': '1.0.0',
-            'logging': 'enabled'
+            'secret_key_set': bool(app.secret_key),
+            'temp_storage_items': len(app.temp_storage),
+            'system': {
+                'cpu_percent': cpu_percent,
+                'memory_percent': memory.percent,
+                'memory_used_gb': round(memory.used / (1024**3), 2),
+                'memory_total_gb': round(memory.total / (1024**3), 2),
+                'disk_percent': round((disk.used / disk.total) * 100, 2),
+                'disk_free_gb': round(disk.free / (1024**3), 2)
+            },
+            'application': {
+                'version': '1.0.0',
+                'environment': os.getenv('FLASK_ENV', 'production'),
+                'uptime_seconds': int(time.time() - app.start_time) if hasattr(app, 'start_time') else 0
+            }
         }
         
         status_code = 200 if db_connected else 503
-        
-        logger.info(
-            "Health check performed",
-            extra={
-                'event_type': 'health_check',
-                'status': health_data['status'],
-                'database_status': health_data['database']
-            }
-        )
-        
         return jsonify(health_data), status_code
         
     except Exception as e:
-        logger.error(
-            "Health check failed",
-            extra={'event_type': 'health_check_error'},
-            exc_info=True
-        )
+        application_errors.labels(error_type=type(e).__name__).inc()
+        logger.error(f"Health check error: {e}")
         return jsonify({
             'status': 'unhealthy',
             'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            'error': str(e)
+            'error': str(e),
+            'secret_key_set': bool(app.secret_key)
         }), 503
 
-# Error handlers with logging
+# Error handlers
 @app.errorhandler(401)
 def unauthorized(error):
     """Handle unauthorized access"""
-    logger.warning("Unauthorized access attempt", extra={'event_type': 'unauthorized_access'})
+    application_errors.labels(error_type='401_Unauthorized').inc()
     return redirect(url_for('auth.login'))
 
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors"""
-    logger.warning(
-        "Page not found", 
-        extra={
-            'event_type': 'page_not_found',
-            'path': request.path,
-            'method': request.method
-        }
-    )
+    application_errors.labels(error_type='404_NotFound').inc()
     return render_template('error.html', error="Page not found"), 404
 
 @app.errorhandler(500)
 def internal_error(error):
     """Handle 500 errors"""
-    logger.error(
-        "Internal server error",
-        extra={'event_type': 'internal_server_error'},
-        exc_info=True
-    )
+    application_errors.labels(error_type='500_InternalError').inc()
+    logger.error(f"Internal server error: {error}")
     return render_template('error.html', error="Internal server error"), 500
 
-# Application cleanup
+# Application shutdown cleanup
 @app.teardown_appcontext
 def cleanup_app_context(error):
     """Cleanup resources on app context teardown"""
     try:
         cleanup_memory()
-    except Exception as e:
-        logger.debug(f"App context cleanup warning: {str(e)}")
+    except Exception:
+        pass
 
 if __name__ == '__main__':
-    # Create session directory
-    session_dir = './.flask_session/'
-    if not os.path.exists(session_dir):
-        os.makedirs(session_dir)
-        logger.info(f"Created session directory: {session_dir}")
+    # Set application start time for uptime calculation
+    app.start_time = time.time()
+    
+    # Verify everything is set up correctly before starting
+    logger.info("\n=== Pre-startup Verification ===")
+    logger.info(f"Secret key set: {bool(app.secret_key)}")
+    logger.info(f"Secret key length: {len(app.secret_key) if app.secret_key else 0}")
+    logger.info(f"JWT configured: {bool(app.config.get('JWT_SECRET_KEY'))}")
+    logger.info("Using Flask's built-in sessions with size optimization")
+    logger.info("Prometheus metrics enabled on /metrics endpoint")
     
     # Configuration
     port = int(os.environ.get('PORT', 5000))
@@ -800,8 +1176,7 @@ if __name__ == '__main__':
     required_vars = {
         'OPENAI_API_KEY': 'OpenAI API key',
         'SUPADATA_API_KEY': 'Supadata API key',
-        'MONGODB_URI': 'MongoDB connection URI',
-        'JWT_SECRET_KEY': 'JWT secret key'
+        'MONGODB_URI': 'MongoDB connection URI'
     }
     
     missing_vars = []
@@ -810,32 +1185,20 @@ if __name__ == '__main__':
             missing_vars.append(f"{var} ({description})")
     
     if missing_vars:
-        logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-        sys.exit(1)
+        logger.warning(f"Missing required environment variables: {', '.join(missing_vars)}")
+        logger.info("Note: JWT_SECRET_KEY will be auto-generated if not provided")
     
-    logger.info(
-        "Application starting",
-        extra={
-            'event_type': 'app_start',
-            'host': host,
-            'port': port,
-            'debug': debug_mode,
-            'log_format': os.getenv('LOG_FORMAT', 'json')
-        }
-    )
+    logger.info(f"\nStarting application on {host}:{port}")
+    logger.info("=================================\n")
     
     try:
         app.run(host=host, port=port, debug=debug_mode)
     except Exception as e:
-        logger.error(
-            "Failed to start application",
-            extra={'event_type': 'app_start_error'},
-            exc_info=True
-        )
+        logger.error(f"Failed to start application: {str(e)}")
         sys.exit(1)
     finally:
         try:
             full_cleanup()
             logger.info("Application shutdown cleanup completed")
-        except Exception as e:
-            logger.warning(f"Shutdown cleanup warning: {str(e)}")
+        except Exception:
+            pass

@@ -481,11 +481,11 @@ jobs:
             -e FLASK_HOST="0.0.0.0" \
             -e OPENAI_MODEL_NAME="${{ secrets.OPENAI_MODEL_NAME }}" \
             -e GA_MEASUREMENT_ID="${{ secrets.GA_MEASUREMENT_ID }}" \
-            -e LOG_LEVEL="INFO" \
-            -e LOG_TO_FILE="true" \
-            -e LOKI_ENDPOINT="http://159.65.149.175:3100" \
-            -e GRAFANA_ENDPOINT="http://159.65.149.175:3000" \
-            -e LOGGING_ENABLED="true" \
+            -e PROMETHEUS_ENDPOINT="${{ secrets.PROMETHEUS_ENDPOINT }}" \
+            -e GRAFANA_ENDPOINT="${{ secrets.GRAFANA_ENDPOINT }}" \
+            -e LOKI_ENDPOINT="${{ secrets.LOKI_ENDPOINT }}" \
+            -e MONITORING_ENABLED="true" \
+            -e METRICS_PORT="8000" \
             -p 5000:5000 \
             youtube-blog-converter:${{ github.sha }}
           # wait for Flask to boot

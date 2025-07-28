@@ -135,20 +135,21 @@
                         </div>
                         
                         <!-- Action Buttons -->
-                        <div class="action-buttons mb-4">
-                            <div class="row g-2">
-                                <div class="col-6">
-                                    <a href="{{ url_for('download_pdf') }}" class="btn btn-orange w-100" id="downloadBtn">
-                                        <i class="fas fa-download me-1"></i>PDF
-                                    </a>
-                                </div>
-                                <div class="col-6">
-                                    <button class="btn btn-outline-light w-100" onclick="copyBlogContent()">
-                                        <i class="fas fa-copy me-1"></i>Copy
-                                    </button>
+                            <div class="action-buttons mb-4">
+                                <div class="row g-2">
+                                    <div class="col-6">
+                                        <button class="btn btn-orange w-100" id="downloadBtn" onclick="downloadCurrentBlog()">
+                                            <i class="fas fa-download me-1"></i>PDF
+                                        </button>
+                                    </div>
+                                    <div class="col-6">
+                                        <button class="btn btn-outline-light w-100" onclick="copyBlogContent()">
+                                            <i class="fas fa-copy me-1"></i>Copy
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+
                         
                         <!-- Blog Content -->
                         <div class="blog-content-section">
@@ -522,36 +523,39 @@ function extractVideoId(url) {
     return null;
 }
 
-// Download button handler
-document.addEventListener('click', function(e) {
-    if (e.target.closest('#downloadBtn')) {
-        e.preventDefault();
-        
-        const btn = e.target.closest('#downloadBtn');
-        const originalHTML = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>PDF...';
-        
-        // Track PDF download attempt
-        if (generatedBlogData && generatedBlogData.title) {
-            trackPdfDownload(generatedBlogData.title);
+// Add this function to handle PDF download
+function downloadCurrentBlog() {
+    if (!generatedBlogData) {
+        if (typeof showToast === 'function') {
+            showToast('No blog data available for download', 'error');
         }
-        
-        // Simulate download process (replace with actual download logic)
-        setTimeout(() => {
-            btn.innerHTML = '<i class="fas fa-check me-1"></i>Done!';
-            
-            // Track successful PDF generation
-            gtag('event', 'pdf_generation_success', {
-                'event_category': 'Downloads',
-                'event_label': generatedBlogData?.title || 'Unknown Blog'
-            });
-            
-            setTimeout(() => {
-                btn.innerHTML = originalHTML;
-            }, 2000);
-        }, 1000);
+        return;
     }
-});
+
+    const btn = document.getElementById('downloadBtn');
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Generating...';
+    btn.disabled = true;
+
+    // Track PDF download attempt
+    trackPdfDownload(generatedBlogData.title);
+
+    // Create a form and submit it to trigger download
+    const form = document.createElement('form');
+    form.method = 'GET';
+    form.action = '{{ url_for("download_pdf") }}';
+    form.style.display = 'none';
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+
+    // Reset button after a delay
+    setTimeout(() => {
+        btn.innerHTML = originalHTML;
+        btn.disabled = false;
+    }, 2000);
+}
+
 
 // Track user engagement (time spent on page)
 let pageStartTime = Date.now();
