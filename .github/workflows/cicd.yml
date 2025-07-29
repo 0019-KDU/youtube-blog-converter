@@ -752,7 +752,12 @@ jobs:
             --label green \
             --revision ${{ steps.deploy-green.outputs.revision_name }} \
             --yes
-          
+          # VERIFY LABEL WAS ADDED
+          az containerapp revision show \
+            --revision ${{ steps.deploy-green.outputs.revision_name }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "{name: name, labels: labels}" \
+            --output table
           echo "✅ Green label added successfully"
 
       # In deploy-green-environment job
@@ -907,22 +912,39 @@ jobs:
           if [ -z "$GREEN_REVISION" ] || [ -z "$APP_URL" ]; then
             echo "⚠️ Outputs empty - querying Azure directly"
             
-            # Get green revision (most recent with green label)
+            # Get green revision (most recent with green label) - FIXED JMESPath QUERY
             GREEN_REVISION=$(az containerapp revision list \
               --name ${{ secrets.CONTAINER_APP_NAME }} \
               --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --query "[?any(labels, labels=='green')].name | [0]" \
+              --query "[?labels[?@ == 'green']].name | [0]" \
               --output tsv)
             
-            # Get application URL
-            URL=$(az containerapp show \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --query "properties.configuration.ingress.fqdn" \
-              --output tsv)
+            # Get application URL with retries
+            MAX_ATTEMPTS=3
+            attempt=1
+            URL=""
+            while [ $attempt -le $MAX_ATTEMPTS ]; do
+              URL=$(az containerapp show \
+                --name ${{ secrets.CONTAINER_APP_NAME }} \
+                --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                --query "properties.configuration.ingress.fqdn" \
+                --output tsv)
+              
+              if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+                break
+              fi
+              echo "⚠️ URL fetch attempt $attempt/$MAX_ATTEMPTS failed"
+              sleep 10
+              ((attempt++))
+            done
+            
+            if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+              echo "::error::❌ Failed to get URL after $MAX_ATTEMPTS attempts"
+              exit 1
+            fi
             APP_URL="https://${URL}"
             
-            if [ -z "$GREEN_REVISION" ] || [ -z "$APP_URL" ] || [ "$APP_URL" = "https://null" ]; then
+            if [ -z "$GREEN_REVISION" ] || [ -z "$APP_URL" ]; then
               echo "::error::❌ CRITICAL: Failed to retrieve deployment parameters"
               echo "::error::GREEN revision: '$GREEN_REVISION'"
               echo "::error::App URL: '$APP_URL'"
