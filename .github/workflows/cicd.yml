@@ -755,13 +755,16 @@ jobs:
           
           echo "✅ Green label added successfully"
 
+      # In deploy-green-environment job
       - name: Get Application URL
         id: get-url
         run: |
           echo "🔍 Retrieving app URL..."
+          MAX_ATTEMPTS=5
+          attempt=1
+          URL=""
           
-          # Retry getting URL in case of temporary issues
-          for i in {1..3}; do
+          while [ $attempt -le $MAX_ATTEMPTS ]; do
             URL=$(az containerapp show \
               --name ${{ secrets.CONTAINER_APP_NAME }} \
               --resource-group ${{ secrets.RESOURCE_GROUP }} \
@@ -772,12 +775,13 @@ jobs:
               break
             fi
             
-            echo "⚠️ Failed to get URL on attempt $i/3, retrying..."
+            echo "⚠️ Attempt $attempt/$MAX_ATTEMPTS failed"
             sleep 10
+            ((attempt++))
           done
-          
+
           if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-            echo "❌ Failed to get Container App URL after 3 attempts"
+            echo "::error::❌ Failed to get Container App URL after $MAX_ATTEMPTS attempts"
             exit 1
           fi
           
@@ -891,23 +895,49 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # In blue-green-traffic-switch job
       - name: Validate Inputs from Previous Job
+        id: validate-inputs
         run: |
           echo "🔍 Validating inputs from deploy-green-environment job..."
-          echo "GREEN revision: '${{ needs.deploy-green-environment.outputs.green-revision }}'"
-          echo "App URL: '${{ needs.deploy-green-environment.outputs.app-url }}'"
+          GREEN_REVISION="${{ needs.deploy-green-environment.outputs.green-revision }}"
+          APP_URL="${{ needs.deploy-green-environment.outputs.app-url }}"
           
-          if [ -z "${{ needs.deploy-green-environment.outputs.green-revision }}" ]; then
-            echo "❌ GREEN revision is empty!"
-            exit 1
+          # Fallback to Azure lookup if outputs are empty
+          if [ -z "$GREEN_REVISION" ] || [ -z "$APP_URL" ]; then
+            echo "⚠️ Outputs empty - querying Azure directly"
+            
+            # Get green revision (most recent with green label)
+            GREEN_REVISION=$(az containerapp revision list \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --query "[?any(labels, labels=='green')].name | [0]" \
+              --output tsv)
+            
+            # Get application URL
+            URL=$(az containerapp show \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --query "properties.configuration.ingress.fqdn" \
+              --output tsv)
+            APP_URL="https://${URL}"
+            
+            if [ -z "$GREEN_REVISION" ] || [ -z "$APP_URL" ] || [ "$APP_URL" = "https://null" ]; then
+              echo "::error::❌ CRITICAL: Failed to retrieve deployment parameters"
+              echo "::error::GREEN revision: '$GREEN_REVISION'"
+              echo "::error::App URL: '$APP_URL'"
+              echo "::error::Possible causes:"
+              echo "::error::- Azure credentials insufficient"
+              echo "::error::- Container app not found"
+              echo "::error::- GREEN deployment failed completely"
+              exit 1
+            fi
           fi
           
-          if [ -z "${{ needs.deploy-green-environment.outputs.app-url }}" ]; then
-            echo "❌ App URL is empty!"
-            exit 1
-          fi
-          
-          echo "✅ All required inputs are present"
+          echo "GREEN revision: '$GREEN_REVISION'"
+          echo "App URL: '$APP_URL'"
+          echo "GREEN_REVISION=$GREEN_REVISION" >> $GITHUB_ENV
+          echo "APP_URL=$APP_URL" >> $GITHUB_ENV
 
       - name: Get Current Blue Revision
         id: get-blue
