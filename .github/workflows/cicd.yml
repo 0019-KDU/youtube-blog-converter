@@ -635,7 +635,6 @@ jobs:
     outputs:
       green-revision: ${{ steps.deploy-green.outputs.revision_name }}
       app-url: ${{ steps.get-url.outputs.url }}
-      container-name: ${{ steps.get-container-info.outputs.container_name }}
       
     steps:
       - name: Show commit author
@@ -667,43 +666,34 @@ jobs:
             --username ${{ secrets.DOCKERHUB_USERNAME }} \
             --password ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Get Container App information
-        id: get-container-info
-        run: |
-          echo "🔍 Getting Container App details..."
-          
-          CONTAINER_NAME=$(az containerapp show \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --query "properties.template.containers[0].name" \
-            --output tsv)
-          
-          if [ -z "$CONTAINER_NAME" ] || [ "$CONTAINER_NAME" = "null" ]; then
-            echo "❌ Failed to get container name. Using 'ytblogger' as fallback."
-            CONTAINER_NAME="ytblogger"
-          fi
-          
-          echo "container_name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
-          echo "✅ Found container name: $CONTAINER_NAME"
-
       - name: Deploy to Green Environment
         id: deploy-green
         run: |
-          # Generate revision suffix for green deployment
-          GREEN_REVISION_SUFFIX="green-${{ github.sha }}"
+          # Generate sequential revision suffix using GitHub run number
+          RUN_NUMBER=$(printf "%07d" ${{ github.run_number }})
+          GREEN_REVISION_SUFFIX="green-${RUN_NUMBER}"
           REVISION_NAME="${{ secrets.CONTAINER_APP_NAME }}--${GREEN_REVISION_SUFFIX}"
           
           echo "🟢 Deploying to GREEN environment..."
           echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
           echo "Resource Group: ${{ secrets.RESOURCE_GROUP }}"
-          echo "Container Name: ${{ steps.get-container-info.outputs.container_name }}"
+          echo "Container Name: ytblogger"
           echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
-          echo "Green Revision: $REVISION_NAME"
+          echo "Green Revision Suffix: $GREEN_REVISION_SUFFIX"
+          echo "Full Revision Name: $REVISION_NAME (${#REVISION_NAME} chars)"
+          
+          # Validate revision name length
+          if [ ${#REVISION_NAME} -gt 54 ]; then
+            echo "❌ ERROR: Revision name too long (${#REVISION_NAME} chars, max 54)"
+            exit 1
+          fi
+          
+          echo "✅ Revision name validation passed"
           
           az containerapp update \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --container-name ${{ steps.get-container-info.outputs.container_name }} \
+            --container-name ytblogger \
             --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
             --revision-suffix $GREEN_REVISION_SUFFIX \
             --set-env-vars DEPLOYMENT_COLOR=green DEPLOYMENT_VERSION=${{ github.sha }} \
