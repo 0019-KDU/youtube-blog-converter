@@ -1,4 +1,4 @@
-name: CI/CD for YouTube Blog Converter
+name: CI/CD for YouTube Blog Converter with Blue-Green Deployment
 
 on:
   push:
@@ -11,6 +11,7 @@ permissions:
   contents: read
   pull-requests: write
   checks: write
+  id-token: write  # Required for OIDC
 
 env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -124,7 +125,6 @@ jobs:
 
   build-and-test:
     runs-on: ubuntu-latest
-    # 🔧 ADD SUPADATA_API_KEY HERE FOR TESTING
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
@@ -466,7 +466,6 @@ jobs:
       - name: Container Vulnerability Scan with Trivy
         run: trivy image --severity HIGH,CRITICAL --exit-code 0 youtube-blog-converter:${{ github.sha }}
       
-      # 🔧 ADD BOTH API KEYS TO SMOKE TEST
       - name: Run smoke test
         run: |
           docker run -d --name smoke-test \
@@ -496,7 +495,6 @@ jobs:
           docker logs smoke-test
           curl --retry 5 --retry-delay 5 --retry-connrefused http://localhost:5000/
           docker stop smoke-test
-
 
       - name: Create issue on failure
         if: ${{ failure() }}
@@ -629,12 +627,16 @@ jobs:
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
-
-  deploy-to-azure:
+  # 🔵 BLUE-GREEN DEPLOYMENT IMPLEMENTATION STARTS HERE
+  deploy-green-environment:
     needs: deploy-to-dockerhub
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-
+    outputs:
+      green-revision: ${{ steps.deploy-green.outputs.revision_name }}
+      app-url: ${{ steps.get-url.outputs.url }}
+      container-name: ${{ steps.get-container-info.outputs.container_name }}
+      
     steps:
       - name: Show commit author
         run: |
@@ -652,13 +654,12 @@ jobs:
 
       - name: Configure Docker Hub registry
         run: |
-          echo "🔄 Removing existing Docker registry config (if any)…"
+          echo "🔄 Configuring Docker Hub registry..."
           az containerapp registry remove \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --server docker.io || true
 
-          echo "➕ Adding Docker Hub registry…"
           az containerapp registry set \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
@@ -671,14 +672,12 @@ jobs:
         run: |
           echo "🔍 Getting Container App details..."
           
-          # Get container name - from your screenshots, it's 'ytblogger'
           CONTAINER_NAME=$(az containerapp show \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --query "properties.template.containers[0].name" \
             --output tsv)
           
-          # Validate container name and use fallback if needed
           if [ -z "$CONTAINER_NAME" ] || [ "$CONTAINER_NAME" = "null" ]; then
             echo "❌ Failed to get container name. Using 'ytblogger' as fallback."
             CONTAINER_NAME="ytblogger"
@@ -686,78 +685,80 @@ jobs:
           
           echo "container_name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
           echo "✅ Found container name: $CONTAINER_NAME"
-          
-          # Get current revision name for reference
-          CURRENT_REVISION=$(az containerapp revision list \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --query "[?properties.active].name | [0]" \
-            --output tsv)
-          
-          echo "current_revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
-          echo "📋 Current active revision: $CURRENT_REVISION"
 
-      - name: Deploy container app
+      - name: Deploy to Green Environment
+        id: deploy-green
         run: |
-          echo "🚀 Deploying image to Container App..."
+          # Generate revision suffix for green deployment
+          GREEN_REVISION_SUFFIX="green-${{ github.sha }}"
+          REVISION_NAME="${{ secrets.CONTAINER_APP_NAME }}--${GREEN_REVISION_SUFFIX}"
+          
+          echo "🟢 Deploying to GREEN environment..."
           echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
           echo "Resource Group: ${{ secrets.RESOURCE_GROUP }}"
           echo "Container Name: ${{ steps.get-container-info.outputs.container_name }}"
           echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+          echo "Green Revision: $REVISION_NAME"
           
           az containerapp update \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --container-name ${{ steps.get-container-info.outputs.container_name }} \
             --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
+            --revision-suffix $GREEN_REVISION_SUFFIX \
+            --set-env-vars DEPLOYMENT_COLOR=green DEPLOYMENT_VERSION=${{ github.sha }} \
             --output table
+          
+          echo "revision_name=$REVISION_NAME" >> $GITHUB_OUTPUT
+          echo "✅ Green revision created: $REVISION_NAME"
 
-      - name: Wait for deployment to complete
+      - name: Wait for Green Deployment
         run: |
-          echo "⏳ Waiting for deployment to stabilize..."
-          sleep 45
+          echo "⏳ Waiting for GREEN deployment to stabilize..."
+          sleep 60
           
-          # Check if new revision is created and active
-          NEW_REVISION=$(az containerapp revision list \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --query "[?properties.active].name | [0]" \
-            --output tsv)
+          REVISION_NAME="${{ steps.deploy-green.outputs.revision_name }}"
           
-          echo "🔄 New active revision: $NEW_REVISION"
-          
-          # Wait for revision to be ready
-          echo "⏳ Waiting for revision to be ready..."
           for i in {1..15}; do
             REVISION_STATUS=$(az containerapp revision show \
-              --revision $NEW_REVISION \
+              --revision $REVISION_NAME \
               --resource-group ${{ secrets.RESOURCE_GROUP }} \
               --query "properties.provisioningState" \
               --output tsv 2>/dev/null || echo "Unknown")
             
-            echo "Revision status: $REVISION_STATUS (attempt $i/15)"
+            echo "GREEN revision status: $REVISION_STATUS (attempt $i/15)"
             
             if [ "$REVISION_STATUS" = "Succeeded" ]; then
-              echo "✅ Revision is ready!"
+              echo "✅ GREEN revision is ready!"
               break
             elif [ "$REVISION_STATUS" = "Failed" ]; then
-              echo "❌ Revision deployment failed!"
-              # Show revision details for debugging
+              echo "❌ GREEN revision deployment failed!"
               az containerapp revision show \
-                --revision $NEW_REVISION \
+                --revision $REVISION_NAME \
                 --resource-group ${{ secrets.RESOURCE_GROUP }} \
                 --query "{name: name, status: properties.provisioningState, replicas: properties.replicas}" \
                 --output table
               exit 1
             fi
             
-            sleep 10
+            sleep 15
           done
 
-      - name: Get Container App URL
+      - name: Add Green Label
+        run: |
+          echo "🏷️ Adding 'green' label to revision..."
+          az containerapp revision label add \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --label green \
+            --revision ${{ steps.deploy-green.outputs.revision_name }}
+          
+          echo "✅ Green label added successfully"
+
+      - name: Get Application URL
         id: get-url
         run: |
-          echo "🔍 Retrieving app URL…"
+          echo "🔍 Retrieving app URL..."
           URL=$(az containerapp show \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
@@ -766,53 +767,33 @@ jobs:
           
           if [ -z "$URL" ] || [ "$URL" = "null" ]; then
             echo "❌ Failed to get Container App URL"
-            echo "Container App ingress might not be configured"
             exit 1
           fi
           
           echo "url=https://${URL}" >> $GITHUB_OUTPUT
           echo "✅ Container App URL: https://${URL}"
 
-      - name: Verify Azure deployment
+      - name: Health Check Green Environment
         run: |
-          echo "✅ Successfully deployed to Azure Container Apps!"
-          echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
-          echo "Container Name: ${{ steps.get-container-info.outputs.container_name }}"
-          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
-          echo "Previous revision: ${{ steps.get-container-info.outputs.current_revision }}"
-          echo "Application URL: ${{ steps.get-url.outputs.url }}"
+          echo "🩺 Testing GREEN environment health..."
           
-          # Show current app status
-          echo "📊 Current app status:"
-          az containerapp show \
-            --name ${{ secrets.CONTAINER_APP_NAME }} \
-            --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --query "{name: name, status: properties.provisioningState, activeRevisions: properties.latestRevisionName}" \
-            --output table
-
-      - name: Test deployment health
-        run: |
-          echo "🩺 Testing deployment health..."
-          echo "URL: ${{ steps.get-url.outputs.url }}"
+          GREEN_URL="${{ steps.get-url.outputs.url }}?label=green"
+          echo "Testing GREEN URL: $GREEN_URL"
           
-          # Wait for container to start (Azure Container Apps cold start)
-          echo "⏳ Waiting for container to start (cold start delay)..."
-          sleep 90
-          
-          # Health check with retries
-          for i in {1..6}; do
-            echo "🔍 Health check attempt $i/6..."
+          # Extended health check with more retries for Container Apps cold start
+          for i in {1..12}; do
+            echo "🔍 Health check attempt $i/12 for GREEN environment..."
             
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 45 "${{ steps.get-url.outputs.url }}" || echo "000")
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 --connect-timeout 30 "$GREEN_URL" || echo "000")
             echo "HTTP Status: $HTTP_STATUS"
             
             if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "302" ]; then
-              echo "✅ Health check passed! (Status: $HTTP_STATUS)"
+              echo "✅ GREEN environment health check passed! (Status: $HTTP_STATUS)"
               break
             else
-              echo "⚠️ Health check failed with status: $HTTP_STATUS (attempt $i/6)"
-              if [ $i -eq 6 ]; then
-                echo "❌ All health checks failed"
+              echo "⚠️ GREEN environment health check failed (Status: $HTTP_STATUS)"
+              if [ $i -eq 12 ]; then
+                echo "❌ GREEN environment failed all health checks"
                 echo "📋 Container App status:"
                 az containerapp show \
                   --name ${{ secrets.CONTAINER_APP_NAME }} \
@@ -820,14 +801,13 @@ jobs:
                   --query "{name: name, status: properties.provisioningState, replicas: properties.template.scale, ingress: properties.configuration.ingress.fqdn}" \
                   --output table
                 
-                echo "📋 Latest revision logs (last 50 lines):"
+                echo "📋 GREEN revision logs (last 50 lines):"
                 az containerapp logs show \
                   --name ${{ secrets.CONTAINER_APP_NAME }} \
                   --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                  --revision ${{ steps.deploy-green.outputs.revision_name }} \
                   --tail 50 || echo "Could not fetch logs"
-                
-                echo "⚠️ Health check failed but deployment completed. App may need more time to start."
-                # Don't exit 1 here as the deployment itself was successful
+                exit 1
               fi
               sleep 45
             fi
@@ -846,26 +826,18 @@ jobs:
               await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                title: `Azure Deployment Failed in ${context.job}`,
-                body:
-                  `### ❌ Deployment to Azure Container Apps Failed\n\n` +
-                  `**Job:** ${context.job}\n` +
-                  `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                  `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                  `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
-                  `**Container App:** ${{ secrets.CONTAINER_APP_NAME }}\n` +
-                  `**Resource Group:** ${{ secrets.RESOURCE_GROUP }}\n` +
-                  `**Container Name:** ${{ steps.get-container-info.outputs.container_name }}\n` +
-                  `**Image:** ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${context.sha}\n\n` +
-                  `Deployment to Azure Container Apps failed. Please check deployment logs and Azure Portal.\n\n` +
-                  `**Troubleshooting Steps:**\n` +
-                  `1. Check Container App logs in Azure Portal\n` +
-                  `2. Verify Docker image exists and is accessible\n` +
-                  `3. Check Container App scaling and resource allocation\n` +
-                  `4. Verify environment variables and secrets\n\n` +
-                  `[View Azure Portal](https://portal.azure.com/)`,
+                title: `GREEN Environment Deployment Failed in ${context.job}`,
+                body: `### 🟢❌ GREEN Environment Deployment Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `**Container App:** ${{ secrets.CONTAINER_APP_NAME }}\n` +
+                      `**Resource Group:** ${{ secrets.RESOURCE_GROUP }}\n` +
+                      `**Image:** ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${context.sha}\n\n` +
+                      `GREEN environment deployment failed. Blue-green deployment halted.`,
                 assignees: [assignee],
-                labels: ['ci-failure', 'azure-deployment', 'urgent']
+                labels: ['ci-failure', 'blue-green-deployment', 'urgent']
               });
             } catch (error) {
               console.error('Error creating issue:', error);
@@ -878,7 +850,7 @@ jobs:
         with:
           channel: '#githubaction'
           status: ${{ job.status }}
-          text: "❌ Azure Deployment Failed in ${{ github.repository }}"
+          text: "🟢❌ GREEN Environment Deployment Failed in ${{ github.repository }}"
           fields: |
             [
               {"title": "Repository", "value": "${{ github.repository }}", "short": true},
@@ -886,10 +858,247 @@ jobs:
               {"title": "Job", "value": "${{ github.job }}", "short": true},
               {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
               {"title": "Commit", "value": "${{ github.sha }}", "short": true},
-              {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true},
               {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
-              {"title": "Container Name", "value": "${{ steps.get-container-info.outputs.container_name }}", "short": true},
               {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": false}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
+  blue-green-traffic-switch:
+    needs: deploy-green-environment
+    runs-on: ubuntu-latest
+    environment: production  # Requires manual approval
+    
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Current Blue Revision
+        id: get-blue
+        run: |
+          echo "🔍 Identifying current BLUE (production) revision..."
+          
+          # Get current production revision (blue) - the one receiving traffic
+          BLUE_REVISION=$(az containerapp revision list \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "[?properties.trafficWeight > \`0\`].name | [0]" \
+            --output tsv)
+          
+          if [ -z "$BLUE_REVISION" ] || [ "$BLUE_REVISION" = "null" ]; then
+            echo "⚠️ No current BLUE revision found with traffic. Getting latest active revision..."
+            BLUE_REVISION=$(az containerapp revision list \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --query "[?properties.active && name != '${{ needs.deploy-green-environment.outputs.green-revision }}'].name | [0]" \
+              --output tsv)
+          fi
+          
+          echo "blue_revision=$BLUE_REVISION" >> $GITHUB_OUTPUT
+          echo "📘 Current BLUE revision: $BLUE_REVISION"
+
+      - name: Pre-Switch Validation
+        run: |
+          echo "🔍 Pre-switch validation..."
+          echo "GREEN revision: ${{ needs.deploy-green-environment.outputs.green-revision }}"
+          echo "BLUE revision: ${{ steps.get-blue.outputs.blue_revision }}"
+          echo "App URL: ${{ needs.deploy-green-environment.outputs.app-url }}"
+          
+          # Final health check on GREEN before switching
+          GREEN_URL="${{ needs.deploy-green-environment.outputs.app-url }}?label=green"
+          echo "Final GREEN health check: $GREEN_URL"
+          
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$GREEN_URL" || echo "000")
+          if [ "$HTTP_STATUS" != "200" ] && [ "$HTTP_STATUS" != "201" ] && [ "$HTTP_STATUS" != "302" ]; then
+            echo "❌ GREEN environment failed final health check (Status: $HTTP_STATUS)"
+            exit 1
+          fi
+          
+          echo "✅ GREEN environment is healthy and ready for traffic switch"
+
+      - name: Switch Traffic to Green
+        id: traffic-switch
+        run: |
+          echo "🔄 Switching traffic from BLUE to GREEN..."
+          echo "Directing 100% traffic to: ${{ needs.deploy-green-environment.outputs.green-revision }}"
+          
+          # Switch 100% traffic to green revision
+          az containerapp ingress traffic set \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --revision-weight ${{ needs.deploy-green-environment.outputs.green-revision }}=100 \
+            --output table
+          
+          echo "✅ Traffic switched to GREEN environment"
+          echo "traffic_switched=true" >> $GITHUB_OUTPUT
+
+      - name: Post-Switch Verification
+        run: |
+          echo "⏳ Waiting for traffic switch to take effect..."
+          sleep 30
+          
+          # Verify traffic is now going to GREEN
+          MAIN_URL="${{ needs.deploy-green-environment.outputs.app-url }}"
+          echo "Verifying main URL now serves GREEN: $MAIN_URL"
+          
+          for i in {1..6}; do
+            echo "🔍 Post-switch verification attempt $i/6..."
+            
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$MAIN_URL" || echo "000")
+            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "302" ]; then
+              echo "✅ Post-switch verification passed! (Status: $HTTP_STATUS)"
+              break
+            else
+              echo "⚠️ Post-switch verification failed (Status: $HTTP_STATUS, attempt $i/6)"
+              if [ $i -eq 6 ]; then
+                echo "❌ Post-switch verification failed - initiating rollback"
+                exit 1
+              fi
+              sleep 20
+            fi
+          done
+
+      - name: Update Labels
+        run: |
+          echo "🏷️ Updating deployment labels..."
+          
+          # Remove old blue label if exists
+          az containerapp revision label remove \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --label blue || true
+          
+          # Add blue label to new production revision (what was green is now blue/production)
+          az containerapp revision label add \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --label blue \
+            --revision ${{ needs.deploy-green-environment.outputs.green-revision }}
+          
+          echo "🏷️ Labels updated: GREEN is now BLUE (production)"
+
+      - name: Final Health Check
+        run: |
+          echo "🩺 Final production health check..."
+          
+          PROD_URL="${{ needs.deploy-green-environment.outputs.app-url }}"
+          echo "Production URL: $PROD_URL"
+          
+          for i in {1..5}; do
+            echo "🔍 Production health check attempt $i/5..."
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$PROD_URL" || echo "000")
+            
+            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "302" ]; then
+              echo "✅ Production health check passed! (Status: $HTTP_STATUS)"
+              break
+            else
+              echo "⚠️ Production health check failed (Status: $HTTP_STATUS, attempt $i/5)"
+              if [ $i -eq 5 ]; then
+                echo "❌ Production health check failed - consider rollback"
+                exit 1
+              fi
+              sleep 15
+            fi
+          done
+
+      - name: Cleanup Old Revisions
+        run: |
+          echo "🧹 Cleaning up old revisions..."
+          
+          # Keep only the last 3 revisions (current + 2 previous for rollback capability)
+          OLD_REVISIONS=$(az containerapp revision list \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "[?properties.trafficWeight == \`0\`] | [3:].name" \
+            --output tsv)
+          
+          if [ -n "$OLD_REVISIONS" ]; then
+            for revision in $OLD_REVISIONS; do
+              if [ -n "$revision" ] && [ "$revision" != "null" ]; then
+                echo "🗑️ Deactivating old revision: $revision"
+                az containerapp revision deactivate \
+                  --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                  --revision "$revision" || true
+              fi
+            done
+            echo "✅ Old revisions cleaned up"
+          else
+            echo "ℹ️ No old revisions to clean up"
+          fi
+
+      - name: Deployment Summary
+        run: |
+          echo "🎉 Blue-Green Deployment Complete!"
+          echo "=========================================="
+          echo "✅ GREEN environment deployed successfully"
+          echo "✅ Traffic switched to GREEN (now BLUE/production)"
+          echo "✅ Health checks passed"
+          echo "✅ Old revisions cleaned up"
+          echo ""
+          echo "📊 Deployment Details:"
+          echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
+          echo "New Production Revision: ${{ needs.deploy-green-environment.outputs.green-revision }}"
+          echo "Previous BLUE Revision: ${{ steps.get-blue.outputs.blue_revision }}"
+          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+          echo "Application URL: ${{ needs.deploy-green-environment.outputs.app-url }}"
+          echo "Commit: ${{ github.sha }}"
+
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Blue-Green Traffic Switch Failed in ${context.job}`,
+                body: `### 🔄❌ Blue-Green Traffic Switch Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `**Container App:** ${{ secrets.CONTAINER_APP_NAME }}\n` +
+                      `**GREEN Revision:** ${{ needs.deploy-green-environment.outputs.green-revision }}\n` +
+                      `**BLUE Revision:** ${{ steps.get-blue.outputs.blue_revision }}\n\n` +
+                      `Traffic switch failed. System may need manual intervention.\n\n` +
+                      `**Manual Rollback Steps:**\n` +
+                      `1. Check Azure Portal for Container App status\n` +
+                      `2. If needed, manually switch traffic back to previous BLUE revision\n` +
+                      `3. Investigate logs for the failed GREEN deployment`,
+                assignees: [assignee],
+                labels: ['ci-failure', 'blue-green-deployment', 'urgent', 'production']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
+
+      - name: Slack Notification on Failure
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "🔄❌ Blue-Green Traffic Switch Failed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
+              {"title": "GREEN Revision", "value": "${{ needs.deploy-green-environment.outputs.green-revision }}", "short": true},
+              {"title": "BLUE Revision", "value": "${{ steps.get-blue.outputs.blue_revision }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
@@ -899,20 +1108,212 @@ jobs:
         with:
           channel: '#githubaction'
           status: 'success'
-          text: "✅ Azure Deployment Successful in ${{ github.repository }}"
+          text: "🎉 Blue-Green Deployment Successful in ${{ github.repository }}"
           fields: |
             [
               {"title": "Repository", "value": "${{ github.repository }}", "short": true},
               {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
-              {"title": "Container Name", "value": "${{ steps.get-container-info.outputs.container_name }}", "short": true},
+              {"title": "New Production", "value": "${{ needs.deploy-green-environment.outputs.green-revision }}", "short": false},
+              {"title": "Previous Version", "value": "${{ steps.get-blue.outputs.blue_revision }}", "short": false},
               {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": false},
-              {"title": "Application URL", "value": "${{ steps.get-url.outputs.url }}", "short": false},
-              {"title": "Previous Revision", "value": "${{ steps.get-container-info.outputs.current_revision }}", "short": true},
-              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Application URL", "value": "${{ needs.deploy-green-environment.outputs.app-url }}", "short": false},
               {"title": "Commit", "value": "${{ github.sha }}", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
+  # 🔄 AUTOMATIC ROLLBACK ON FAILURE
+  rollback-on-failure:
+    needs: [deploy-green-environment, blue-green-traffic-switch]
+    if: failure()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Show rollback trigger
+        run: |
+          echo "🚨 ROLLBACK TRIGGERED"
+          echo "GREEN deployment status: ${{ needs.deploy-green-environment.result }}"
+          echo "Traffic switch status: ${{ needs.blue-green-traffic-switch.result }}"
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Identify Rollback Target
+        id: rollback-target
+        run: |
+          echo "🔍 Identifying rollback target..."
+          
+          # Get the previous stable revision (excluding the failed green one)
+          GREEN_REVISION="${{ needs.deploy-green-environment.outputs.green-revision }}"
+          
+          ROLLBACK_REVISION=$(az containerapp revision list \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "[?properties.active && name != '$GREEN_REVISION'] | [0].name" \
+            --output tsv)
+          
+          if [ -z "$ROLLBACK_REVISION" ] || [ "$ROLLBACK_REVISION" = "null" ]; then
+            echo "❌ No suitable rollback revision found"
+            exit 1
+          fi
+          
+          echo "rollback_revision=$ROLLBACK_REVISION" >> $GITHUB_OUTPUT
+          echo "🔄 Rollback target identified: $ROLLBACK_REVISION"
+
+      - name: Execute Rollback
+        run: |
+          echo "🔄 Executing rollback to BLUE environment..."
+          echo "Rolling back to: ${{ steps.rollback-target.outputs.rollback_revision }}"
+          
+          # Switch traffic back to previous stable revision
+          az containerapp ingress traffic set \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --revision-weight ${{ steps.rollback-target.outputs.rollback_revision }}=100 \
+            --output table
+          
+          echo "✅ Rollback traffic switch completed"
+
+      - name: Verify Rollback
+        run: |
+          echo "🔍 Verifying rollback..."
+          
+          # Get app URL
+          URL=$(az containerapp show \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" \
+            --output tsv)
+          
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "❌ Failed to get app URL for verification"
+            exit 1
+          fi
+          
+          ROLLBACK_URL="https://${URL}"
+          echo "Verifying rollback URL: $ROLLBACK_URL"
+          
+          # Wait for rollback to take effect
+          sleep 30
+          
+          for i in {1..5}; do
+            echo "🔍 Rollback verification attempt $i/5..."
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$ROLLBACK_URL" || echo "000")
+            
+            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "302" ]; then
+              echo "✅ Rollback verification passed! (Status: $HTTP_STATUS)"
+              break
+            else
+              echo "⚠️ Rollback verification failed (Status: $HTTP_STATUS, attempt $i/5)"
+              if [ $i -eq 5 ]; then
+                echo "❌ Rollback verification failed - manual intervention required"
+                exit 1
+              fi
+              sleep 15
+            fi
+          done
+
+      - name: Update Labels After Rollback
+        run: |
+          echo "🏷️ Updating labels after rollback..."
+          
+          # Remove labels from failed green revision
+          az containerapp revision label remove \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --label green || true
+          
+          # Ensure blue label is on the rollback revision
+          az containerapp revision label add \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --label blue \
+            --revision ${{ steps.rollback-target.outputs.rollback_revision }} || true
+          
+          echo "✅ Labels updated after rollback"
+
+      - name: Deactivate Failed Green Revision
+        run: |
+          echo "🗑️ Deactivating failed GREEN revision..."
+          
+          GREEN_REVISION="${{ needs.deploy-green-environment.outputs.green-revision }}"
+          if [ -n "$GREEN_REVISION" ] && [ "$GREEN_REVISION" != "null" ]; then
+            az containerapp revision deactivate \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --revision "$GREEN_REVISION" || true
+            echo "✅ Failed GREEN revision deactivated: $GREEN_REVISION"
+          fi
+
+      - name: Rollback Summary
+        run: |
+          echo "🔄 ROLLBACK COMPLETED"
+          echo "======================================"
+          echo "✅ Traffic rolled back to stable version"
+          echo "✅ Failed GREEN revision deactivated"
+          echo "✅ System restored to previous state"
+          echo ""
+          echo "📊 Rollback Details:"
+          echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
+          echo "Rollback Revision: ${{ steps.rollback-target.outputs.rollback_revision }}"
+          echo "Failed GREEN Revision: ${{ needs.deploy-green-environment.outputs.green-revision }}"
+          echo "Commit that failed: ${{ github.sha }}"
+
+      - name: Create Rollback Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🔄 Automatic Rollback Executed - Deployment Failed`,
+                body: `### 🔄 Automatic Rollback Executed\n\n` +
+                      `**Trigger:** Blue-Green deployment failure\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `**Container App:** ${{ secrets.CONTAINER_APP_NAME }}\n` +
+                      `**Failed GREEN Revision:** ${{ needs.deploy-green-environment.outputs.green-revision }}\n` +
+                      `**Rollback Target:** ${{ steps.rollback-target.outputs.rollback_revision }}\n\n` +
+                      `### What Happened\n` +
+                      `The blue-green deployment failed and an automatic rollback was executed. ` +
+                      `The system has been restored to the previous stable state.\n\n` +
+                      `### Next Steps\n` +
+                      `1. Review the failed deployment logs\n` +
+                      `2. Fix the issues in the code\n` +
+                      `3. Test locally before next deployment\n` +
+                      `4. Monitor the application for stability`,
+                assignees: [assignee],
+                labels: ['rollback', 'blue-green-deployment', 'urgent', 'production']
+              });
+            } catch (error) {
+              console.error('Error creating rollback issue:', error);
+              core.setFailed(`Failed to create rollback issue: ${error.message}`);
+            }
+
+      - name: Slack Rollback Notification
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: 'warning'
+          text: "🔄 Automatic Rollback Executed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
+              {"title": "Failed GREEN", "value": "${{ needs.deploy-green-environment.outputs.green-revision }}", "short": false},
+              {"title": "Rollback Target", "value": "${{ steps.rollback-target.outputs.rollback_revision }}", "short": false},
+              {"title": "Failed Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Status", "value": "System restored to stable state", "short": false}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
+  # 📊 FINAL NOTIFICATION
   notify:
     name: Pipeline Status Notification
     if: always()
@@ -923,7 +1324,9 @@ jobs:
       - sonarqube-scan
       - docker-build-test
       - deploy-to-dockerhub
-      - deploy-to-azure
+      - deploy-green-environment
+      - blue-green-traffic-switch
+      - rollback-on-failure
     steps:
       - name: Aggregate job statuses
         id: status
@@ -931,7 +1334,9 @@ jobs:
           failed_jobs=""
           successful_jobs=""
           skipped_jobs=""
+          rollback_executed="false"
 
+          # Check each job status
           if [[ "${{ needs.security-scan.result }}" == 'failure' ]]; then 
             failed_jobs+="Security Scan, "
           elif [[ "${{ needs.security-scan.result }}" == 'success' ]]; then
@@ -972,14 +1377,31 @@ jobs:
             skipped_jobs+="Docker Hub Deployment, "
           fi
 
-          if [[ "${{ needs.deploy-to-azure.result }}" == 'failure' ]]; then 
-            failed_jobs+="Azure Deployment, "
-          elif [[ "${{ needs.deploy-to-azure.result }}" == 'success' ]]; then
-            successful_jobs+="Azure Deployment, "
+          if [[ "${{ needs.deploy-green-environment.result }}" == 'failure' ]]; then 
+            failed_jobs+="GREEN Environment Deploy, "
+          elif [[ "${{ needs.deploy-green-environment.result }}" == 'success' ]]; then
+            successful_jobs+="GREEN Environment Deploy, "
           else
-            skipped_jobs+="Azure Deployment, "
+            skipped_jobs+="GREEN Environment Deploy, "
           fi
 
+          if [[ "${{ needs.blue-green-traffic-switch.result }}" == 'failure' ]]; then 
+            failed_jobs+="Blue-Green Traffic Switch, "
+          elif [[ "${{ needs.blue-green-traffic-switch.result }}" == 'success' ]]; then
+            successful_jobs+="Blue-Green Traffic Switch, "
+          else
+            skipped_jobs+="Blue-Green Traffic Switch, "
+          fi
+
+          # Check if rollback was executed
+          if [[ "${{ needs.rollback-on-failure.result }}" == 'success' ]]; then
+            rollback_executed="true"
+            successful_jobs+="Automatic Rollback, "
+          elif [[ "${{ needs.rollback-on-failure.result }}" == 'failure' ]]; then
+            failed_jobs+="Automatic Rollback, "
+          fi
+
+          # Clean up trailing commas
           failed_jobs=${failed_jobs%, }
           successful_jobs=${successful_jobs%, }
           skipped_jobs=${skipped_jobs%, }
@@ -987,8 +1409,12 @@ jobs:
           echo "failed_jobs=$failed_jobs" >> $GITHUB_OUTPUT
           echo "successful_jobs=$successful_jobs" >> $GITHUB_OUTPUT
           echo "skipped_jobs=$skipped_jobs" >> $GITHUB_OUTPUT
+          echo "rollback_executed=$rollback_executed" >> $GITHUB_OUTPUT
           
-          if [ -n "$failed_jobs" ]; then
+          # Determine overall status
+          if [ "$rollback_executed" = "true" ]; then
+            echo "overall_status=rollback" >> $GITHUB_OUTPUT
+          elif [ -n "$failed_jobs" ]; then
             echo "overall_status=failure" >> $GITHUB_OUTPUT
           elif [ -n "$successful_jobs" ]; then
             echo "overall_status=success" >> $GITHUB_OUTPUT
@@ -1001,10 +1427,19 @@ jobs:
         with:
           channel: '#githubaction'
           status: ${{ job.status }}
-          icon_emoji: ${{ steps.status.outputs.overall_status == 'success' && ':white_check_mark:' || ':x:' }}
+          icon_emoji: |
+            ${{ 
+              steps.status.outputs.overall_status == 'success' && ':white_check_mark:' || 
+              steps.status.outputs.overall_status == 'rollback' && ':warning:' || 
+              ':x:' 
+            }}
           text: |
-            ${{ steps.status.outputs.overall_status == 'success' && '✅ Complete Pipeline Succeeded!' || '❌ Pipeline Failed!' }}
-            ${{ steps.status.outputs.overall_status == 'skipped' && '⚠️ Pipeline Skipped!' }}
+            ${{
+              steps.status.outputs.overall_status == 'success' && '✅ Blue-Green Deployment Pipeline Succeeded!' ||
+              steps.status.outputs.overall_status == 'rollback' && '🔄 Pipeline Failed - Automatic Rollback Executed!' ||
+              steps.status.outputs.overall_status == 'failure' && '❌ Pipeline Failed!' ||
+              '⚠️ Pipeline Skipped!'
+            }}
           fields: |
             [
               {"title": "Repository", "value": "${{ github.repository }}", "short": true},
@@ -1012,8 +1447,10 @@ jobs:
               {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
               {"title": "Commit", "value": "${{ github.sha }}", "short": true},
               {"title": "Triggered by", "value": "${{ github.actor }}", "short": true},
-              ${{ steps.status.outputs.successful_jobs != '' && format('{{"title": "Successful Jobs", "value": "{0}", "short": true}},', steps.status.outputs.successful_jobs) || '' }}
-              ${{ steps.status.outputs.failed_jobs != '' && format('{{"title": "Failed Jobs", "value": "{0}", "short": true}},', steps.status.outputs.failed_jobs) || '' }}
-              ${{ steps.status.outputs.skipped_jobs != '' && format('{{"title": "Skipped Jobs", "value": "{0}", "short": true}}', steps.status.outputs.skipped_jobs) || '' }}
+              {"title": "Deployment Strategy", "value": "Blue-Green", "short": true},
+              ${{ steps.status.outputs.successful_jobs != '' && format('{{"title": "Successful Jobs", "value": "{0}", "short": false}},', steps.status.outputs.successful_jobs) || '' }}
+              ${{ steps.status.outputs.failed_jobs != '' && format('{{"title": "Failed Jobs", "value": "{0}", "short": false}},', steps.status.outputs.failed_jobs) || '' }}
+              ${{ steps.status.outputs.skipped_jobs != '' && format('{{"title": "Skipped Jobs", "value": "{0}", "short": false}},', steps.status.outputs.skipped_jobs) || '' }}
+              ${{ steps.status.outputs.rollback_executed == 'true' && '{"title": "Rollback Status", "value": "✅ System restored to stable state", "short": false}' || '' }}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run Details>"
