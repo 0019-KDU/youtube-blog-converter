@@ -737,11 +737,21 @@ jobs:
       - name: Add Green Label
         run: |
           echo "🏷️ Adding 'green' label to revision..."
+          
+          # Remove existing green label if it exists (with --yes flag)
+          az containerapp revision label remove \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --label green \
+            --yes || echo "No existing green label to remove"
+          
+          # Add green label to new revision (with --yes flag)
           az containerapp revision label add \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --label green \
-            --revision ${{ steps.deploy-green.outputs.revision_name }}
+            --revision ${{ steps.deploy-green.outputs.revision_name }} \
+            --yes
           
           echo "✅ Green label added successfully"
 
@@ -1030,18 +1040,20 @@ jobs:
         run: |
           echo "🏷️ Updating deployment labels..."
           
-          # Remove old blue label if exists
+          # Remove old blue label if exists (with --yes flag)
           az containerapp revision label remove \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --label blue || true
+            --label blue \
+            --yes || true
           
-          # Add blue label to new production revision (what was green is now blue/production)
+          # Add blue label to new production revision (with --yes flag)
           az containerapp revision label add \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --label blue \
-            --revision ${{ needs.deploy-green-environment.outputs.green-revision }}
+            --revision ${{ needs.deploy-green-environment.outputs.green-revision }} \
+            --yes
           
           echo "🏷️ Labels updated: GREEN is now BLUE (production)"
 
@@ -1298,18 +1310,20 @@ jobs:
         run: |
           echo "🏷️ Updating labels after rollback..."
           
-          # Remove labels from failed green revision
+          # Remove labels from failed green revision (with --yes flag)
           az containerapp revision label remove \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --label green || true
+            --label green \
+            --yes || true
           
-          # Ensure blue label is on the rollback revision
+          # Ensure blue label is on the rollback revision (with --yes flag)
           az containerapp revision label add \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --label blue \
-            --revision ${{ steps.rollback-target.outputs.rollback_revision }} || true
+            --revision ${{ steps.rollback-target.outputs.rollback_revision }} \
+            --yes || true
           
           echo "✅ Labels updated after rollback"
 
