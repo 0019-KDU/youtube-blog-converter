@@ -752,24 +752,16 @@ jobs:
             --label green \
             --revision ${{ steps.deploy-green.outputs.revision_name }} \
             --yes
-          # VERIFY LABEL WAS ADDED
-          az containerapp revision show \
-            --revision ${{ steps.deploy-green.outputs.revision_name }} \
-            --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --query "{name: name, labels: labels}" \
-            --output table
+          
           echo "✅ Green label added successfully"
 
-      # In deploy-green-environment job
       - name: Get Application URL
         id: get-url
         run: |
           echo "🔍 Retrieving app URL..."
-          MAX_ATTEMPTS=5
-          attempt=1
-          URL=""
           
-          while [ $attempt -le $MAX_ATTEMPTS ]; do
+          # Retry getting URL in case of temporary issues
+          for i in {1..3}; do
             URL=$(az containerapp show \
               --name ${{ secrets.CONTAINER_APP_NAME }} \
               --resource-group ${{ secrets.RESOURCE_GROUP }} \
@@ -780,13 +772,12 @@ jobs:
               break
             fi
             
-            echo "⚠️ Attempt $attempt/$MAX_ATTEMPTS failed"
+            echo "⚠️ Failed to get URL on attempt $i/3, retrying..."
             sleep 10
-            ((attempt++))
           done
-
+          
           if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-            echo "::error::❌ Failed to get Container App URL after $MAX_ATTEMPTS attempts"
+            echo "❌ Failed to get Container App URL after 3 attempts"
             exit 1
           fi
           
@@ -900,30 +891,75 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # In blue-green-traffic-switch job
-      - name: Validate Inputs from Previous Job
-        id: validate-inputs
+      - name: Debug Previous Job Outputs
         run: |
-          echo "🔍 Validating inputs from deploy-green-environment job..."
+          echo "🔍 Debugging previous job outputs..."
+          echo "needs.deploy-green-environment.result: '${{ needs.deploy-green-environment.result }}'"
+          echo "needs.deploy-green-environment.outputs: '${{ toJSON(needs.deploy-green-environment.outputs) }}'"
+          echo "GREEN revision raw: '${{ needs.deploy-green-environment.outputs.green-revision }}'"
+          echo "App URL raw: '${{ needs.deploy-green-environment.outputs.app-url }}'"
+
+      - name: Validate or Retrieve Missing Inputs
+        id: get-inputs
+        run: |
+          echo "🔍 Validating and retrieving deployment inputs..."
+          
+          # Check if previous job succeeded
+          if [ "${{ needs.deploy-green-environment.result }}" != "success" ]; then
+            echo "❌ Previous job (deploy-green-environment) did not succeed: ${{ needs.deploy-green-environment.result }}"
+            exit 1
+          fi
+          
+          # Try to get GREEN revision from job outputs first
           GREEN_REVISION="${{ needs.deploy-green-environment.outputs.green-revision }}"
           APP_URL="${{ needs.deploy-green-environment.outputs.app-url }}"
           
-          # Fallback to Azure lookup if outputs are empty
-          if [ -z "$GREEN_REVISION" ] || [ -z "$APP_URL" ]; then
-            echo "⚠️ Outputs empty - querying Azure directly"
+          echo "From job outputs - GREEN revision: '$GREEN_REVISION'"
+          echo "From job outputs - App URL: '$APP_URL'"
+          
+          # If GREEN revision is empty, try to find it manually
+          if [ -z "$GREEN_REVISION" ]; then
+            echo "⚠️ GREEN revision not found in outputs, searching manually..."
             
-            # Get green revision (most recent with green label) - FIXED JMESPath QUERY
-            GREEN_REVISION=$(az containerapp revision list \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
+            # Generate the expected revision name
+            RUN_NUMBER=$(printf "%07d" ${{ github.run_number }})
+            GREEN_REVISION_SUFFIX="green-${RUN_NUMBER}"
+            EXPECTED_REVISION="${{ secrets.CONTAINER_APP_NAME }}--${GREEN_REVISION_SUFFIX}"
+            
+            echo "Expected GREEN revision: $EXPECTED_REVISION"
+            
+            # Verify it exists
+            REVISION_EXISTS=$(az containerapp revision show \
+              --revision "$EXPECTED_REVISION" \
               --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --query "[?labels[?@ == 'green']].name | [0]" \
-              --output tsv)
+              --query "name" \
+              --output tsv 2>/dev/null || echo "null")
             
-            # Get application URL with retries
-            MAX_ATTEMPTS=3
-            attempt=1
-            URL=""
-            while [ $attempt -le $MAX_ATTEMPTS ]; do
+            if [ "$REVISION_EXISTS" != "null" ] && [ -n "$REVISION_EXISTS" ]; then
+              GREEN_REVISION="$EXPECTED_REVISION"
+              echo "✅ Found GREEN revision manually: $GREEN_REVISION"
+            else
+              echo "❌ Could not find GREEN revision. Searching for latest green revision..."
+              GREEN_REVISION=$(az containerapp revision list \
+                --name ${{ secrets.CONTAINER_APP_NAME }} \
+                --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                --query "[?starts_with(name, '${{ secrets.CONTAINER_APP_NAME }}--green-')] | [0].name" \
+                --output tsv)
+              
+              if [ -z "$GREEN_REVISION" ] || [ "$GREEN_REVISION" = "null" ]; then
+                echo "❌ No GREEN revision found at all!"
+                exit 1
+              fi
+              echo "✅ Found latest GREEN revision: $GREEN_REVISION"
+            fi
+          fi
+          
+          # If App URL is empty, retrieve it manually
+          if [ -z "$APP_URL" ]; then
+            echo "⚠️ App URL not found in outputs, retrieving manually..."
+            
+            # Get app URL from Azure
+            for i in {1..3}; do
               URL=$(az containerapp show \
                 --name ${{ secrets.CONTAINER_APP_NAME }} \
                 --resource-group ${{ secrets.RESOURCE_GROUP }} \
@@ -931,35 +967,39 @@ jobs:
                 --output tsv)
               
               if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+                APP_URL="https://${URL}"
                 break
               fi
-              echo "⚠️ URL fetch attempt $attempt/$MAX_ATTEMPTS failed"
+              
+              echo "⚠️ Failed to get URL on attempt $i/3, retrying..."
               sleep 10
-              ((attempt++))
             done
             
-            if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-              echo "::error::❌ Failed to get URL after $MAX_ATTEMPTS attempts"
+            if [ -z "$APP_URL" ] || [ "$APP_URL" = "https://null" ]; then
+              echo "❌ Failed to get Container App URL after 3 attempts"
               exit 1
             fi
-            APP_URL="https://${URL}"
-            
-            if [ -z "$GREEN_REVISION" ] || [ -z "$APP_URL" ]; then
-              echo "::error::❌ CRITICAL: Failed to retrieve deployment parameters"
-              echo "::error::GREEN revision: '$GREEN_REVISION'"
-              echo "::error::App URL: '$APP_URL'"
-              echo "::error::Possible causes:"
-              echo "::error::- Azure credentials insufficient"
-              echo "::error::- Container app not found"
-              echo "::error::- GREEN deployment failed completely"
-              exit 1
-            fi
+            echo "✅ Retrieved App URL manually: $APP_URL"
           fi
           
-          echo "GREEN revision: '$GREEN_REVISION'"
-          echo "App URL: '$APP_URL'"
-          echo "GREEN_REVISION=$GREEN_REVISION" >> $GITHUB_ENV
-          echo "APP_URL=$APP_URL" >> $GITHUB_ENV
+          # Final validation
+          if [ -z "$GREEN_REVISION" ]; then
+            echo "❌ GREEN revision is still empty after all attempts!"
+            exit 1
+          fi
+          
+          if [ -z "$APP_URL" ]; then
+            echo "❌ App URL is still empty after all attempts!"
+            exit 1
+          fi
+          
+          # Set outputs for subsequent steps
+          echo "green_revision=$GREEN_REVISION" >> $GITHUB_OUTPUT
+          echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
+          
+          echo "✅ All inputs validated successfully:"
+          echo "  GREEN revision: $GREEN_REVISION"
+          echo "  App URL: $APP_URL"
 
       - name: Get Current Blue Revision
         id: get-blue
@@ -967,7 +1007,7 @@ jobs:
           echo "🔍 Identifying current BLUE (production) revision..."
           
           # Get current production revision (blue) - exclude the new green revision
-          GREEN_REVISION="${{ needs.deploy-green-environment.outputs.green-revision }}"
+          GREEN_REVISION="${{ steps.get-inputs.outputs.green_revision }}"
           echo "Excluding GREEN revision: $GREEN_REVISION"
           
           # Get current production revision receiving traffic (should be different from green)
@@ -997,12 +1037,12 @@ jobs:
       - name: Pre-Switch Validation
         run: |
           echo "🔍 Pre-switch validation..."
-          echo "GREEN revision: '${{ needs.deploy-green-environment.outputs.green-revision }}'"
+          echo "GREEN revision: '${{ steps.get-inputs.outputs.green_revision }}'"
           echo "BLUE revision: '${{ steps.get-blue.outputs.blue_revision }}'"
-          echo "App URL: '${{ needs.deploy-green-environment.outputs.app-url }}'"
+          echo "App URL: '${{ steps.get-inputs.outputs.app_url }}'"
           
           # Construct GREEN URL properly
-          BASE_URL="${{ needs.deploy-green-environment.outputs.app-url }}"
+          BASE_URL="${{ steps.get-inputs.outputs.app_url }}"
           GREEN_URL="${BASE_URL}?label=green"
           echo "Final GREEN health check URL: $GREEN_URL"
           
@@ -1033,7 +1073,7 @@ jobs:
                 # Check if green label exists
                 echo "📋 Checking GREEN revision status:"
                 az containerapp revision show \
-                  --revision ${{ needs.deploy-green-environment.outputs.green-revision }} \
+                  --revision ${{ steps.get-inputs.outputs.green_revision }} \
                   --resource-group ${{ secrets.RESOURCE_GROUP }} \
                   --query "{name: name, status: properties.provisioningState, active: properties.active, trafficWeight: properties.trafficWeight}" \
                   --output table || echo "Could not get revision details"
@@ -1048,13 +1088,13 @@ jobs:
         id: traffic-switch
         run: |
           echo "🔄 Switching traffic from BLUE to GREEN..."
-          echo "Directing 100% traffic to: ${{ needs.deploy-green-environment.outputs.green-revision }}"
+          echo "Directing 100% traffic to: ${{ steps.get-inputs.outputs.green_revision }}"
           
           # Switch 100% traffic to green revision
           az containerapp ingress traffic set \
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --revision-weight ${{ needs.deploy-green-environment.outputs.green-revision }}=100 \
+            --revision-weight ${{ steps.get-inputs.outputs.green_revision }}=100 \
             --output table
           
           echo "✅ Traffic switched to GREEN environment"
@@ -1066,7 +1106,7 @@ jobs:
           sleep 45
           
           # Verify traffic is now going to GREEN
-          MAIN_URL="${{ needs.deploy-green-environment.outputs.app-url }}"
+          MAIN_URL="${{ steps.get-inputs.outputs.app_url }}"
           echo "Verifying main URL now serves GREEN: $MAIN_URL"
           
           for i in {1..8}; do
@@ -1104,7 +1144,7 @@ jobs:
             --name ${{ secrets.CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --label blue \
-            --revision ${{ needs.deploy-green-environment.outputs.green-revision }} \
+            --revision ${{ steps.get-inputs.outputs.green_revision }} \
             --yes
           
           echo "🏷️ Labels updated: GREEN is now BLUE (production)"
@@ -1113,7 +1153,7 @@ jobs:
         run: |
           echo "🩺 Final production health check..."
           
-          PROD_URL="${{ needs.deploy-green-environment.outputs.app-url }}"
+          PROD_URL="${{ steps.get-inputs.outputs.app_url }}"
           echo "Production URL: $PROD_URL"
           
           for i in {1..5}; do
@@ -1169,10 +1209,10 @@ jobs:
           echo ""
           echo "📊 Deployment Details:"
           echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
-          echo "New Production Revision: ${{ needs.deploy-green-environment.outputs.green-revision }}"
+          echo "New Production Revision: ${{ steps.get-inputs.outputs.green_revision }}"
           echo "Previous BLUE Revision: ${{ steps.get-blue.outputs.blue_revision }}"
           echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
-          echo "Application URL: ${{ needs.deploy-green-environment.outputs.app-url }}"
+          echo "Application URL: ${{ steps.get-inputs.outputs.app_url }}"
           echo "Commit: ${{ github.sha }}"
 
       - name: Create issue on failure
@@ -1195,7 +1235,7 @@ jobs:
                       `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
                       `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
                       `**Container App:** ${{ secrets.CONTAINER_APP_NAME }}\n` +
-                      `**GREEN Revision:** ${{ needs.deploy-green-environment.outputs.green-revision }}\n` +
+                      `**GREEN Revision:** ${{ steps.get-inputs.outputs.green_revision }}\n` +
                       `**BLUE Revision:** ${{ steps.get-blue.outputs.blue_revision }}\n\n` +
                       `Traffic switch failed. System may need manual intervention.\n\n` +
                       `**Manual Rollback Steps:**\n` +
@@ -1221,7 +1261,7 @@ jobs:
             [
               {"title": "Repository", "value": "${{ github.repository }}", "short": true},
               {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
-              {"title": "GREEN Revision", "value": "${{ needs.deploy-green-environment.outputs.green-revision }}", "short": true},
+              {"title": "GREEN Revision", "value": "${{ steps.get-inputs.outputs.green_revision }}", "short": true},
               {"title": "BLUE Revision", "value": "${{ steps.get-blue.outputs.blue_revision }}", "short": true},
               {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
               {"title": "Commit", "value": "${{ github.sha }}", "short": true}
@@ -1239,10 +1279,10 @@ jobs:
             [
               {"title": "Repository", "value": "${{ github.repository }}", "short": true},
               {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
-              {"title": "New Production", "value": "${{ needs.deploy-green-environment.outputs.green-revision }}", "short": false},
+              {"title": "New Production", "value": "${{ steps.get-inputs.outputs.green_revision }}", "short": false},
               {"title": "Previous Version", "value": "${{ steps.get-blue.outputs.blue_revision }}", "short": false},
               {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": false},
-              {"title": "Application URL", "value": "${{ needs.deploy-green-environment.outputs.app-url }}", "short": false},
+              {"title": "Application URL", "value": "${{ steps.get-inputs.outputs.app_url }}", "short": false},
               {"title": "Commit", "value": "${{ github.sha }}", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
