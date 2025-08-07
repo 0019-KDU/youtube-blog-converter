@@ -24,7 +24,7 @@ COPY static/ ./static/
 # Ensure Python can find modules
 RUN touch auth/__init__.py src/__init__.py
 
-# Create directories for logs and sessions with proper permissions
+# Create directories for logs with proper permissions
 RUN mkdir -p /var/log/flask-app /app/.flask_session /app/logs && \
     chmod 755 /var/log/flask-app /app/.flask_session /app/logs
 
@@ -42,9 +42,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Expose port
 EXPOSE 5000 8000
 
-# Environment variables for logging (can be overridden at runtime)
+# Environment variables for logging
 ENV LOG_LEVEL=INFO
 ENV LOG_TO_FILE=true
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "-m", "flask", "run", "--host=0.0.0.0"]
+CMD ["python", "app.py"]
