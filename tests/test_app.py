@@ -77,6 +77,47 @@ def request_context(app):
     with app.test_request_context():
         yield
 
+@pytest.fixture
+def mock_user():
+    """Mock user data with all required fields"""
+    return {
+        '_id': 'user123',
+        'username': 'testuser',
+        'email': 'test@example.com',
+        'created_at': datetime.datetime.utcnow(),
+        'is_active': True
+    }
+
+@pytest.fixture
+def mock_all_prometheus_metrics():
+    """Mock all Prometheus metrics to prevent AttributeError"""
+    with patch('app.blog_generation_requests') as mock_blog_requests, \
+         patch('app.youtube_urls_processed') as mock_youtube_urls, \
+         patch('app.openai_tokens_used') as mock_tokens, \
+         patch('app.blog_generation_duration') as mock_duration, \
+         patch('app.database_operations') as mock_db_ops, \
+         patch('app.blog_posts_created') as mock_blog_created, \
+         patch('app.application_errors') as mock_app_errors, \
+         patch('app.user_logins') as mock_user_logins, \
+         patch('app.pdf_downloads') as mock_pdf_downloads, \
+         patch('app.http_requests_total') as mock_http_requests, \
+         patch('app.http_request_duration_seconds') as mock_http_duration, \
+         patch('app.active_users') as mock_active_users:
+        
+        # Configure all metrics to prevent AttributeErrors
+        for metric in [mock_blog_requests, mock_youtube_urls, mock_db_ops, 
+                      mock_app_errors, mock_user_logins, mock_http_requests, 
+                      mock_http_duration, mock_active_users]:
+            metric.labels.return_value.inc = Mock()
+        
+        for metric in [mock_tokens, mock_blog_created, mock_pdf_downloads]:
+            metric.inc = Mock()
+        
+        mock_duration.observe = Mock()
+        mock_active_users.inc = Mock()
+        
+        yield
+
 class TestUtilityFunctions:
     """Test utility functions"""
     
@@ -692,9 +733,9 @@ class TestRoutes:
         assert data['success'] is False
 
     @patch('app.get_current_user')
-    def test_generate_blog_no_url(self, mock_get_current_user, client):
+    def test_generate_blog_no_url(self, mock_get_current_user, client, mock_user, mock_all_prometheus_metrics):
         """Test blog generation without URL"""
-        mock_get_current_user.return_value = {'_id': 'user123'}
+        mock_get_current_user.return_value = mock_user
         
         response = client.post('/generate', data={})
         
@@ -703,33 +744,57 @@ class TestRoutes:
         assert data['success'] is False
         assert 'YouTube URL is required' in data['message']
 
+
     @patch('app.get_current_user')
     def test_generate_blog_invalid_url(self, mock_get_current_user, client):
         """Test blog generation with invalid URL"""
-        mock_get_current_user.return_value = {'_id': 'user123'}
+        mock_get_current_user.return_value = {
+            '_id': 'user123',
+            'username': 'testuser',  # Add this missing field
+            'email': 'test@example.com'
+        }
         
-        response = client.post('/generate', data={
-            'youtube_url': 'https://www.google.com'
-        })
-        
-        assert response.status_code == 400
-        data = json.loads(response.data)
-        assert data['success'] is False
+        # Mock the metrics that the route calls for invalid URLs
+        with patch('app.blog_generation_requests') as mock_blog_requests:
+            mock_blog_requests.labels.return_value.inc = Mock()
+            
+            response = client.post('/generate', data={
+                'youtube_url': 'https://www.google.com'
+            })
+            
+            assert response.status_code == 400
+            data = json.loads(response.data)
+            assert data['success'] is False
+
+
 
     @patch('app.get_current_user')
     @patch('app.extract_video_id')
     def test_generate_blog_invalid_video_id(self, mock_extract_video_id, mock_get_current_user, client):
         """Test blog generation with invalid video ID"""
-        mock_get_current_user.return_value = {'_id': 'user123'}
+        mock_get_current_user.return_value = {
+            '_id': 'user123',
+            'username': 'testuser',  # Add this missing field
+            'email': 'test@example.com'
+        }
         mock_extract_video_id.return_value = None
         
-        response = client.post('/generate', data={
-            'youtube_url': 'https://www.youtube.com/watch?v=invalid'
-        })
-        
-        assert response.status_code == 400
-        data = json.loads(response.data)
-        assert data['success'] is False
+        # Mock the metrics that get called for invalid video IDs
+        with patch('app.blog_generation_requests') as mock_blog_requests, \
+            patch('app.youtube_urls_processed') as mock_youtube_urls:
+            
+            mock_blog_requests.labels.return_value.inc = Mock()
+            mock_youtube_urls.labels.return_value.inc = Mock()
+            
+            response = client.post('/generate', data={
+                'youtube_url': 'https://www.youtube.com/watch?v=invalid'
+            })
+            
+            assert response.status_code == 400
+            data = json.loads(response.data)
+            assert data['success'] is False
+
+
 
     @patch('app.get_current_user')
     @patch('app.extract_video_id')
@@ -785,12 +850,27 @@ class TestRoutes:
     @patch('app.retrieve_large_data')
     def test_download_pdf_no_data(self, mock_retrieve_data, mock_get_current_user, client):
         """Test PDF download with no data"""
-        mock_get_current_user.return_value = {'_id': 'user123'}
+        mock_get_current_user.return_value = {
+            '_id': 'user123',
+            'username': 'testuser',  # Add this missing field
+            'email': 'test@example.com'
+        }
         mock_retrieve_data.return_value = None
         
-        response = client.get('/download')
+        # Set up session with storage key
+        with client.session_transaction() as sess:
+            sess['blog_storage_key'] = 'test_key'
         
-        assert response.status_code == 404
+        # Mock any metrics that might be called
+        with patch('app.application_errors') as mock_app_errors:
+            mock_app_errors.labels.return_value.inc = Mock()
+            
+            response = client.get('/download')
+            
+            assert response.status_code == 404
+
+
+
 
     @patch('app.get_current_user')
     @patch('app.BlogPost')
@@ -856,17 +936,26 @@ class TestRoutes:
     @patch('app.BlogPost')
     def test_get_post_success(self, mock_blog_post_class, mock_get_current_user, client):
         """Test successful post retrieval"""
-        mock_get_current_user.return_value = {'_id': 'user123'}
+        mock_get_current_user.return_value = {
+            '_id': 'user123',
+            'username': 'testuser',  # Add this missing field
+            'email': 'test@example.com'
+        }
         
         mock_blog_instance = Mock()
         mock_blog_post_class.return_value = mock_blog_instance
         mock_blog_instance.get_post_by_id.return_value = {'_id': 'post123', 'title': 'Test Post'}
         
-        response = client.get('/get-post/post123')
-        
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        assert data['success'] is True
+        # Mock the database operations metric that this route uses
+        with patch('app.database_operations') as mock_db_ops:
+            mock_db_ops.labels.return_value.inc = Mock()
+            
+            response = client.get('/get-post/post123')
+            
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['success'] is True
+
 
     @patch('app.get_current_user')
     @patch('app.BlogPost')
