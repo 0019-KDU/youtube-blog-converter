@@ -890,7 +890,36 @@ jobs:
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-
+    
+     # 👆 ADD THE NEW STEP HERE 👇
+      - name: Enable Multiple Revision Mode
+        run: |
+          echo "🔧 Ensuring Container App is in multiple revision mode..."
+          
+          # Check current revision mode
+          CURRENT_MODE=$(az containerapp show \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "properties.configuration.activeRevisionsMode" \
+            --output tsv)
+          
+          echo "Current revision mode: $CURRENT_MODE"
+          
+          if [ "$CURRENT_MODE" = "Single" ]; then
+            echo "🔄 Switching to multiple revision mode..."
+            az containerapp revision set-mode \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --mode multiple
+            
+            echo "✅ Container App switched to multiple revision mode"
+            
+            # Wait for the change to take effect
+            sleep 30
+          else
+            echo "✅ Container App is already in multiple revision mode"
+          fi
+      
       - name: Debug Previous Job Outputs
         run: |
           echo "🔍 Debugging previous job outputs..."
