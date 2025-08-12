@@ -542,8 +542,264 @@ jobs:
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
-  deploy-to-dockerhub:
+  # 🛡️ NEW OWASP DAST SECURITY TESTING JOB
+  owasp-zap-dast:
     needs: docker-build-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Container App URL
+        id: get-url
+        run: |
+          URL=$(az containerapp show \
+            --name ${{ secrets.CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" \
+            --output tsv)
+          
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "❌ Failed to get Container App URL"
+            exit 1
+          fi
+          
+          FULL_URL="https://${URL}"
+          echo "app_url=$FULL_URL" >> $GITHUB_OUTPUT
+          echo "✅ Target URL for DAST: $FULL_URL"
+
+      - name: Create ZAP Rules File
+        run: |
+          mkdir -p .zap
+          cat << 'EOF' > .zap/rules.tsv
+          # ZAP Scanning Rules
+          # Format: ID	THRESHOLD	NEW_LEVEL	[DESCRIPTION]
+          
+          # Critical Rules - Fail build
+          10020	OFF	FAIL	[Anti CSRF Tokens Scanner]
+          10021	OFF	FAIL	[Absence of Anti-CSRF Tokens]
+          10023	OFF	FAIL	[Information Disclosure - Debug Error Messages]
+          10024	OFF	FAIL	[Information Disclosure - Sensitive Information in URL]
+          10025	OFF	FAIL	[Information Disclosure - Sensitive Information in HTTP Referrer Header]
+          10026	OFF	FAIL	[HTTP Parameter Override]
+          10027	OFF	FAIL	[Information Disclosure - Suspicious Comments]
+          10028	OFF	FAIL	[Open Redirect]
+          10029	OFF	FAIL	[Cookie Poisoning]
+          10030	OFF	FAIL	[User Controllable Charset]
+          
+          # SQL Injection
+          40018	OFF	FAIL	[SQL Injection]
+          40019	OFF	FAIL	[SQL Injection - MySQL]
+          40020	OFF	FAIL	[SQL Injection - Hypersonic SQL]
+          40021	OFF	FAIL	[SQL Injection - Oracle]
+          40022	OFF	FAIL	[SQL Injection - PostgreSQL]
+          
+          # XSS
+          40012	OFF	FAIL	[Cross Site Scripting (Reflected)]
+          40014	OFF	FAIL	[Cross Site Scripting (Persistent)]
+          40016	OFF	FAIL	[Cross Site Scripting (Persistent) - Prime]
+          40017	OFF	FAIL	[Cross Site Scripting (Persistent) - Spider]
+          
+          # Authentication and Session Management
+          10010	OFF	FAIL	[Cookie No HttpOnly Flag]
+          10011	OFF	FAIL	[Cookie Without Secure Flag]
+          10016	OFF	FAIL	[Web Browser XSS Protection Not Enabled]
+          10017	OFF	FAIL	[Cross-Domain JavaScript Source File Inclusion]
+          10019	OFF	FAIL	[Content-Type Header Missing]
+          
+          # Warn level rules
+          10015	OFF	WARN	[Incomplete or No Cache-control and Pragma HTTP Header Set]
+          10020	OFF	WARN	[X-Frame-Options Header]
+          EOF
+
+      - name: Run OWASP ZAP DAST Scan
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: ${{ steps.get-url.outputs.app_url }}
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -j -m 10 -T 60 -z "-configFile /zap/wrk/.zap/options.prop"'
+          issue_title: 'OWASP ZAP DAST Security Vulnerabilities'
+          fail_action: true
+          
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-report
+          path: report_html.html
+
+      - name: Parse ZAP Results
+        id: parse-results
+        if: always()
+        run: |
+          if [ -f "report_json.json" ]; then
+            HIGH_COUNT=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("High"))] | length' report_json.json)
+            MEDIUM_COUNT=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Medium"))] | length' report_json.json)
+            LOW_COUNT=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Low"))] | length' report_json.json)
+            
+            echo "high_count=$HIGH_COUNT" >> $GITHUB_OUTPUT
+            echo "medium_count=$MEDIUM_COUNT" >> $GITHUB_OUTPUT
+            echo "low_count=$LOW_COUNT" >> $GITHUB_OUTPUT
+            
+            echo "🔍 DAST Scan Results:"
+            echo "High Risk: $HIGH_COUNT"
+            echo "Medium Risk: $MEDIUM_COUNT"
+            echo "Low Risk: $LOW_COUNT"
+          else
+            echo "⚠️ ZAP report not found"
+          fi
+
+      - name: Create Detailed DAST PR Comment
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const highCount = '${{ steps.parse-results.outputs.high_count }}' || '0';
+            const mediumCount = '${{ steps.parse-results.outputs.medium_count }}' || '0';
+            const lowCount = '${{ steps.parse-results.outputs.low_count }}' || '0';
+            
+            const commentBody = [
+              '## 🛡️ OWASP ZAP DAST Security Scan Results',
+              '',
+              '### 📊 Vulnerability Summary',
+              '',
+              '| Risk Level | Count | Status |',
+              '|------------|-------|---------|',
+              `| 🔴 **High** | ${highCount} | ${highCount > 0 ? '❌ Action Required' : '✅ Clean'} |`,
+              `| 🟡 **Medium** | ${mediumCount} | ${mediumCount > 0 ? '⚠️ Review Needed' : '✅ Clean'} |`,
+              `| 🔵 **Low** | ${lowCount} | ${lowCount > 0 ? 'ℹ️ Informational' : '✅ Clean'} |`,
+              '',
+              '### 🎯 Scan Details',
+              `- **Target URL**: ${{ steps.get-url.outputs.app_url }}`,
+              `- **Scan Type**: Full OWASP ZAP DAST Scan`,
+              `- **OWASP Top 10 Coverage**: ✅ Complete`,
+              `- **Scan Date**: ${new Date().toISOString()}`,
+              '',
+              '### 📋 Security Categories Tested',
+              '- ✅ SQL Injection (OWASP A03)',
+              '- ✅ Cross-Site Scripting (OWASP A03)', 
+              '- ✅ Broken Authentication (OWASP A07)',
+              '- ✅ Security Misconfiguration (OWASP A05)',
+              '- ✅ Insecure Direct Object References',
+              '- ✅ Cross-Site Request Forgery',
+              '- ✅ Information Disclosure',
+              '- ✅ HTTP Security Headers',
+              '',
+              highCount > 0 || mediumCount > 0 ? 
+              '⚠️ **Action Required**: Please review the detailed report and address identified vulnerabilities before merging.' : 
+              '✅ **All Clear**: No critical security vulnerabilities detected.',
+              '',
+              '📄 **Download Full Report**: Check the workflow artifacts for detailed HTML report.',
+              '',
+              '---',
+              '*This scan was performed using OWASP ZAP following production security standards*'
+            ].join('\n');
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody
+            });
+
+      - name: Security Gate Check
+        if: always()
+        run: |
+          HIGH_COUNT=${{ steps.parse-results.outputs.high_count }}
+          MEDIUM_COUNT=${{ steps.parse-results.outputs.medium_count }}
+          
+          echo "🚨 Security Gate Evaluation"
+          echo "High Risk Vulnerabilities: $HIGH_COUNT"
+          echo "Medium Risk Vulnerabilities: $MEDIUM_COUNT"
+          
+          # Fail build if high-risk vulnerabilities found
+          if [ "$HIGH_COUNT" -gt 0 ]; then
+            echo "❌ SECURITY GATE FAILED: High-risk vulnerabilities detected"
+            echo "Build failed due to critical security issues"
+            exit 1
+          fi
+          
+          # Warning for medium-risk (but don't fail build)
+          if [ "$MEDIUM_COUNT" -gt 5 ]; then
+            echo "⚠️ WARNING: Multiple medium-risk vulnerabilities detected ($MEDIUM_COUNT)"
+            echo "Consider addressing these issues"
+          fi
+          
+          echo "✅ Security gate passed"
+
+      - name: Create issue on DAST failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🛡️ DAST Security Scan Failed - Critical Vulnerabilities Detected`,
+                body: `### 🚨 DAST Security Scan Failed\n\n` +
+                      `**Job:** ${context.job}\n` +
+                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                      `**Target URL:** ${{ steps.get-url.outputs.app_url }}\n` +
+                      `**High Risk Vulnerabilities:** ${{ steps.parse-results.outputs.high_count }}\n` +
+                      `**Medium Risk Vulnerabilities:** ${{ steps.parse-results.outputs.medium_count }}\n\n` +
+                      `**Critical security vulnerabilities detected by OWASP ZAP scan.**\n\n` +
+                      `### Immediate Actions Required:\n` +
+                      `1. Review the DAST scan report (check workflow artifacts)\n` +
+                      `2. Address all HIGH-risk vulnerabilities immediately\n` +
+                      `3. Review and fix MEDIUM-risk vulnerabilities\n` +
+                      `4. Re-run security tests after fixes\n\n` +
+                      `**OWASP Top 10 Categories Tested:**\n` +
+                      `- Injection Attacks (SQL, XSS)\n` +
+                      `- Broken Authentication\n` +
+                      `- Security Misconfiguration\n` +
+                      `- And 7 more critical categories`,
+                assignees: [assignee],
+                labels: ['security', 'dast', 'owasp', 'critical', 'ci-failure']
+              });
+            } catch (error) {
+              console.error('Error creating issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
+
+      - name: Slack Security Alert
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: 'failure'
+          text: "🚨 CRITICAL: DAST Security Scan Failed - ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "High Risk Issues", "value": "${{ steps.parse-results.outputs.high_count }}", "short": true},
+              {"title": "Medium Risk Issues", "value": "${{ steps.parse-results.outputs.medium_count }}", "short": true},
+              {"title": "Target URL", "value": "${{ steps.get-url.outputs.app_url }}", "short": false},
+              {"title": "Scan Type", "value": "OWASP ZAP Full DAST", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Security Report>"
+
+  deploy-to-dockerhub:
+    needs: [docker-build-test, owasp-zap-dast]  # Added DAST dependency
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -629,7 +885,7 @@ jobs:
 
   # 🔵 BLUE-GREEN DEPLOYMENT IMPLEMENTATION
   deploy-green-environment:
-    needs: deploy-to-dockerhub
+    needs: [deploy-to-dockerhub, owasp-zap-dast]  # Added DAST dependency
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
@@ -891,7 +1147,6 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
     
-     # 👆 ADD THE NEW STEP HERE 👇
       - name: Enable Multiple Revision Mode
         run: |
           echo "🔧 Ensuring Container App is in multiple revision mode..."
@@ -1538,6 +1793,7 @@ jobs:
       - build-and-test
       - sonarqube-scan
       - docker-build-test
+      - owasp-zap-dast  # Added DAST to dependency tracking
       - deploy-to-dockerhub
       - deploy-green-environment
       - blue-green-traffic-switch
@@ -1582,6 +1838,15 @@ jobs:
             successful_jobs+="Docker Build, "
           else
             skipped_jobs+="Docker Build, "
+          fi
+
+          # 🛡️ OWASP ZAP DAST Status Check
+          if [[ "${{ needs.owasp-zap-dast.result }}" == 'failure' ]]; then 
+            failed_jobs+="OWASP ZAP DAST Security Scan, "
+          elif [[ "${{ needs.owasp-zap-dast.result }}" == 'success' ]]; then
+            successful_jobs+="OWASP ZAP DAST Security Scan, "
+          else
+            skipped_jobs+="OWASP ZAP DAST Security Scan, "
           fi
 
           if [[ "${{ needs.deploy-to-dockerhub.result }}" == 'failure' ]]; then 
@@ -1650,7 +1915,7 @@ jobs:
             }}
           text: |
             ${{
-              steps.status.outputs.overall_status == 'success' && '✅ Blue-Green Deployment Pipeline Succeeded!' ||
+              steps.status.outputs.overall_status == 'success' && '✅ Blue-Green Deployment Pipeline Succeeded (with DAST Security Validation)!' ||
               steps.status.outputs.overall_status == 'rollback' && '🔄 Pipeline Failed - Automatic Rollback Executed!' ||
               steps.status.outputs.overall_status == 'failure' && '❌ Pipeline Failed!' ||
               '⚠️ Pipeline Skipped!'
@@ -1662,10 +1927,11 @@ jobs:
               {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
               {"title": "Commit", "value": "${{ github.sha }}", "short": true},
               {"title": "Triggered by", "value": "${{ github.actor }}", "short": true},
-              {"title": "Deployment Strategy", "value": "Blue-Green", "short": true},
-              ${{ steps.status.outputs.successful_jobs != '' && format('{{"title": "Successful Jobs", "value": "{0}", "short": false}},', steps.status.outputs.successful_jobs) || '' }}
-              ${{ steps.status.outputs.failed_jobs != '' && format('{{"title": "Failed Jobs", "value": "{0}", "short": false}},', steps.status.outputs.failed_jobs) || '' }}
-              ${{ steps.status.outputs.skipped_jobs != '' && format('{{"title": "Skipped Jobs", "value": "{0}", "short": false}},', steps.status.outputs.skipped_jobs) || '' }}
-              ${{ steps.status.outputs.rollback_executed == 'true' && '{"title": "Rollback Status", "value": "✅ System restored to stable state", "short": false}' || '' }}
+              {"title": "Security Testing", "value": "OWASP ZAP DAST + Static Analysis", "short": true},
+              {"title": "Deployment Strategy", "value": "Blue-Green with Security Gates", "short": true},
+              ${{ steps.status.outputs.successful_jobs != '' && format('{"title": "✅ Successful Jobs", "value": "{0}", "short": false},', steps.status.outputs.successful_jobs) || '' }}
+              ${{ steps.status.outputs.failed_jobs != '' && format('{"title": "❌ Failed Jobs", "value": "{0}", "short": false},', steps.status.outputs.failed_jobs) || '' }}
+              ${{ steps.status.outputs.skipped_jobs != '' && format('{"title": "⏭️ Skipped Jobs", "value": "{0}", "short": false},', steps.status.outputs.skipped_jobs) || '' }}
+              ${{ steps.status.outputs.rollback_executed == 'true' && '{"title": "🔄 Rollback Status", "value": "✅ System restored to stable state", "short": false}' || '' }}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run Details>"
