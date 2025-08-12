@@ -31,6 +31,169 @@ else:
     load_dotenv()
     print("Loaded .env from default location")
 
+# ========== LOKI HANDLER IMPLEMENTATION ==========
+import requests
+from queue import Queue, Empty
+
+class LokiHandler(logging.Handler):
+    """Custom Loki handler for Flask application logs"""
+    
+    def __init__(self, loki_url, tags=None, timeout=5, batch_size=100, flush_interval=5):
+        super().__init__()
+        self.loki_url = loki_url.rstrip('/') + '/loki/api/v1/push'
+        self.tags = tags or {}
+        self.timeout = timeout
+        self.batch_size = batch_size
+        self.flush_interval = flush_interval
+        
+        # Batch processing
+        self.log_queue = Queue()
+        self.batch_thread = threading.Thread(target=self._batch_sender, daemon=True)
+        self.batch_thread.start()
+    
+    def emit(self, record):
+        """Emit a log record to Loki"""
+        try:
+            # Format the record
+            log_entry = self.format(record)
+            
+            # Create timestamp in nanoseconds
+            timestamp = str(int(time.time() * 1_000_000_000))
+            
+            # Prepare labels
+            labels = dict(self.tags)
+            labels.update({
+                'level': record.levelname.lower(),
+                'logger': record.name,
+                'filename': record.filename,
+                'function': record.funcName,
+                'application': 'flask-blog-app'
+            })
+            
+            # Add extra labels from record
+            if hasattr(record, 'request_id'):
+                labels['request_id'] = record.request_id
+            if hasattr(record, 'user_id'):
+                labels['user_id'] = record.user_id
+            if hasattr(record, 'endpoint'):
+                labels['endpoint'] = record.endpoint
+            if hasattr(record, 'error_type'):
+                labels['error_type'] = record.error_type
+            
+            # Create Loki entry
+            loki_entry = {
+                'streams': [{
+                    'stream': labels,
+                    'values': [[timestamp, log_entry]]
+                }]
+            }
+            
+            # Add to queue for batch processing
+            self.log_queue.put(loki_entry)
+            
+        except Exception as e:
+            # Don't let logging errors break the application
+            print(f"Loki handler error: {e}")
+    
+    def _batch_sender(self):
+        """Background thread to send logs in batches"""
+        batch = []
+        last_flush = time.time()
+        
+        while True:
+            try:
+                # Try to get log entry with timeout
+                try:
+                    entry = self.log_queue.get(timeout=1)
+                    batch.append(entry)
+                except Empty:
+                    pass
+                
+                # Check if we should flush the batch
+                should_flush = (
+                    len(batch) >= self.batch_size or 
+                    (batch and time.time() - last_flush >= self.flush_interval)
+                )
+                
+                if should_flush and batch:
+                    self._send_batch(batch)
+                    batch = []
+                    last_flush = time.time()
+                    
+            except Exception as e:
+                print(f"Batch sender error: {e}")
+                batch = []  # Clear batch on error
+    
+    def _send_batch(self, batch):
+        """Send a batch of log entries to Loki"""
+        if not batch:
+            return
+            
+        try:
+            # Merge all streams
+            merged_streams = {}
+            for entry in batch:
+                for stream in entry['streams']:
+                    stream_key = json.dumps(stream['stream'], sort_keys=True)
+                    if stream_key not in merged_streams:
+                        merged_streams[stream_key] = {
+                            'stream': stream['stream'],
+                            'values': []
+                        }
+                    merged_streams[stream_key]['values'].extend(stream['values'])
+            
+            # Create final payload
+            payload = {
+                'streams': list(merged_streams.values())
+            }
+            
+            # Send to Loki
+            headers = {'Content-Type': 'application/json'}
+            response = requests.post(
+                self.loki_url, 
+                data=json.dumps(payload), 
+                headers=headers, 
+                timeout=self.timeout
+            )
+            
+            if response.status_code != 204:
+                print(f"Loki push failed: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            print(f"Failed to send logs to Loki: {e}")
+
+class LokiJsonFormatter(logging.Formatter):
+    """JSON formatter for Loki with structured data"""
+    
+    def format(self, record):
+        # Create base log entry
+        log_entry = {
+            'timestamp': datetime.datetime.fromtimestamp(record.created).isoformat(),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+            'filename': record.filename,
+            'lineno': record.lineno,
+            'function': record.funcName,
+            'thread': record.thread,
+            'thread_name': record.threadName,
+        }
+        
+        # Add exception info if present
+        if record.exc_info:
+            log_entry['exception'] = self.formatException(record.exc_info)
+        
+        # Add extra attributes
+        for key, value in record.__dict__.items():
+            if key not in ['name', 'msg', 'args', 'levelname', 'levelno', 'pathname',
+                          'filename', 'module', 'lineno', 'funcName', 'created',
+                          'msecs', 'relativeCreated', 'thread', 'threadName',
+                          'processName', 'process', 'message', 'exc_info',
+                          'exc_text', 'stack_info']:
+                log_entry[key] = str(value)
+        
+        return json.dumps(log_entry)
+
 # ========== BASIC LOGGING CONFIGURATION (BEFORE FLASK) ==========
 def setup_basic_logging():
     """Setup basic logging before Flask app initialization"""
@@ -135,105 +298,78 @@ logger.info("Flask secret key set successfully")
 if not app.secret_key:
     raise RuntimeError("Failed to set Flask secret key!")
 
-# ========== ENHANCED LOGGING CONFIGURATION (AFTER FLASK) ==========
-def setup_enhanced_logging_with_context():
-    """Setup enhanced logging with Flask context support"""
+# ========== ENHANCED LOGGING CONFIGURATION WITH LOKI (AFTER FLASK) ==========
+def setup_enhanced_logging_with_loki():
+    """Setup enhanced logging with Loki integration"""
     
-    # Create logs directory
-    log_dir = Path('/var/log/flask-app')
-    try:
-        log_dir.mkdir(parents=True, exist_ok=True)
-    except PermissionError:
-        # Fall back to local directory if /var/log is not writable
-        log_dir = Path('./logs')
-        log_dir.mkdir(parents=True, exist_ok=True)
+    # Get your DigitalOcean droplet IP from environment
+    loki_url = os.getenv('LOKI_URL', 'http://YOUR_DROPLET_IP:3100')  # Replace with actual IP
+    
+    # Determine log directory based on environment
+    shared_log_path = os.getenv('SHARED_LOG_PATH', '/shared-logs')
+    log_dir = Path(shared_log_path) if os.path.exists(shared_log_path) else Path('./logs')
+    
+    # Create log directory
+    log_dir.mkdir(parents=True, exist_ok=True)
     
     # Set log level from environment
     log_level = getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper())
     
-    # Context-aware formatter for JSON logs
-    class ContextAwareJSONFormatter(logging.Formatter):
-        def format(self, record):
-            # Safely get context information
-            if has_app_context():
-                try:
-                    record.request_id = getattr(g, 'request_id', 'no-request')
-                    record.user_id = getattr(g, 'user_id', 'anonymous')
-                except:
-                    record.request_id = 'no-request'
-                    record.user_id = 'anonymous'
-            else:
-                record.request_id = 'no-request'
-                record.user_id = 'anonymous'
-            
-            # Create JSON log entry
-            log_entry = {
-                "timestamp": self.formatTime(record),
-                "logger": record.name,
-                "level": record.levelname,
-                "message": record.getMessage(),
-                "filename": record.filename,
-                "line": record.lineno,
-                "request_id": record.request_id,
-                "user_id": record.user_id
-            }
-            return json.dumps(log_entry)
-    
-    # Enhanced formatters
-    detailed_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s - %(filename)s:%(lineno)d'
-    )
-    
-    json_formatter = ContextAwareJSONFormatter()
-    
     # Get root logger
     root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
     
-    # Keep existing basic handlers but add enhanced ones
+    # Keep existing console handler
+    console_handlers = [h for h in root_logger.handlers if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)]
     
-    # JSON formatted logs for Loki (if directory exists)
-    if log_dir.exists():
-        json_log_file = log_dir / 'app.json'
-        json_handler = RotatingFileHandler(
-            json_log_file,
-            maxBytes=10*1024*1024,  # 10MB
-            backupCount=5
+    # Loki handler for centralized logging
+    try:
+        loki_handler = LokiHandler(
+            loki_url=loki_url,
+            tags={
+                'application': 'flask-blog-app',
+                'environment': os.getenv('FLASK_ENV', 'production'),
+                'service': 'web-app'
+            }
         )
-        json_handler.setLevel(log_level)
-        json_handler.setFormatter(json_formatter)
-        root_logger.addHandler(json_handler)
-        
-        # Separate file for errors
-        error_log_file = log_dir / 'error.log'
-        error_handler = RotatingFileHandler(
-            error_log_file,
-            maxBytes=10*1024*1024,  # 10MB
-            backupCount=5
-        )
-        error_handler.setLevel(logging.ERROR)
-        error_handler.setFormatter(detailed_formatter)
-        root_logger.addHandler(error_handler)
-        
-        # Access logs for requests
-        access_log_file = log_dir / 'access.log'
-        access_handler = RotatingFileHandler(
-            access_log_file,
-            maxBytes=10*1024*1024,
-            backupCount=5
-        )
-        access_handler.setLevel(logging.INFO)
-        access_formatter = logging.Formatter(
-            '%(asctime)s - %(remote_addr)s - "%(method)s %(url)s %(protocol)s" %(status_code)s %(response_size)s "%(user_agent)s" %(duration_ms)sms'
-        )
-        access_handler.setFormatter(access_formatter)
-        
-        # Create access logger
-        access_logger = logging.getLogger('access')
-        access_logger.addHandler(access_handler)
-        access_logger.setLevel(logging.INFO)
-        access_logger.propagate = False
+        loki_handler.setLevel(log_level)
+        loki_handler.setFormatter(LokiJsonFormatter())
+        root_logger.addHandler(loki_handler)
+        logger.info(f"Loki handler configured successfully: {loki_url}")
+    except Exception as e:
+        logger.error(f"Failed to configure Loki handler: {e}")
     
-    logger.info("Enhanced logging configuration completed for Loki integration")
+    # Enhanced JSON logs for local file storage (backup)
+    json_log_file = log_dir / 'app.json'
+    json_handler = RotatingFileHandler(
+        json_log_file,
+        maxBytes=50*1024*1024,  # 50MB
+        backupCount=5
+    )
+    json_handler.setLevel(log_level)
+    json_handler.setFormatter(LokiJsonFormatter())
+    root_logger.addHandler(json_handler)
+    
+    # Enhanced access logs
+    access_log_file = log_dir / 'access.log'
+    access_handler = RotatingFileHandler(
+        access_log_file,
+        maxBytes=50*1024*1024,
+        backupCount=5
+    )
+    access_handler.setLevel(logging.INFO)
+    access_formatter = logging.Formatter(
+        '%(asctime)s - %(remote_addr)s - "%(method)s %(url)s %(protocol)s" %(status_code)s %(response_size)s "%(user_agent)s" %(duration_ms)sms'
+    )
+    access_handler.setFormatter(access_formatter)
+    
+    # Create access logger
+    access_logger = logging.getLogger('access')
+    access_logger.addHandler(access_handler)
+    access_logger.setLevel(logging.INFO)
+    access_logger.propagate = False
+    
+    logger.info(f"Enhanced logging with Loki configured - Log directory: {log_dir}")
     return root_logger
 
 # JWT Configuration
@@ -455,18 +591,23 @@ class ContextAwareLogMetricsFilter(logging.Filter):
                 
                 if not hasattr(record, 'user_id'):
                     record.user_id = getattr(g, 'user_id', 'anonymous')
+                
+                if not hasattr(record, 'endpoint'):
+                    record.endpoint = request.endpoint if request else 'unknown'
             except:
                 record.request_id = 'no-request'
                 record.user_id = 'anonymous'
+                record.endpoint = 'unknown'
         else:
             record.request_id = 'no-request'
             record.user_id = 'anonymous'
+            record.endpoint = 'unknown'
             
         return True
 
 # Setup enhanced logging with Flask context
 with app.app_context():
-    setup_enhanced_logging_with_context()
+    setup_enhanced_logging_with_loki()
     
     # Add the metrics filter to all handlers
     metrics_filter = ContextAwareLogMetricsFilter()
@@ -475,7 +616,7 @@ with app.app_context():
 
 # Decorators for metrics collection
 def track_requests(f):
-    """Decorator to track HTTP requests with enhanced logging"""
+    """Decorator to track HTTP requests with enhanced Loki logging"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         start_time = time.time()
@@ -504,11 +645,12 @@ def track_requests(f):
                 endpoint=request.endpoint or 'unknown'
             ).observe(duration)
             
-            # Log access information
+            # Enhanced access logging with Loki-friendly structure
             access_logger = logging.getLogger('access')
             access_logger.info(
-                '',
+                'Request completed',
                 extra={
+                    'event': 'request_completed',
                     'remote_addr': request.remote_addr,
                     'method': request.method,
                     'url': request.url,
@@ -516,7 +658,8 @@ def track_requests(f):
                     'status_code': status_code,
                     'response_size': len(str(response)) if isinstance(response, str) else 0,
                     'user_agent': request.headers.get('User-Agent', ''),
-                    'duration_ms': round(duration * 1000, 2)
+                    'duration_ms': round(duration * 1000, 2),
+                    'endpoint': request.endpoint or 'unknown'
                 }
             )
             
@@ -532,13 +675,16 @@ def track_requests(f):
             
             application_errors.labels(error_type=type(e).__name__).inc()
             
-            # Log error with context
+            # Enhanced error logging for Loki
             logger.error(
                 f"Request failed: {request.method} {request.url}",
                 extra={
+                    'event': 'request_failed',
                     'error_type': type(e).__name__,
                     'error_message': str(e),
-                    'endpoint': request.endpoint
+                    'endpoint': request.endpoint or 'unknown',
+                    'method': request.method,
+                    'url': request.url
                 },
                 exc_info=True
             )
@@ -566,19 +712,20 @@ except ImportError as e:
 # Register authentication blueprint
 app.register_blueprint(auth_bp, url_prefix='/auth')
 
-# Request middleware
+# Request middleware with enhanced Loki logging
 @app.before_request
 def log_request():
-    """Enhanced request logging with context"""
+    """Enhanced request logging with context for Loki"""
     request_id = str(uuid.uuid4())
     g.request_id = request_id
     g.start_time = time.time()
     g.user_id = 'anonymous'  # Will be updated if user is authenticated
     
-    # Log request details with structured data
+    # Enhanced request logging with structured data for Loki
     logger.info(
         "Request started",
         extra={
+            'event': 'request_started',
             'request_id': request_id,
             'method': request.method,
             'url': request.url,
@@ -587,13 +734,14 @@ def log_request():
             'user_agent': request.headers.get('User-Agent', ''),
             'remote_addr': request.remote_addr,
             'content_type': request.content_type,
-            'content_length': request.content_length
+            'content_length': request.content_length,
+            'endpoint': request.endpoint or 'unknown'
         }
     )
 
 @app.after_request
 def log_response(response):
-    """Enhanced response logging with safe response size calculation"""
+    """Enhanced response logging with safe response size calculation for Loki"""
     duration = time.time() - getattr(g, 'start_time', time.time())
     request_id = getattr(g, 'request_id', 'unknown')
     
@@ -624,20 +772,23 @@ def log_response(response):
     
     response_size = get_safe_response_size(response)
     
-    # Log response details
+    # Enhanced response logging for Loki
     logger.info(
         "Request completed",
         extra={
+            'event': 'request_completed',
             'request_id': request_id,
             'status_code': response.status_code,
             'duration_ms': round(duration * 1000, 2),
             'response_size': response_size,
-            'content_type': getattr(response, 'content_type', 'unknown')
+            'content_type': getattr(response, 'content_type', 'unknown'),
+            'method': request.method,
+            'endpoint': request.endpoint or 'unknown',
+            'success': response.status_code < 400
         }
     )
     
     return response
-
 
 # Enhanced database operations tracking
 def track_db_operation(operation, collection, func):
@@ -658,6 +809,7 @@ def track_db_operation(operation, collection, func):
             logger.info(
                 f"Database operation completed successfully",
                 extra={
+                    'event': 'database_operation',
                     'operation': operation,
                     'collection': collection,
                     'duration_ms': round(duration * 1000, 2),
@@ -676,6 +828,7 @@ def track_db_operation(operation, collection, func):
             logger.error(
                 f"Database operation failed",
                 extra={
+                    'event': 'database_error',
                     'operation': operation,
                     'collection': collection,
                     'duration_ms': round(duration * 1000, 2),
@@ -857,7 +1010,15 @@ def get_current_user():
         
     except Exception as e:
         application_errors.labels(error_type=type(e).__name__).inc()
-        logger.error(f"Error getting current user: {e}", exc_info=True)
+        logger.error(
+            "Error getting current user",
+            extra={
+                'event': 'user_authentication_error',
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            },
+            exc_info=True
+        )
         return None
     finally:
         if user_model:
@@ -929,11 +1090,26 @@ def nl2br_filter(text):
 def index():
     """Render the main landing page"""
     try:
-        logger.info("Index page accessed")
+        logger.info(
+            "Index page accessed", 
+            extra={
+                'event': 'page_access',
+                'page': 'index'
+            }
+        )
         return render_template('index.html')
     except Exception as e:
         application_errors.labels(error_type=type(e).__name__).inc()
-        logger.error(f"Error loading index page: {e}", exc_info=True)
+        logger.error(
+            "Error loading index page", 
+            extra={
+                'event': 'page_error',
+                'page': 'index',
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            },
+            exc_info=True
+        )
         return f"Error loading page: {str(e)}", 500
 
 @app.route('/generate-page')
@@ -943,21 +1119,44 @@ def generate_page():
     try:
         current_user = get_current_user()
         if not current_user:
-            logger.warning("Unauthorized access to generate page")
+            logger.warning(
+                "Unauthorized access to generate page",
+                extra={
+                    'event': 'unauthorized_access',
+                    'page': 'generate'
+                }
+            )
             return redirect(url_for('auth.login'))
         
-        logger.info(f"Generate page accessed by user: {current_user['username']}")
+        logger.info(
+            f"Generate page accessed by user: {current_user['username']}",
+            extra={
+                'event': 'page_access',
+                'page': 'generate',
+                'user_id': current_user['_id'],
+                'username': current_user['username']
+            }
+        )
         return render_template('generate.html')
     except Exception as e:
         application_errors.labels(error_type=type(e).__name__).inc()
-        logger.error(f"Error loading generate page: {e}", exc_info=True)
+        logger.error(
+            "Error loading generate page",
+            extra={
+                'event': 'page_error',
+                'page': 'generate',
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            },
+            exc_info=True
+        )
         return render_template('error.html', 
                              error=f"Error loading generate page: {str(e)}"), 500
 
 @app.route('/generate', methods=['POST'])
 @track_requests
 def generate_blog():
-    """Process YouTube URL and generate blog - returns JSON for AJAX"""
+    """Process YouTube URL and generate blog - returns JSON for AJAX with enhanced Loki logging"""
     start_time = time.time()
     blog_model = None
     user_model = None
@@ -967,31 +1166,57 @@ def generate_blog():
         current_user = get_current_user()
         if not current_user:
             user_logins.labels(status='failed').inc()
-            logger.warning(f"Unauthorized blog generation attempt from {request.remote_addr}")
+            logger.warning(
+                "Unauthorized blog generation attempt",
+                extra={
+                    'event': 'unauthorized_access',
+                    'operation': 'blog_generation',
+                    'remote_addr': request.remote_addr
+                }
+            )
             return jsonify({'success': False, 'message': 'Authentication required'}), 401
         
         youtube_url = request.form.get('youtube_url', '').strip()
         language = request.form.get('language', 'en')
         
         logger.info(
-            f"Blog generation started",
+            "Blog generation started",
             extra={
+                'event': 'blog_generation_started',
                 'user_id': current_user['_id'],
                 'username': current_user['username'],
                 'youtube_url': youtube_url,
-                'language': language
+                'language': language,
+                'operation': 'create_blog'
             }
         )
         
         if not youtube_url:
             blog_generation_requests.labels(status='failed').inc()
-            logger.warning("Blog generation failed: Empty YouTube URL")
+            logger.warning(
+                "Blog generation failed: Empty YouTube URL",
+                extra={
+                    'event': 'validation_error',
+                    'operation': 'blog_generation',
+                    'error_type': 'empty_url',
+                    'user_id': current_user['_id']
+                }
+            )
             return jsonify({'success': False, 'message': 'YouTube URL is required'}), 400
         
         # Validate URL format
         if not re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/', youtube_url):
             blog_generation_requests.labels(status='failed').inc()
-            logger.warning(f"Blog generation failed: Invalid URL format - {youtube_url}")
+            logger.warning(
+                "Blog generation failed: Invalid URL format",
+                extra={
+                    'event': 'validation_error',
+                    'operation': 'blog_generation',
+                    'error_type': 'invalid_url_format',
+                    'youtube_url': youtube_url,
+                    'user_id': current_user['_id']
+                }
+            )
             return jsonify({'success': False, 'message': 'Please enter a valid YouTube URL'}), 400
         
         # Extract video ID
@@ -999,11 +1224,27 @@ def generate_blog():
         if not video_id:
             blog_generation_requests.labels(status='failed').inc()
             youtube_urls_processed.labels(status='invalid').inc()
-            logger.warning(f"Blog generation failed: Could not extract video ID from {youtube_url}")
+            logger.warning(
+                "Blog generation failed: Could not extract video ID",
+                extra={
+                    'event': 'video_id_extraction_failed',
+                    'operation': 'blog_generation',
+                    'youtube_url': youtube_url,
+                    'user_id': current_user['_id']
+                }
+            )
             return jsonify({'success': False, 'message': 'Invalid YouTube URL'}), 400
         
         youtube_urls_processed.labels(status='valid').inc()
-        logger.info(f"Video ID extracted successfully: {video_id}")
+        logger.info(
+            "Video ID extracted successfully",
+            extra={
+                'event': 'video_id_extracted',
+                'video_id': video_id,
+                'youtube_url': youtube_url,
+                'user_id': current_user['_id']
+            }
+        )
         
         # Track blog generation start
         generation_start = time.time()
@@ -1011,24 +1252,43 @@ def generate_blog():
         # Generate blog content
         blog_content = None
         try:
-            logger.info("Starting blog content generation")
+            logger.info(
+                "Starting blog content generation",
+                extra={
+                    'event': 'content_generation_started',
+                    'video_id': video_id,
+                    'user_id': current_user['_id']
+                }
+            )
             blog_content = generate_blog_from_youtube(youtube_url, language)
             
             # Estimate tokens used (rough calculation)
             estimated_tokens = len(blog_content.split()) * 1.3  # Rough estimate
             openai_tokens_used.inc(estimated_tokens)
             
-            logger.info(f"Blog content generated successfully: {len(blog_content)} characters, ~{int(estimated_tokens)} tokens")
+            logger.info(
+                "Blog content generated successfully",
+                extra={
+                    'event': 'content_generation_completed',
+                    'content_length': len(blog_content),
+                    'estimated_tokens': int(estimated_tokens),
+                    'video_id': video_id,
+                    'user_id': current_user['_id']
+                }
+            )
             
         except Exception as gen_error:
             blog_generation_requests.labels(status='failed').inc()
             api_errors.labels(api='openai', error_type=type(gen_error).__name__).inc()
             logger.error(
-                f"Blog generation failed",
+                "Blog generation failed",
                 extra={
+                    'event': 'content_generation_failed',
                     'error_type': type(gen_error).__name__,
                     'error_message': str(gen_error),
-                    'video_id': video_id
+                    'video_id': video_id,
+                    'user_id': current_user['_id'],
+                    'operation': 'blog_generation'
                 },
                 exc_info=True
             )
@@ -1039,14 +1299,30 @@ def generate_blog():
         # Check if generation was successful
         if not blog_content or len(blog_content) < 100:
             blog_generation_requests.labels(status='failed').inc()
-            logger.error("Blog generation failed: Content too short or empty")
+            logger.error(
+                "Blog generation failed: Content too short or empty",
+                extra={
+                    'event': 'content_validation_failed',
+                    'content_length': len(blog_content) if blog_content else 0,
+                    'video_id': video_id,
+                    'user_id': current_user['_id']
+                }
+            )
             return jsonify({'success': False, 'message': 'Failed to generate blog content. Please try with a different video.'}), 500
         
         # Check for error responses
         if blog_content.startswith("ERROR:"):
             blog_generation_requests.labels(status='failed').inc()
             error_msg = blog_content.replace("ERROR:", "").strip()
-            logger.error(f"Blog generation error response: {error_msg}")
+            logger.error(
+                "Blog generation error response",
+                extra={
+                    'event': 'content_generation_error',
+                    'error_message': error_msg,
+                    'video_id': video_id,
+                    'user_id': current_user['_id']
+                }
+            )
             return jsonify({'success': False, 'message': error_msg}), 500
         
         # Track successful generation
@@ -1058,12 +1334,27 @@ def generate_blog():
         title_match = re.search(r'^#\s+(.+)$', blog_content, re.MULTILINE)
         title = title_match.group(1) if title_match else "YouTube Blog Post"
         
-        logger.info(f"Blog title extracted: {title}")
+        logger.info(
+            "Blog title extracted",
+            extra={
+                'event': 'title_extracted',
+                'title': title,
+                'video_id': video_id,
+                'user_id': current_user['_id']
+            }
+        )
         
-        # Save blog post to database
+        # Save blog post to database with Loki logging
         blog_model = BlogPost()
         try:
-            logger.info("Saving blog post to database")
+            logger.info(
+                "Saving blog post to database",
+                extra={
+                    'event': 'database_operation_started',
+                    'operation': 'create_blog_post',
+                    'user_id': current_user['_id']
+                }
+            )
             blog_post = blog_model.create_post(
                 user_id=current_user['_id'],
                 youtube_url=youtube_url,
@@ -1071,24 +1362,51 @@ def generate_blog():
                 content=blog_content,
                 video_id=video_id
             )
+            
             database_operations.labels(
                 operation='create',
                 collection='blog_posts',
                 status='success'
             ).inc()
             blog_posts_created.inc()
-            logger.info(f"Blog post saved successfully with ID: {blog_post['_id']}")
+            
+            logger.info(
+                "Blog post saved successfully",
+                extra={
+                    'event': 'database_operation_completed',
+                    'operation': 'create_blog_post',
+                    'post_id': str(blog_post['_id']),
+                    'user_id': current_user['_id'],
+                    'title': title
+                }
+            )
         except Exception as db_error:
             database_operations.labels(
                 operation='create',
                 collection='blog_posts',
                 status='error'
             ).inc()
-            logger.error(f"Database error creating blog post: {db_error}", exc_info=True)
+            logger.error(
+                "Database error creating blog post",
+                extra={
+                    'event': 'database_error',
+                    'operation': 'create_blog_post',
+                    'error_type': type(db_error).__name__,
+                    'error_message': str(db_error),
+                    'user_id': current_user['_id']
+                },
+                exc_info=True
+            )
             raise
         
         if not blog_post:
-            logger.error("Failed to save blog post to database")
+            logger.error(
+                "Failed to save blog post to database",
+                extra={
+                    'event': 'blog_post_save_failed',
+                    'user_id': current_user['_id']
+                }
+            )
             return jsonify({'success': False, 'message': 'Failed to save blog post'}), 500
         
         generation_time = time.time() - start_time
@@ -1113,14 +1431,16 @@ def generate_blog():
         session['blog_created'] = time.time()
         
         logger.info(
-            f"Blog generation completed successfully",
+            "Blog generation completed successfully",
             extra={
+                'event': 'blog_generation_completed',
                 'user_id': current_user['_id'],
                 'username': current_user['username'],
                 'title': title,
                 'word_count': word_count,
                 'generation_time_seconds': generation_time,
-                'post_id': str(blog_post['_id'])
+                'post_id': str(blog_post['_id']),
+                'success': True
             }
         )
         
@@ -1137,11 +1457,14 @@ def generate_blog():
         blog_generation_requests.labels(status='failed').inc()
         application_errors.labels(error_type=type(e).__name__).inc()
         logger.error(
-            f"Unexpected error during blog generation",
+            "Unexpected error during blog generation",
             extra={
+                'event': 'unexpected_error',
+                'operation': 'blog_generation',
                 'error_type': type(e).__name__,
                 'error_message': str(e),
-                'request_id': request_id
+                'request_id': request_id,
+                'user_id': getattr(current_user, '_id', 'unknown') if 'current_user' in locals() else 'unknown'
             },
             exc_info=True
         )
@@ -1162,7 +1485,13 @@ def download_pdf():
     try:
         current_user = get_current_user()
         if not current_user:
-            logger.warning("Unauthorized PDF download attempt")
+            logger.warning(
+                "Unauthorized PDF download attempt",
+                extra={
+                    'event': 'unauthorized_access',
+                    'operation': 'pdf_download'
+                }
+            )
             return redirect(url_for('auth.login'))
         
         # Retrieve blog data from temporary storage
@@ -1173,7 +1502,14 @@ def download_pdf():
             blog_data = retrieve_large_data('current_blog', str(current_user['_id']))
         
         if not blog_data:
-            logger.warning(f"PDF download failed: No blog data found for user {current_user['username']}")
+            logger.warning(
+                f"PDF download failed: No blog data found for user {current_user['username']}",
+                extra={
+                    'event': 'pdf_download_failed',
+                    'error_type': 'no_data',
+                    'user_id': current_user['_id']
+                }
+            )
             return jsonify({'success': False, 'message': 'No blog data found or expired'}), 404
         
         blog_content = blog_data['blog_content']
@@ -1183,14 +1519,28 @@ def download_pdf():
         safe_title = re.sub(r'[^\w\s-]', '', title)[:50]
         filename = f"{safe_title}_blog.pdf"
         
-        logger.info(f"PDF generation started for user {current_user['username']}: {title}")
+        logger.info(
+            f"PDF generation started for user {current_user['username']}: {title}",
+            extra={
+                'event': 'pdf_generation_started',
+                'user_id': current_user['_id'],
+                'title': title
+            }
+        )
         
         # Generate PDF with proper cleanup
         try:
             pdf_generator = PDFGeneratorTool()
             pdf_bytes = pdf_generator.generate_pdf_bytes(blog_content)
             pdf_downloads.inc()
-            logger.info(f"PDF generated successfully: {len(pdf_bytes)} bytes")
+            logger.info(
+                f"PDF download completed successfully for user {current_user['username']}: {filename}",
+                extra={
+                    'event': 'pdf_download_completed',
+                    'user_id': current_user['_id'],
+                    'file_name': filename  # Changed from 'filename' to 'file_name'
+                }
+            )
         finally:
             if pdf_generator:
                 pdf_generator = None
@@ -1201,7 +1551,14 @@ def download_pdf():
         mem_file.write(pdf_bytes)
         mem_file.seek(0)
         
-        logger.info(f"PDF download completed successfully for user {current_user['username']}: {filename}")
+        logger.info(
+            f"PDF download completed successfully for user {current_user['username']}: {filename}",
+            extra={
+                'event': 'pdf_download_completed',
+                'user_id': current_user['_id'],
+                'file_name': filename
+            }
+        )
         
         return send_file(
             mem_file,
@@ -1213,8 +1570,9 @@ def download_pdf():
     except Exception as e:
         application_errors.labels(error_type=type(e).__name__).inc()
         logger.error(
-            f"PDF generation failed",
+            "PDF generation failed",
             extra={
+                'event': 'pdf_generation_error',
                 'error_type': type(e).__name__,
                 'error_message': str(e),
                 'user_id': getattr(current_user, '_id', 'unknown') if 'current_user' in locals() else 'unknown'
@@ -1238,11 +1596,25 @@ def dashboard():
         current_user = get_current_user()
         
         if not current_user:
-            logger.warning("Unauthorized dashboard access")
+            logger.warning(
+                "Unauthorized dashboard access",
+                extra={
+                    'event': 'unauthorized_access',
+                    'page': 'dashboard'
+                }
+            )
             session.clear()
             return redirect(url_for('auth.login'))
         
-        logger.info(f"Dashboard accessed by user: {current_user['username']}")
+        logger.info(
+            f"Dashboard accessed by user: {current_user['username']}",
+            extra={
+                'event': 'page_access',
+                'page': 'dashboard',
+                'user_id': current_user['_id'],
+                'username': current_user['username']
+            }
+        )
         
         blog_model = BlogPost()
         try:
@@ -1252,14 +1624,31 @@ def dashboard():
                 collection='blog_posts',
                 status='success'
             ).inc()
-            logger.info(f"Retrieved {len(posts)} posts for user {current_user['username']}")
+            logger.info(
+                f"Retrieved {len(posts)} posts for user {current_user['username']}",
+                extra={
+                    'event': 'posts_retrieved',
+                    'user_id': current_user['_id'],
+                    'post_count': len(posts)
+                }
+            )
         except Exception as db_error:
             database_operations.labels(
                 operation='read',
                 collection='blog_posts',
                 status='error'
             ).inc()
-            logger.error(f"Database error retrieving posts: {db_error}", exc_info=True)
+            logger.error(
+                "Database error retrieving posts",
+                extra={
+                    'event': 'database_error',
+                    'operation': 'read_posts',
+                    'error_type': type(db_error).__name__,
+                    'error_message': str(db_error),
+                    'user_id': current_user['_id']
+                },
+                exc_info=True
+            )
             posts = []
         
         return render_template('dashboard.html', 
@@ -1268,7 +1657,15 @@ def dashboard():
         
     except Exception as e:
         application_errors.labels(error_type=type(e).__name__).inc()
-        logger.error(f"Dashboard error: {e}", exc_info=True)
+        logger.error(
+            "Dashboard error",
+            extra={
+                'event': 'dashboard_error',
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            },
+            exc_info=True
+        )
         session.clear()
         return redirect(url_for('auth.login'))
     finally:
@@ -1284,10 +1681,24 @@ def delete_post(post_id):
     try:
         current_user = get_current_user()
         if not current_user:
-            logger.warning(f"Unauthorized post deletion attempt for post {post_id}")
+            logger.warning(
+                f"Unauthorized post deletion attempt for post {post_id}",
+                extra={
+                    'event': 'unauthorized_access',
+                    'operation': 'delete_post',
+                    'post_id': post_id
+                }
+            )
             return jsonify({'success': False, 'message': 'Authentication required'}), 401
         
-        logger.info(f"Post deletion requested by user {current_user['username']}: {post_id}")
+        logger.info(
+            f"Post deletion requested by user {current_user['username']}: {post_id}",
+            extra={
+                'event': 'post_deletion_started',
+                'user_id': current_user['_id'],
+                'post_id': post_id
+            }
+        )
         
         blog_model = BlogPost()
         try:
@@ -1303,19 +1714,54 @@ def delete_post(post_id):
                 collection='blog_posts',
                 status='error'
             ).inc()
-            logger.error(f"Database error deleting post: {db_error}", exc_info=True)
+            logger.error(
+                "Database error deleting post",
+                extra={
+                    'event': 'database_error',
+                    'operation': 'delete_post',
+                    'error_type': type(db_error).__name__,
+                    'error_message': str(db_error),
+                    'user_id': current_user['_id'],
+                    'post_id': post_id
+                },
+                exc_info=True
+            )
             raise
         
         if success:
-            logger.info(f"Post deleted successfully by user {current_user['username']}: {post_id}")
+            logger.info(
+                f"Post deleted successfully by user {current_user['username']}: {post_id}",
+                extra={
+                    'event': 'post_deletion_completed',
+                    'user_id': current_user['_id'],
+                    'post_id': post_id
+                }
+            )
             return jsonify({'success': True, 'message': 'Post deleted successfully'})
         else:
-            logger.warning(f"Post not found for deletion: {post_id}")
+            logger.warning(
+                f"Post not found for deletion: {post_id}",
+                extra={
+                    'event': 'post_deletion_failed',
+                    'error_type': 'not_found',
+                    'user_id': current_user['_id'],
+                    'post_id': post_id
+                }
+            )
             return jsonify({'success': False, 'message': 'Post not found'}), 404
             
     except Exception as e:
         application_errors.labels(error_type=type(e).__name__).inc()
-        logger.error(f"Error deleting post {post_id}: {e}", exc_info=True)
+        logger.error(
+            f"Error deleting post {post_id}",
+            extra={
+                'event': 'post_deletion_error',
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'post_id': post_id
+            },
+            exc_info=True
+        )
         return jsonify({'success': False, 'message': str(e)}), 500
     finally:
         if blog_model:
@@ -1326,11 +1772,26 @@ def delete_post(post_id):
 def contact():
     """Contact page"""
     try:
-        logger.info("Contact page accessed")
+        logger.info(
+            "Contact page accessed",
+            extra={
+                'event': 'page_access',
+                'page': 'contact'
+            }
+        )
         return render_template('contact.html')
     except Exception as e:
         application_errors.labels(error_type=type(e).__name__).inc()
-        logger.error(f"Error loading contact page: {e}", exc_info=True)
+        logger.error(
+            "Error loading contact page",
+            extra={
+                'event': 'page_error',
+                'page': 'contact',
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            },
+            exc_info=True
+        )
         return render_template('error.html', 
                              error=f"Error loading contact page: {str(e)}"), 500
 
@@ -1343,10 +1804,24 @@ def get_post(post_id):
     try:
         current_user = get_current_user()
         if not current_user:
-            logger.warning(f"Unauthorized post access attempt for post {post_id}")
+            logger.warning(
+                f"Unauthorized post access attempt for post {post_id}",
+                extra={
+                    'event': 'unauthorized_access',
+                    'operation': 'get_post',
+                    'post_id': post_id
+                }
+            )
             return jsonify({'success': False, 'message': 'Authentication required'}), 401
         
-        logger.info(f"Post retrieval requested by user {current_user['username']}: {post_id}")
+        logger.info(
+            f"Post retrieval requested by user {current_user['username']}: {post_id}",
+            extra={
+                'event': 'post_retrieval_started',
+                'user_id': current_user['_id'],
+                'post_id': post_id
+            }
+        )
         
         blog_model = BlogPost()
         try:
@@ -1362,22 +1837,57 @@ def get_post(post_id):
                 collection='blog_posts',
                 status='error'
             ).inc()
-            logger.error(f"Database error retrieving post: {db_error}", exc_info=True)
+            logger.error(
+                "Database error retrieving post",
+                extra={
+                    'event': 'database_error',
+                    'operation': 'get_post',
+                    'error_type': type(db_error).__name__,
+                    'error_message': str(db_error),
+                    'user_id': current_user['_id'],
+                    'post_id': post_id
+                },
+                exc_info=True
+            )
             raise
         
         if post:
-            logger.info(f"Post retrieved successfully: {post_id}")
+            logger.info(
+                f"Post retrieved successfully: {post_id}",
+                extra={
+                    'event': 'post_retrieval_completed',
+                    'user_id': current_user['_id'],
+                    'post_id': post_id
+                }
+            )
             return jsonify({
                 'success': True,
                 'post': post
             })
         else:
-            logger.warning(f"Post not found: {post_id}")
+            logger.warning(
+                f"Post not found: {post_id}",
+                extra={
+                    'event': 'post_retrieval_failed',
+                    'error_type': 'not_found',
+                    'user_id': current_user['_id'],
+                    'post_id': post_id
+                }
+            )
             return jsonify({'success': False, 'message': 'Post not found'}), 404
             
     except Exception as e:
         application_errors.labels(error_type=type(e).__name__).inc()
-        logger.error(f"Error retrieving post {post_id}: {e}", exc_info=True)
+        logger.error(
+            f"Error retrieving post {post_id}",
+            extra={
+                'event': 'post_retrieval_error',
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'post_id': post_id
+            },
+            exc_info=True
+        )
         return jsonify({'success': False, 'message': str(e)}), 500
     finally:
         if blog_model:
@@ -1393,10 +1903,24 @@ def download_post_pdf(post_id):
     try:
         current_user = get_current_user()
         if not current_user:
-            logger.warning(f"Unauthorized PDF download attempt for post {post_id}")
+            logger.warning(
+                f"Unauthorized PDF download attempt for post {post_id}",
+                extra={
+                    'event': 'unauthorized_access',
+                    'operation': 'download_post_pdf',
+                    'post_id': post_id
+                }
+            )
             return redirect(url_for('auth.login'))
         
-        logger.info(f"PDF download requested by user {current_user['username']} for post: {post_id}")
+        logger.info(
+            f"PDF download requested by user {current_user['username']} for post: {post_id}",
+            extra={
+                'event': 'post_pdf_download_started',
+                'user_id': current_user['_id'],
+                'post_id': post_id
+            }
+        )
         
         blog_model = BlogPost()
         try:
@@ -1412,11 +1936,30 @@ def download_post_pdf(post_id):
                 collection='blog_posts',
                 status='error'
             ).inc()
-            logger.error(f"Database error retrieving post for PDF: {db_error}", exc_info=True)
+            logger.error(
+                "Database error retrieving post for PDF",
+                extra={
+                    'event': 'database_error',
+                    'operation': 'get_post_for_pdf',
+                    'error_type': type(db_error).__name__,
+                    'error_message': str(db_error),
+                    'user_id': current_user['_id'],
+                    'post_id': post_id
+                },
+                exc_info=True
+            )
             raise
         
         if not post:
-            logger.warning(f"Post not found for PDF download: {post_id}")
+            logger.warning(
+                f"Post not found for PDF download: {post_id}",
+                extra={
+                    'event': 'post_pdf_download_failed',
+                    'error_type': 'not_found',
+                    'user_id': current_user['_id'],
+                    'post_id': post_id
+                }
+            )
             return jsonify({'success': False, 'message': 'Post not found'}), 404
         
         blog_content = post['content']
@@ -1426,14 +1969,30 @@ def download_post_pdf(post_id):
         safe_title = re.sub(r'[^\w\s-]', '', title)[:50]
         filename = f"{safe_title}_blog.pdf"
         
-        logger.info(f"PDF generation started for post {post_id}: {title}")
+        logger.info(
+            f"PDF generation started for post {post_id}: {title}",
+            extra={
+                'event': 'post_pdf_generation_started',
+                'user_id': current_user['_id'],
+                'post_id': post_id,
+                'title': title
+            }
+        )
         
         # Generate PDF
         try:
             pdf_generator = PDFGeneratorTool()
             pdf_bytes = pdf_generator.generate_pdf_bytes(blog_content)
             pdf_downloads.inc()
-            logger.info(f"PDF generated successfully for post {post_id}: {len(pdf_bytes)} bytes")
+            logger.info(
+                f"PDF generated successfully for post {post_id}: {len(pdf_bytes)} bytes",
+                extra={
+                    'event': 'post_pdf_generation_completed',
+                    'user_id': current_user['_id'],
+                    'post_id': post_id,
+                    'file_size': len(pdf_bytes)
+                }
+            )
         finally:
             if pdf_generator:
                 pdf_generator = None
@@ -1444,7 +2003,15 @@ def download_post_pdf(post_id):
         mem_file.write(pdf_bytes)
         mem_file.seek(0)
         
-        logger.info(f"PDF download completed for post {post_id} by user {current_user['username']}")
+        logger.info(
+            f"PDF download completed for post {post_id} by user {current_user['username']}",
+            extra={
+                'event': 'post_pdf_download_completed',
+                'user_id': current_user['_id'],
+                'post_id': post_id,
+                'file_name': filename  # Changed from 'filename' to 'file_name'
+            }
+    )
         
         return send_file(
             mem_file,
@@ -1458,6 +2025,7 @@ def download_post_pdf(post_id):
         logger.error(
             f"PDF generation failed for post {post_id}",
             extra={
+                'event': 'post_pdf_generation_error',
                 'error_type': type(e).__name__,
                 'error_message': str(e),
                 'post_id': post_id
@@ -1505,6 +2073,7 @@ def health_check():
             'database': 'connected' if db_connected else 'disconnected',
             'secret_key_set': bool(app.secret_key),
             'temp_storage_items': len(app.temp_storage),
+            'loki_url': os.getenv('LOKI_URL', 'not_configured'),
             'system': {
                 'cpu_percent': cpu_percent,
                 'memory_percent': memory.percent,
@@ -1522,14 +2091,16 @@ def health_check():
         
         status_code = 200 if db_connected else 503
         
-        # Log health check
+        # Enhanced health check logging for Loki
         logger.info(
-            f"Health check performed",
+            "Health check performed",
             extra={
+                'event': 'health_check',
                 'status': health_data['status'],
                 'database': health_data['database'],
                 'cpu_percent': cpu_percent,
-                'memory_percent': memory.percent
+                'memory_percent': memory.percent,
+                'loki_configured': bool(os.getenv('LOKI_URL'))
             }
         )
         
@@ -1537,7 +2108,15 @@ def health_check():
         
     except Exception as e:
         application_errors.labels(error_type=type(e).__name__).inc()
-        logger.error(f"Health check error: {e}", exc_info=True)
+        logger.error(
+            "Health check error",
+            extra={
+                'event': 'health_check_error',
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            },
+            exc_info=True
+        )
         return jsonify({
             'status': 'unhealthy',
             'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -1602,21 +2181,44 @@ def health_metrics():
 def unauthorized(error):
     """Handle unauthorized access"""
     application_errors.labels(error_type='401_Unauthorized').inc()
-    logger.warning(f"Unauthorized access attempt from {request.remote_addr}")
+    logger.warning(
+        f"Unauthorized access attempt from {request.remote_addr}",
+        extra={
+            'event': 'unauthorized_access',
+            'remote_addr': request.remote_addr,
+            'url': request.url
+        }
+    )
     return redirect(url_for('auth.login'))
 
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors"""
     application_errors.labels(error_type='404_NotFound').inc()
-    logger.warning(f"404 error for {request.url}")
+    logger.warning(
+        f"404 error for {request.url}",
+        extra={
+            'event': '404_error',
+            'url': request.url,
+            'method': request.method
+        }
+    )
     return render_template('error.html', error="Page not found"), 404
 
 @app.errorhandler(500)
 def internal_error(error):
     """Handle 500 errors"""
     application_errors.labels(error_type='500_InternalError').inc()
-    logger.error(f"Internal server error: {error}", exc_info=True)
+    logger.error(
+        f"Internal server error: {error}",
+        extra={
+            'event': '500_error',
+            'error_message': str(error),
+            'url': request.url,
+            'method': request.method
+        },
+        exc_info=True
+    )
     return render_template('error.html', error="Internal server error"), 500
 
 # Application shutdown cleanup
@@ -1640,6 +2242,7 @@ if __name__ == '__main__':
     logger.info("Using Flask's built-in sessions with size optimization")
     logger.info("Prometheus metrics enabled on /metrics endpoint")
     logger.info("Enhanced logging configured for Loki integration")
+    logger.info(f"Loki URL: {os.getenv('LOKI_URL', 'NOT_SET')}")
     
     # Configuration
     port = int(os.environ.get('PORT', 5000))
@@ -1650,7 +2253,8 @@ if __name__ == '__main__':
     required_vars = {
         'OPENAI_API_KEY': 'OpenAI API key',
         'SUPADATA_API_KEY': 'Supadata API key',
-        'MONGODB_URI': 'MongoDB connection URI'
+        'MONGODB_URI': 'MongoDB connection URI',
+        'LOKI_URL': 'Loki server URL (format: http://YOUR_DROPLET_IP:3100)'
     }
     
     missing_vars = []
@@ -1660,7 +2264,8 @@ if __name__ == '__main__':
     
     if missing_vars:
         logger.warning(f"Missing required environment variables: {', '.join(missing_vars)}")
-        logger.info("Note: JWT_SECRET_KEY will be auto-generated if not provided")
+        if 'LOKI_URL' in [var.split(' ')[0] for var in missing_vars]:
+            logger.warning("Loki integration will be disabled without LOKI_URL")
     
     logger.info(f"\nStarting application on {host}:{port}")
     logger.info("=================================\n")

@@ -818,7 +818,6 @@ class TestRoutes:
     @patch('app.retrieve_large_data')
     @patch('app.PDFGeneratorTool')
     def test_download_pdf_success(self, mock_pdf_tool_class, mock_retrieve_data, mock_get_current_user, client):
-        """Test successful PDF download"""
         mock_get_current_user.return_value = {'_id': 'user123', 'username': 'testuser'}
         mock_retrieve_data.return_value = {
             'blog_content': '# Test Blog\n\nContent here.',
@@ -831,9 +830,9 @@ class TestRoutes:
         
         with client.session_transaction() as sess:
             sess['blog_storage_key'] = 'test_key'
+            sess['user_id'] = 'user123'  # Add user_id to session
         
         response = client.get('/download')
-        
         assert response.status_code == 200
         assert response.mimetype == 'application/pdf'
 
@@ -962,7 +961,6 @@ class TestRoutes:
     @patch('app.PDFGeneratorTool')
     def test_download_post_pdf_success(self, mock_pdf_tool_class, mock_blog_post_class, 
                                     mock_get_current_user, client):
-        """Test successful post PDF download"""
         mock_get_current_user.return_value = {'_id': 'user123', 'username': 'testuser'}
         
         mock_blog_instance = Mock()
@@ -970,7 +968,7 @@ class TestRoutes:
         mock_blog_instance.get_post_by_id.return_value = {
             '_id': 'post123',
             'title': 'Test Post',
-            'content': '# Test Post\n\nContent here.'
+            'content': '# Test Post\n\nContent here.'  # Add content field
         }
         
         mock_pdf_tool = Mock()
@@ -978,7 +976,6 @@ class TestRoutes:
         mock_pdf_tool.generate_pdf_bytes.return_value = b'PDF content'
         
         response = client.get('/download-post/post123')
-        
         assert response.status_code == 200
         assert response.mimetype == 'application/pdf'
 
