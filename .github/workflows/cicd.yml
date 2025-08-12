@@ -1907,12 +1907,6 @@ jobs:
         with:
           channel: '#githubaction'
           status: ${{ job.status }}
-          icon_emoji: |
-            ${{ 
-              steps.status.outputs.overall_status == 'success' && ':white_check_mark:' || 
-              steps.status.outputs.overall_status == 'rollback' && ':warning:' || 
-              ':x:' 
-            }}
           text: |
             ${{
               steps.status.outputs.overall_status == 'success' && '✅ Blue-Green Deployment Pipeline Succeeded (with DAST Security Validation)!' ||
@@ -1928,10 +1922,25 @@ jobs:
               {"title": "Commit", "value": "${{ github.sha }}", "short": true},
               {"title": "Triggered by", "value": "${{ github.actor }}", "short": true},
               {"title": "Security Testing", "value": "OWASP ZAP DAST + Static Analysis", "short": true},
-              {"title": "Deployment Strategy", "value": "Blue-Green with Security Gates", "short": true},
-              ${{ steps.status.outputs.successful_jobs != '' && format('{"title": "✅ Successful Jobs", "value": "{0}", "short": false},', steps.status.outputs.successful_jobs) || '' }}
-              ${{ steps.status.outputs.failed_jobs != '' && format('{"title": "❌ Failed Jobs", "value": "{0}", "short": false},', steps.status.outputs.failed_jobs) || '' }}
-              ${{ steps.status.outputs.skipped_jobs != '' && format('{"title": "⏭️ Skipped Jobs", "value": "{0}", "short": false},', steps.status.outputs.skipped_jobs) || '' }}
+              {"title": "Deployment Strategy", "value": "Blue-Green with Security Gates", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run Details>"
+
+      - name: Send Detailed Status if Jobs Failed or Succeeded
+        if: steps.status.outputs.successful_jobs != '' || steps.status.outputs.failed_jobs != '' || steps.status.outputs.skipped_jobs != ''
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "📊 Detailed Job Status Report"
+          fields: |
+            [
+              ${{ steps.status.outputs.successful_jobs != '' && format('{"title": "✅ Successful Jobs", "value": "{0}", "short": false}', steps.status.outputs.successful_jobs) || '' }}
+              ${{ steps.status.outputs.successful_jobs != '' && steps.status.outputs.failed_jobs != '' && ',' || '' }}
+              ${{ steps.status.outputs.failed_jobs != '' && format('{"title": "❌ Failed Jobs", "value": "{0}", "short": false}', steps.status.outputs.failed_jobs) || '' }}
+              ${{ (steps.status.outputs.successful_jobs != '' || steps.status.outputs.failed_jobs != '') && steps.status.outputs.skipped_jobs != '' && ',' || '' }}
+              ${{ steps.status.outputs.skipped_jobs != '' && format('{"title": "⏭️ Skipped Jobs", "value": "{0}", "short": false}', steps.status.outputs.skipped_jobs) || '' }}
+              ${{ steps.status.outputs.rollback_executed == 'true' && ',' || '' }}
               ${{ steps.status.outputs.rollback_executed == 'true' && '{"title": "🔄 Rollback Status", "value": "✅ System restored to stable state", "short": false}' || '' }}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run Details>"
