@@ -1783,7 +1783,7 @@ jobs:
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
-  # 📊 FINAL NOTIFICATION
+    # 📊 FINAL NOTIFICATION
   notify:
     name: Pipeline Status Notification
     if: always()
@@ -1793,7 +1793,7 @@ jobs:
       - build-and-test
       - sonarqube-scan
       - docker-build-test
-      - owasp-zap-dast  # Added DAST to dependency tracking
+      - owasp-zap-dast
       - deploy-to-dockerhub
       - deploy-green-environment
       - blue-green-traffic-switch
@@ -1840,7 +1840,6 @@ jobs:
             skipped_jobs+="Docker Build, "
           fi
 
-          # 🛡️ OWASP ZAP DAST Status Check
           if [[ "${{ needs.owasp-zap-dast.result }}" == 'failure' ]]; then 
             failed_jobs+="OWASP ZAP DAST Security Scan, "
           elif [[ "${{ needs.owasp-zap-dast.result }}" == 'success' ]]; then
@@ -1873,7 +1872,6 @@ jobs:
             skipped_jobs+="Blue-Green Traffic Switch, "
           fi
 
-          # Check if rollback was executed
           if [[ "${{ needs.rollback-on-failure.result }}" == 'success' ]]; then
             rollback_executed="true"
             successful_jobs+="Automatic Rollback, "
@@ -1921,26 +1919,55 @@ jobs:
               {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
               {"title": "Commit", "value": "${{ github.sha }}", "short": true},
               {"title": "Triggered by", "value": "${{ github.actor }}", "short": true},
-              {"title": "Security Testing", "value": "OWASP ZAP DAST + Static Analysis", "short": true},
-              {"title": "Deployment Strategy", "value": "Blue-Green with Security Gates", "short": true}
+              {"title": "Security Testing", "value": "OWASP ZAP DAST + Static Analysis", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run Details>"
 
-      - name: Send Detailed Status if Jobs Failed or Succeeded
-        if: steps.status.outputs.successful_jobs != '' || steps.status.outputs.failed_jobs != '' || steps.status.outputs.skipped_jobs != ''
+      - name: Send Success Details
+        if: steps.status.outputs.successful_jobs != ''
         uses: act10ns/slack@v2.1.0
         with:
           channel: '#githubaction'
-          status: ${{ job.status }}
-          text: "📊 Detailed Job Status Report"
+          status: 'success'
+          text: "✅ Successful Jobs Details"
           fields: |
             [
-              ${{ steps.status.outputs.successful_jobs != '' && format('{"title": "✅ Successful Jobs", "value": "{0}", "short": false}', steps.status.outputs.successful_jobs) || '' }}
-              ${{ steps.status.outputs.successful_jobs != '' && steps.status.outputs.failed_jobs != '' && ',' || '' }}
-              ${{ steps.status.outputs.failed_jobs != '' && format('{"title": "❌ Failed Jobs", "value": "{0}", "short": false}', steps.status.outputs.failed_jobs) || '' }}
-              ${{ (steps.status.outputs.successful_jobs != '' || steps.status.outputs.failed_jobs != '') && steps.status.outputs.skipped_jobs != '' && ',' || '' }}
-              ${{ steps.status.outputs.skipped_jobs != '' && format('{"title": "⏭️ Skipped Jobs", "value": "{0}", "short": false}', steps.status.outputs.skipped_jobs) || '' }}
-              ${{ steps.status.outputs.rollback_executed == 'true' && ',' || '' }}
-              ${{ steps.status.outputs.rollback_executed == 'true' && '{"title": "🔄 Rollback Status", "value": "✅ System restored to stable state", "short": false}' || '' }}
+              {"title": "Successful Jobs", "value": "${{ steps.status.outputs.successful_jobs }}", "short": false}
             ]
-          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run Details>"
+
+      - name: Send Failure Details
+        if: steps.status.outputs.failed_jobs != ''
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: 'failure'
+          text: "❌ Failed Jobs Details"
+          fields: |
+            [
+              {"title": "Failed Jobs", "value": "${{ steps.status.outputs.failed_jobs }}", "short": false}
+            ]
+
+      - name: Send Skipped Details
+        if: steps.status.outputs.skipped_jobs != ''
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: 'warning'
+          text: "⏭️ Skipped Jobs Details"
+          fields: |
+            [
+              {"title": "Skipped Jobs", "value": "${{ steps.status.outputs.skipped_jobs }}", "short": false}
+            ]
+
+      - name: Send Rollback Details
+        if: steps.status.outputs.rollback_executed == 'true'
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: 'warning'
+          text: "🔄 Rollback Executed"
+          fields: |
+            [
+              {"title": "Rollback Status", "value": "✅ System restored to stable state", "short": false}
+            ]
+
