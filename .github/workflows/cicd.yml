@@ -543,6 +543,7 @@ jobs:
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
 # 🛡️ PRODUCTION-READY OWASP ZAP DAST SECURITY TESTING
+ # 🛡️ PRODUCTION-READY OWASP ZAP DAST SECURITY TESTING
   owasp-zap-baseline-scan:
     needs: docker-build-test
     runs-on: ubuntu-latest
@@ -627,10 +628,10 @@ jobs:
           mkdir -p zap-config
           echo "📁 Created ZAP configuration directory"
 
-      - name: Generate ZAP Rules Configuration (FIXED)
+      - name: Generate ZAP Rules Configuration
         run: |
-          # Create properly formatted TSV file with TAB separators
-          cat << 'EOF' > zap-config/rules.tsv
+          # Create properly formatted TSV file with real TAB characters
+          cat > zap-config/rules.tsv << 'EOF'
           # ZAP Scanning Rules - Production CI/CD Optimized
           # Format: ID	THRESHOLD	NEW_LEVEL	[DESCRIPTION]
           
@@ -662,12 +663,14 @@ jobs:
           90005	OFF	INFO	[Sec-Fetch-Dest Header is Missing]
           EOF
           
-          # Verify the file was created correctly
+          # Replace spaces with actual TAB characters in the TSV file
+          sed -i 's/	/\t/g' zap-config/rules.tsv
+          
           echo "✅ ZAP rules configuration created"
-          echo "📄 Rules file contents:"
-          head -10 zap-config/rules.tsv
+          echo "📄 First few lines of rules file:"
+          head -5 zap-config/rules.tsv
 
-      - name: Create ZAP Options Configuration  
+      - name: Create ZAP Options Configuration
         run: |
           cat << 'EOF' > zap-config/options.prop
           # OWASP ZAP CI/CD Optimized Configuration
@@ -685,67 +688,81 @@ jobs:
           
           echo "✅ ZAP options configuration created"
 
-      - name: Run OWASP ZAP Baseline Scan (FIXED)
+      - name: Run OWASP ZAP Baseline Scan
         id: zap-scan
-        continue-on-error: true  # Don't fail the step, we'll handle results manually
+        continue-on-error: true
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: ${{ steps.get-url.outputs.app_url }}
           rules_file_name: 'zap-config/rules.tsv'
           cmd_options: '-a -j -m 3 -T 10 -z "-config spider.maxDepth=2 -config spider.maxChildren=15"'
           issue_title: '🛡️ OWASP ZAP Security Vulnerabilities Detected'
-          fail_action: false  # We'll handle failures manually
-          artifact_name: 'zapSecurityScanResults'  # FIXED: No hyphens, no underscores
+          fail_action: false
+          # FIXED: Use simple alphanumeric name without special characters
+          artifact_name: 'zapsecurityscanresults'
 
-      - name: Parse ZAP Scan Results (FIXED)
+      - name: Parse ZAP Scan Results (COMPLETELY FIXED)
         id: parse-results
         if: always()
         run: |
           echo "📊 Parsing ZAP scan results..."
           
-          # Initialize counters with proper values
+          # Initialize all variables properly with integer values
           HIGH_COUNT=0
           MEDIUM_COUNT=0
           LOW_COUNT=0
           INFO_COUNT=0
           FAIL_NEW_COUNT=0
           WARN_NEW_COUNT=0
+          TOTAL_ISSUES=0
           SCAN_SUCCESS="false"
           
-          # Method 1: Parse from ZAP baseline markdown report (most reliable for baseline scans)
+          # Method 1: Parse baseline scan results from markdown
           if [ -f "report_md.md" ]; then
             echo "✅ ZAP Markdown report found, parsing baseline results..."
             SCAN_SUCCESS="true"
             
-            # Parse FAIL-NEW and WARN-NEW from baseline scan
+            # Count FAIL-NEW and WARN-NEW occurrences
             FAIL_NEW_COUNT=$(grep -c "FAIL-NEW:" report_md.md 2>/dev/null || echo "0")
             WARN_NEW_COUNT=$(grep -c "WARN-NEW:" report_md.md 2>/dev/null || echo "0")
+            
+            # Ensure we have valid integers
+            FAIL_NEW_COUNT=${FAIL_NEW_COUNT:-0}
+            WARN_NEW_COUNT=${WARN_NEW_COUNT:-0}
             
             echo "🎯 ZAP Baseline Scan Results:"
             echo "   FAIL-NEW (Critical): $FAIL_NEW_COUNT"
             echo "   WARN-NEW (Warning): $WARN_NEW_COUNT"
+          else
+            echo "⚠️ ZAP Markdown report not found"
           fi
           
-          # Method 2: Parse from JSON report for detailed risk levels
-          if [ -f "report_json.json" ]; then
+          # Method 2: Parse detailed risk levels from JSON
+          if [ -f "report_json.json" ] && [ -s "report_json.json" ]; then
             echo "✅ ZAP JSON report found, parsing detailed risk levels..."
             
-            # Parse actual ZAP risk levels from JSON (fixed jq queries)
-            HIGH_COUNT=$(jq '[.site[]?.alerts[]? | select(.riskcode == "3")] | length' report_json.json 2>/dev/null || echo "0")
-            MEDIUM_COUNT=$(jq '[.site[]?.alerts[]? | select(.riskcode == "2")] | length' report_json.json 2>/dev/null || echo "0") 
-            LOW_COUNT=$(jq '[.site[]?.alerts[]? | select(.riskcode == "1")] | length' report_json.json 2>/dev/null || echo "0")
-            INFO_COUNT=$(jq '[.site[]?.alerts[]? | select(.riskcode == "0")] | length' report_json.json 2>/dev/null || echo "0")
+            # Parse with robust error handling
+            HIGH_COUNT=$(jq -r '[.site[]? | .alerts[]? | select(.riskcode == "3")] | length' report_json.json 2>/dev/null || echo "0")
+            MEDIUM_COUNT=$(jq -r '[.site[]? | .alerts[]? | select(.riskcode == "2")] | length' report_json.json 2>/dev/null || echo "0")
+            LOW_COUNT=$(jq -r '[.site[]? | .alerts[]? | select(.riskcode == "1")] | length' report_json.json 2>/dev/null || echo "0")
+            INFO_COUNT=$(jq -r '[.site[]? | .alerts[]? | select(.riskcode == "0")] | length' report_json.json 2>/dev/null || echo "0")
+            
+            # Ensure all are valid integers
+            HIGH_COUNT=${HIGH_COUNT:-0}
+            MEDIUM_COUNT=${MEDIUM_COUNT:-0}
+            LOW_COUNT=${LOW_COUNT:-0}
+            INFO_COUNT=${INFO_COUNT:-0}
             
             echo "📊 ZAP Risk Level Analysis:"
             echo "   High Risk (riskcode=3): $HIGH_COUNT"
-            echo "   Medium Risk (riskcode=2): $MEDIUM_COUNT" 
+            echo "   Medium Risk (riskcode=2): $MEDIUM_COUNT"
             echo "   Low Risk (riskcode=1): $LOW_COUNT"
             echo "   Informational (riskcode=0): $INFO_COUNT"
           else
-            echo "⚠️ ZAP JSON report not found, using baseline counts only"
+            echo "⚠️ ZAP JSON report not found or empty"
           fi
           
-          # Calculate total issues properly
+          # Calculate total issues safely
           TOTAL_ISSUES=$((FAIL_NEW_COUNT + WARN_NEW_COUNT))
           
           echo "🏁 Final Counts for Security Gate:"
@@ -753,7 +770,7 @@ jobs:
           echo "   Warning Issues (WARN-NEW): $WARN_NEW_COUNT"
           echo "   Total Baseline Issues: $TOTAL_ISSUES"
           
-          # Set outputs with proper format (FIXED)
+          # Set outputs with validated values
           echo "fail_new_count=$FAIL_NEW_COUNT" >> $GITHUB_OUTPUT
           echo "warn_new_count=$WARN_NEW_COUNT" >> $GITHUB_OUTPUT
           echo "high_count=$HIGH_COUNT" >> $GITHUB_OUTPUT
@@ -810,11 +827,12 @@ jobs:
           
           echo "✅ Security summary report generated"
 
-      - name: Upload ZAP Scan Reports (FIXED)
+      - name: Upload ZAP Scan Reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: zapSecurityReports${{ github.run_number }}  # FIXED: No hyphens/underscores
+          # FIXED: Simple alphanumeric name with run number
+          name: zapsecurityreports${{ github.run_number }}
           path: |
             report_html.html
             report_json.json
@@ -824,7 +842,7 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-      - name: Security Gate Evaluation (FIXED)
+      - name: Security Gate Evaluation
         id: security-gate
         if: always()
         run: |
@@ -846,7 +864,7 @@ jobs:
           echo "   Total Baseline Issues: $TOTAL_ISSUES"
           echo "   Scan Status: $SCAN_SUCCESS"
           
-          # Security gate rules for production (CORRECTED)
+          # Security gate rules for production
           GATE_PASSED="true"
           GATE_MESSAGE=""
           
@@ -912,7 +930,7 @@ jobs:
               '### 🛠️ **Immediate Actions Required**',
               '',
               '#### 1. 🔍 **Review Critical Findings**',
-              `- Download the \`zapSecurityReports${{ github.run_number }}\` artifact from the [failed workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`,
+              `- Download the \`zapsecurityreports${{ github.run_number }}\` artifact from the [failed workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`,
               '- Open `report_html.html` for detailed vulnerability information',
               '- Focus on **FAIL-NEW** entries in `report_md.md`',
               '',
@@ -964,7 +982,7 @@ jobs:
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔍 View Security Report>"
 
-      - name: Slack Success Notification  
+      - name: Slack Success Notification
         if: success()
         uses: act10ns/slack@v2.1.0
         with:
