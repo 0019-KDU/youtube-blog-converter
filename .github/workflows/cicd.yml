@@ -692,7 +692,7 @@ jobs:
           cmd_options: '-a -j -m 3 -T 10 -z "-config spider.maxDepth=2 -config spider.maxChildren=15"'
           issue_title: '🛡️ OWASP ZAP Security Vulnerabilities Detected'
           fail_action: false  # We'll handle failures manually
-          artifact_name: 'zap-security-scan-results'  # Unique artifact name
+          artifact_name: 'zap_security_scan_results'  # Unique artifact name
 
       - name: Parse ZAP Scan Results
         id: parse-results
@@ -826,7 +826,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: dast-security-reports-${{ github.run_number }}
+          name: dast_security_reports_${{ github.run_number }}
           path: |
             report_html.html
             report_json.json
