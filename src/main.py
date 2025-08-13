@@ -213,7 +213,7 @@ def validate_environment():
 
 def cli_main():
     """Command line interface with enhanced error handling"""
-    print("YouTube Blog Generator - Supadata API Version")
+    print("YouTube Blog Generator - Supadata API Version...")
     print("=" * 50)
     
     try:
