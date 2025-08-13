@@ -826,7 +826,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: dast_security_reports_${{ github.run_number }}
+          name: dast-security-reports-${{ github.run_number }}
           path: |
             report_html.html
             report_json.json
