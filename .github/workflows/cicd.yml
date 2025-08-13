@@ -698,7 +698,7 @@ jobs:
           issue_title: '🛡️ OWASP ZAP Security Vulnerabilities Detected'
           fail_action: false
           # FIXED: Simplified artifact name
-          artifact_name: 'zap-results'
+          artifact_name: 'zapresults'
 
       - name: Parse ZAP Scan Results (FIXED)
         id: parse-results
@@ -847,7 +847,7 @@ jobs:
         if: always()
         with:
           # FIXED: Simple alphanumeric name with run number
-          name: zap-reports-${{ github.run_number }}
+          name: zapreports-${{ github.run_number }}
           path: |
             report_html.html
             report_json.json
