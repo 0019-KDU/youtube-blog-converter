@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- ZAP Context Configuration for Flask YouTube Blog Converter -->
+<!-- Place this file as .zap/context.xml in your repository root -->
+<configuration>
+    <context>
+        <name>YouTube Blog Converter App</name>
+        <desc>Security context for Flask YouTube blog converter application</desc>
+        <inscope>true</inscope>
+        <incregexes>https://.*\.azurecontainerapps\.io/.*</incregexes>
+        <excregexes>
+            <!-- Exclude static assets that don't need security testing -->
+            <regex>.*\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)(\?.*)?$</regex>
+            <!-- Exclude logout endpoints to prevent session invalidation during scan -->
+            <regex>.*/logout.*</regex>
+            <!-- Exclude admin/internal endpoints if any -->
+            <regex>.*/admin/.*</regex>
+            <!-- Exclude health check endpoints -->
+            <regex>.*/health.*</regex>
+            <regex>.*/readiness.*</regex>
+            <regex>.*/liveness.*</regex>
+        </excregexes>
+        <tech>
+            <include>Db</include>
+            <include>Db.MongoDB</include>
+            <include>Language</include>
+            <include>Language.Python</include>
+            <include>OS</include>
+            <include>OS.Linux</include>
+            <include>SCM</include>
+            <include>SCM.Git</include>
+            <include>WS</include>
+            <include>WS.Flask</include>
+        </tech>
+        <urlparser>
+            <class>org.zaproxy.zap.model.StandardParameterParser</class>
+            <config></config>
+        </urlparser>
+        <postparser>
+            <class>org.zaproxy.zap.model.StandardParameterParser</class>
+            <config></config>
+        </postparser>
+        <authentication>
+            <type>0</type>
+        </authentication>
+        <users/>
+        <forceduser>-1</forceduser>
+        <session>
+            <type>0</type>
+        </session>
+    </context>
+</configuration>
