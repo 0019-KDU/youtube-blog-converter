@@ -18,3 +18,5 @@ python-json-logger
 prometheus_client
 psutil
 python-json-logger
+pytest-timeout
+mongomock
