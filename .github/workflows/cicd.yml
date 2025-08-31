@@ -1,4 +1,4 @@
-name: Enhanced CI/CD for YouTube Blog Converter with Blue-Green Deployment
+name: CI/CD for YouTube Blog Converter with Blue-Green Deployment
 
 on:
   push:
@@ -66,46 +66,6 @@ permissions:
   attestations: write  # For SBOM signing
 
 jobs:
-  # SBOM GENERATION AND CONTAINER SIGNING
-  generate-sbom:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Syft
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-          syft --version
-
-      - name: Generate SBOM
-        run: |
-          syft dir:. -o cyclonedx-json=sbom-cyclonedx.json
-          syft dir:. -o spdx-json=sbom-spdx.json
-          echo "SBOM generated successfully"
-
-      - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom-reports
-          path: |
-            sbom-cyclonedx.json
-            sbom-spdx.json
-          retention-days: 90
-
-      - name: Create SBOM summary
-        run: |
-          echo "📦 Software Bill of Materials (SBOM) Generated" >> $GITHUB_STEP_SUMMARY
-          echo "=============================================" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **CycloneDX JSON**: [Download](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
-          echo "- **SPDX JSON**: [Download](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
-          echo "- **Generated**: $(date -u)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "SBOM includes all dependencies and components used in the application." >> $GITHUB_STEP_SUMMARY
-
   security-scan:
     runs-on: ubuntu-latest
     steps:
@@ -225,7 +185,6 @@ jobs:
               {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
-
   build-and-test:
     runs-on: ubuntu-latest
     steps:
@@ -325,6 +284,45 @@ jobs:
               {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
+  generate-sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft --version
+
+      - name: Generate SBOM
+        run: |
+          syft dir:. -o cyclonedx-json=sbom-cyclonedx.json
+          syft dir:. -o spdx-json=sbom-spdx.json
+          echo "SBOM generated successfully"
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-reports
+          path: |
+            sbom-cyclonedx.json
+            sbom-spdx.json
+          retention-days: 90
+
+      - name: Create SBOM summary
+        run: |
+          echo "📦 Software Bill of Materials (SBOM) Generated" >> $GITHUB_STEP_SUMMARY
+          echo "=============================================" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **CycloneDX JSON**: [Download](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **SPDX JSON**: [Download](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Generated**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "SBOM includes all dependencies and components used in the application." >> $GITHUB_STEP_SUMMARY
 
   sonarqube-scan:
     runs-on: self-hosted
@@ -671,8 +669,460 @@ jobs:
               {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+  deploy-to-dockerhub:
+      needs: [docker-build-test, owasp-zap-baseline-scan]  # Added DAST dependency
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      runs-on: ubuntu-latest
+      steps:
+        - name: Show commit author
+          run: |
+            echo "Commit by ${{ github.actor }}"
+            echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+            echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
 
-  # 🛡️ PRODUCTION-READY OWASP ZAP DAST SECURITY TESTING
+        - name: Checkout code
+          uses: actions/checkout@v4
+
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@v3
+
+        - name: Login to Docker Hub
+          uses: docker/login-action@v3
+          with:
+            username: ${{ secrets.DOCKERHUB_USERNAME }}
+            password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+        - name: Build and push Docker image
+          uses: docker/build-push-action@v5
+          with:
+            context: .
+            push: true
+            tags: |
+              ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:latest
+              ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
+            cache-from: type=gha
+            cache-to: type=gha,mode=max
+
+        - name: Verify deployment
+          run: |
+            echo "Successfully deployed to Docker Hub!"
+            echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+
+        - name: Create issue on failure
+          if: ${{ failure() }}
+          uses: actions/github-script@v7
+          with:
+            script: |
+              try {
+                const assignee = "${{ github.actor }}";
+                const authorName = "${{ github.event.head_commit.author.name }}";
+                const authorEmail = "${{ github.event.head_commit.author.email }}";
+                
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `Deployment Failed in ${context.job}`,
+                  body: `### ❌ Deployment to Docker Hub Failed\n\n` +
+                        `**Job:** ${context.job}\n` +
+                        `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                        `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                        `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                        `Deployment to Docker Hub failed. Please check build logs.`,
+                  assignees: [assignee],
+                  labels: ['ci-failure', 'deployment']
+                });
+              } catch (error) {
+                console.error('Error creating issue:', error);
+                core.setFailed(`Failed to create issue: ${error.message}`);
+              }
+
+        - name: Slack Notification on Failure
+          if: ${{ failure() }}
+          uses: act10ns/slack@v2.1.0
+          with:
+            channel: '#githubaction'
+            status: ${{ job.status }}
+            text: "❌ Deployment Failed in ${{ github.repository }}"
+            fields: |
+              [
+                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+                {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+                {"title": "Job", "value": "${{ github.job }}", "short": true},
+                {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+                {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+                {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
+              ]
+            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+  sign-container:
+    needs: [docker-build-test, owasp-zap-baseline-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.6.0   # <- upgraded installer
+        with:
+          cosign-release: v2.2.4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Sign container image with Cosign
+        env:
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          IMAGE="${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}"
+          docker pull "$IMAGE"
+
+          for i in {1..3}; do
+            echo "Signing attempt $i/3..."
+            if cosign sign --yes "$IMAGE"; then
+              echo "Container signed successfully"
+              break
+            else
+              echo "Signing attempt $i failed, retrying..."
+              sleep 10
+            fi
+
+            if [ $i -eq 3 ]; then
+              echo "All signing attempts failed, but continuing pipeline..."
+              echo "SIGNING_FAILED=true" >> "$GITHUB_ENV"
+            fi
+          done
+
+      - name: Generate and attach SBOM
+        if: env.SIGNING_FAILED != 'true'
+        run: |
+          IMAGE="${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}"
+          PAYLOAD=$(cat <<EOF
+          {
+            "spdxVersion": "SPDX-2.3",
+            "creationInfo": { "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)" },
+            "name": "${{ env.CONTAINER_IMAGE }}:${{ github.sha }}",
+            "packages": []
+          }
+          EOF
+          )
+
+          for i in {1..3}; do
+            echo "SBOM generation attempt $i/3..."
+            if cosign attest --yes \
+              --predicate-type="https://spdx.dev/Document" \
+              --predicate=<(echo "$PAYLOAD") "$IMAGE"; then
+              echo "SBOM attestation created successfully"
+              break
+            else
+              echo "SBOM attempt $i failed, retrying..."
+              sleep 10
+            fi
+
+            if [ $i -eq 3 ]; then
+              echo "SBOM generation failed, but continuing..."
+            fi
+          done
+
+      - name: Verify container signature
+        if: env.SIGNING_FAILED != 'true'
+        run: |
+          IMAGE="${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}"
+          cosign verify "$IMAGE" \
+            --certificate-identity-regexp=".*" \
+            --certificate-oidc-issuer-regexp=".*" \
+            || echo "Verification failed but continuing..."
+
+      - name: Create issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const assignee = "${{ github.actor }}";
+            const authorName = "${{ github.event.head_commit.author.name }}";
+            const authorEmail = "${{ github.event.head_commit.author.email }}";
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Container Signing Failed in ${context.job}`,
+              body: `### Container Signing Failed\n\n` +
+                    `**Job:** ${context.job}\n` +
+                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                    `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                    `Container signing failed. Please check the logs.`,
+              assignees: [assignee],
+              labels: ['ci-failure', 'security', 'container']
+            });
+
+      - name: Slack Notification on Failure
+        if: failure()
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: ${{ job.status }}
+          text: "Container Signing Failed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+              {"title": "Job", "value": "${{ github.job }}", "short": true},
+              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+              {"title": "Image", "value": "${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}", "short": false}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+
+  deploy-green-environment:
+      needs: [deploy-to-dockerhub, owasp-zap-baseline-scan]  # Added DAST dependency
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      runs-on: ubuntu-latest
+      outputs:
+        green-revision: ${{ steps.deploy-green.outputs.revision_name }}
+        app-url: ${{ steps.get-url.outputs.url }}
+        
+      steps:
+        - name: Show commit author
+          run: |
+            echo "Commit by ${{ github.actor }}"
+            echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+            echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
+
+        - name: Checkout code
+          uses: actions/checkout@v4
+
+        - name: Azure Login
+          uses: azure/login@v2
+          with:
+            creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+        - name: Configure Docker Hub registry
+          run: |
+            echo "🔄 Configuring Docker Hub registry..."
+            az containerapp registry remove \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --server docker.io || true
+
+            az containerapp registry set \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --server docker.io \
+              --username ${{ secrets.DOCKERHUB_USERNAME }} \
+              --password ${{ secrets.DOCKERHUB_TOKEN }}
+
+        - name: Deploy to Green Environment
+          id: deploy-green
+          run: |
+            # Generate sequential revision suffix using GitHub run number
+            RUN_NUMBER=$(printf "%07d" ${{ github.run_number }})
+            GREEN_REVISION_SUFFIX="green-${RUN_NUMBER}"
+            REVISION_NAME="${{ secrets.CONTAINER_APP_NAME }}--${GREEN_REVISION_SUFFIX}"
+            
+            echo "🟢 Deploying to GREEN environment..."
+            echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
+            echo "Resource Group: ${{ secrets.RESOURCE_GROUP }}"
+            echo "Container Name: ytblogger"
+            echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
+            echo "Green Revision Suffix: $GREEN_REVISION_SUFFIX"
+            echo "Full Revision Name: $REVISION_NAME (${#REVISION_NAME} chars)"
+            
+            # Validate revision name length
+            if [ ${#REVISION_NAME} -gt 54 ]; then
+              echo "❌ ERROR: Revision name too long (${#REVISION_NAME} chars, max 54)"
+              exit 1
+            fi
+            
+            echo "✅ Revision name validation passed"
+            
+            az containerapp update \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --container-name ytblogger \
+              --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
+              --revision-suffix $GREEN_REVISION_SUFFIX \
+              --set-env-vars DEPLOYMENT_COLOR=green DEPLOYMENT_VERSION=${{ github.sha }} \
+              --output table
+            
+            echo "revision_name=$REVISION_NAME" >> $GITHUB_OUTPUT
+            echo "✅ Green revision created: $REVISION_NAME"
+
+        - name: Wait for Green Deployment
+          run: |
+            echo "⏳ Waiting for GREEN deployment to stabilize..."
+            sleep 60
+            
+            REVISION_NAME="${{ steps.deploy-green.outputs.revision_name }}"
+            
+            for i in {1..15}; do
+              REVISION_STATUS=$(az containerapp revision show \
+                --revision $REVISION_NAME \
+                --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                --query "properties.provisioningState" \
+                --output tsv 2>/dev/null || echo "Unknown")
+              
+              echo "GREEN revision status: $REVISION_STATUS (attempt $i/15)"
+              
+              if [ "$REVISION_STATUS" = "Succeeded" ]; then
+                echo "✅ GREEN revision is ready!"
+                break
+              elif [ "$REVISION_STATUS" = "Failed" ]; then
+                echo "❌ GREEN revision deployment failed!"
+                az containerapp revision show \
+                  --revision $REVISION_NAME \
+                  --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                  --query "{name: name, status: properties.provisioningState, replicas: properties.replicas}" \
+                  --output table
+                exit 1
+              fi
+              
+              sleep 15
+            done
+
+        - name: Add Green Label
+          run: |
+            echo "🏷️ Adding 'green' label to revision..."
+            
+            # Remove existing green label if it exists (with --yes flag)
+            az containerapp revision label remove \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --label green \
+              --yes || echo "No existing green label to remove"
+            
+            # Add green label to new revision (with --yes flag)
+            az containerapp revision label add \
+              --name ${{ secrets.CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.RESOURCE_GROUP }} \
+              --label green \
+              --revision ${{ steps.deploy-green.outputs.revision_name }} \
+              --yes
+            
+            echo "✅ Green label added successfully"
+
+        - name: Get Application URL
+          id: get-url
+          run: |
+            echo "🔍 Retrieving app URL..."
+            
+            # Retry getting URL in case of temporary issues
+            for i in {1..3}; do
+              URL=$(az containerapp show \
+                --name ${{ secrets.CONTAINER_APP_NAME }} \
+                --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                --query "properties.configuration.ingress.fqdn" \
+                --output tsv)
+              
+              if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+                break
+              fi
+              
+              echo "⚠️ Failed to get URL on attempt $i/3, retrying..."
+              sleep 10
+            done
+            
+            if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+              echo "❌ Failed to get Container App URL after 3 attempts"
+              exit 1
+            fi
+            
+            FULL_URL="https://${URL}"
+            echo "url=$FULL_URL" >> $GITHUB_OUTPUT
+            echo "✅ Container App URL: $FULL_URL"
+
+        - name: Health Check Green Environment
+          run: |
+            echo "🩺 Testing GREEN environment health..."
+            
+            GREEN_URL="${{ steps.get-url.outputs.url }}?label=green"
+            echo "Testing GREEN URL: $GREEN_URL"
+            
+            # Extended health check with more retries for Container Apps cold start
+            for i in {1..12}; do
+              echo "🔍 Health check attempt $i/12 for GREEN environment..."
+              
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 --connect-timeout 30 "$GREEN_URL" || echo "000")
+              echo "HTTP Status: $HTTP_STATUS"
+              
+              if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "302" ]; then
+                echo "✅ GREEN environment health check passed! (Status: $HTTP_STATUS)"
+                break
+              else
+                echo "⚠️ GREEN environment health check failed (Status: $HTTP_STATUS)"
+                if [ $i -eq 12 ]; then
+                  echo "❌ GREEN environment failed all health checks"
+                  echo "📋 Container App status:"
+                  az containerapp show \
+                    --name ${{ secrets.CONTAINER_APP_NAME }} \
+                    --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                    --query "{name: name, status: properties.provisioningState, replicas: properties.template.scale, ingress: properties.configuration.ingress.fqdn}" \
+                    --output table
+                  
+                  echo "📋 GREEN revision logs (last 50 lines):"
+                  az containerapp logs show \
+                    --name ${{ secrets.CONTAINER_APP_NAME }} \
+                    --resource-group ${{ secrets.RESOURCE_GROUP }} \
+                    --revision ${{ steps.deploy-green.outputs.revision_name }} \
+                    --tail 50 || echo "Could not fetch logs"
+                  exit 1
+                fi
+                sleep 45
+              fi
+            done
+
+        - name: Create issue on failure
+          if: ${{ failure() }}
+          uses: actions/github-script@v7
+          with:
+            script: |
+              try {
+                const assignee = "${{ github.actor }}";
+                const authorName = "${{ github.event.head_commit.author.name }}";
+                const authorEmail = "${{ github.event.head_commit.author.email }}";
+                
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `GREEN Environment Deployment Failed in ${context.job}`,
+                  body: `### 🟢❌ GREEN Environment Deployment Failed\n\n` +
+                        `**Job:** ${context.job}\n` +
+                        `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                        `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                        `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                        `**Container App:** ${{ secrets.CONTAINER_APP_NAME }}\n` +
+                        `**Resource Group:** ${{ secrets.RESOURCE_GROUP }}\n` +
+                        `**Image:** ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${context.sha}\n\n` +
+                        `GREEN environment deployment failed. Blue-green deployment halted.`,
+                  assignees: [assignee],
+                  labels: ['ci-failure', 'blue-green-deployment', 'urgent']
+                });
+              } catch (error) {
+                console.error('Error creating issue:', error);
+                core.setFailed(`Failed to create issue: ${error.message}`);
+              }
+
+        - name: Slack Notification on Failure
+          if: ${{ failure() }}
+          uses: act10ns/slack@v2.1.0
+          with:
+            channel: '#githubaction'
+            status: ${{ job.status }}
+            text: "🟢❌ GREEN Environment Deployment Failed in ${{ github.repository }}"
+            fields: |
+              [
+                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+                {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
+                {"title": "Job", "value": "${{ github.job }}", "short": true},
+                {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
+                {"title": "Commit", "value": "${{ github.sha }}", "short": true},
+                {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
+                {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": false}
+              ]
+            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
   owasp-zap-baseline-scan:
     needs: docker-build-test
     runs-on: ubuntu-latest
@@ -1143,976 +1593,854 @@ jobs:
               {"title": "📋 Coverage", "value": "OWASP Top 10 + Security Headers", "short": true}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View Detailed Report>"
-
   jmeter-load-test:
-      needs: [deploy-green-environment, owasp-zap-baseline-scan]
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      runs-on: ubuntu-latest
-      timeout-minutes: 45
-      
-      steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
-
-        - name: Install Java and JMeter (Fixed)
-          run: |
-            # Install Java
-            sudo apt-get update
-            sudo apt-get install -y openjdk-17-jre-headless wget
-            
-            # Download and install JMeter from Apache archive
-            wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.2.tgz
-            tar -xzf apache-jmeter-5.6.2.tgz
-            sudo mv apache-jmeter-5.6.2 /opt/jmeter
-            sudo ln -sf /opt/jmeter/bin/jmeter /usr/local/bin/jmeter
-            
-            # Verify installation
-            jmeter --version
-            java -version
-
-        - name: Azure Login
-          uses: azure/login@v2
-          with:
-            creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-        - name: Get Container App URL
-          id: get-app-url
-          run: |
-            echo "Retrieving Container App URL..."
-            
-            for attempt in {1..3}; do
-              URL=$(az containerapp show \
-                --name ${{ env.CONTAINER_APP_NAME }} \
-                --resource-group ${{ env.RESOURCE_GROUP }} \
-                --query "properties.configuration.ingress.fqdn" \
-                --output tsv 2>/dev/null || echo "")
-              
-              if [ -n "$URL" ] && [ "$URL" != "null" ]; then
-                FULL_URL="https://${URL}"
-                echo "app_url=$FULL_URL" >> $GITHUB_OUTPUT
-                echo "Target URL for load testing: $FULL_URL"
-                
-                # Extract host and set port
-                HOST=$(echo "$URL" | sed 's|^https\?://||')
-                echo "target_host=$HOST" >> $GITHUB_OUTPUT
-                echo "target_port=443" >> $GITHUB_OUTPUT
-                break
-              fi
-              
-              echo "Attempt $attempt/3 failed to get URL, retrying..."
-              sleep 5
-            done
-            
-            if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-              echo "Failed to get Container App URL after 3 attempts"
-              exit 1
-            fi
-
-        - name: Verify application is accessible
-          run: |
-            echo "Testing application connectivity..."
-            APP_URL="${{ steps.get-app-url.outputs.app_url }}"
-            
-            for i in {1..5}; do
-              echo "Connectivity test attempt $i/5..."
-              if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
-                echo "✅ Application is accessible"
-                break
-              else
-                echo "❌ Application not accessible (attempt $i/5)"
-                if [ $i -eq 5 ]; then
-                  echo "Application connectivity test failed after 5 attempts"
-                  exit 1
-                fi
-                sleep 10
-              fi
-            done
-
-        - name: Wait for Application Readiness
-          run: |
-            echo "Waiting for application to be ready..."
-            APP_URL="${{ steps.get-app-url.outputs.app_url }}"
-            
-            for i in {1..10}; do
-              echo "Readiness check $i/10..."
-              
-              # More comprehensive health check
-              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-                --max-time 30 \
-                --connect-timeout 15 \
-                "$APP_URL" 2>/dev/null || echo "000")
-              
-              # Also check if we get any response body
-              RESPONSE_BODY=$(curl -s --max-time 30 "$APP_URL" | head -c 100 || echo "NO_RESPONSE")
-              
-              echo "HTTP Status: $HTTP_STATUS"
-              echo "Response snippet: $RESPONSE_BODY"
-              
-              if [[ "$HTTP_STATUS" =~ ^(200|201|202|204|301|302|307)$ ]] || [ "$RESPONSE_BODY" != "NO_RESPONSE" ]; then
-                echo "✅ Application is ready for load testing!"
-                break
-              else
-                echo "⚠️ Application not ready (Status: $HTTP_STATUS, attempt $i/10)"
-                if [ $i -eq 10 ]; then
-                  echo "❌ Application readiness timeout - cannot proceed with load test"
-                  exit 1
-                fi
-                sleep 15
-              fi
-            done
-
-        - name: Create JMeter test plan
-          run: |
-            cat > load-test.jmx << 'EOF'
-            <?xml version="1.0" encoding="UTF-8"?>
-            <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6">
-              <hashTree>
-                <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="YouTube Blog Converter Load Test">
-                  <boolProp name="TestPlan.functional_mode">false</boolProp>
-                  <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
-                  <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
-                  <elementProp name="TestPlan.user_defined_variables" elementType="Arguments">
-                    <collectionProp name="Arguments.arguments"/>
-                  </elementProp>
-                </TestPlan>
-                <hashTree>
-                  <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Load Test Thread Group">
-                    <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
-                    <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
-                      <boolProp name="LoopController.continue_forever">false</boolProp>
-                      <stringProp name="LoopController.loops">-1</stringProp>
-                    </elementProp>
-                    <stringProp name="ThreadGroup.num_threads">${{ env.JMETER_THREADS }}</stringProp>
-                    <stringProp name="ThreadGroup.ramp_time">${{ env.JMETER_RAMPUP }}</stringProp>
-                    <boolProp name="ThreadGroup.scheduler">true</boolProp>
-                    <stringProp name="ThreadGroup.duration">${{ env.JMETER_DURATION }}</stringProp>
-                    <stringProp name="ThreadGroup.delay">0</stringProp>
-                  </ThreadGroup>
-                  <hashTree>
-                    <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Home Page Request">
-                      <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
-                        <collectionProp name="Arguments.arguments"/>
-                      </elementProp>
-                      <stringProp name="HTTPSampler.domain">${{ steps.get-app-url.outputs.target_host }}</stringProp>
-                      <stringProp name="HTTPSampler.port">443</stringProp>
-                      <stringProp name="HTTPSampler.protocol">https</stringProp>
-                      <stringProp name="HTTPSampler.path">/</stringProp>
-                      <stringProp name="HTTPSampler.method">GET</stringProp>
-                      <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-                      <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
-                      <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
-                      <stringProp name="HTTPSampler.connect_timeout">10000</stringProp>
-                      <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
-                    </HTTPSamplerProxy>
-                    <hashTree>
-                      <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="HTTP 200 Response">
-                        <collectionProp name="Asserion.test_strings">
-                          <stringProp name="49586">200</stringProp>
-                        </collectionProp>
-                        <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
-                        <boolProp name="Assertion.assume_success">false</boolProp>
-                        <intProp name="Assertion.test_type">16</intProp>
-                      </ResponseAssertion>
-                      <hashTree/>
-                    </hashTree>
-                    <ConstantThroughputTimer guiclass="TestBeanGUI" testclass="ConstantThroughputTimer" testname="Throughput Controller">
-                      <intProp name="calcMode">0</intProp>
-                      <doubleProp name="throughput">${{ env.JMETER_TARGET_RPS }}</doubleProp>
-                    </ConstantThroughputTimer>
-                    <hashTree/>
-                    <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="Summary Report">
-                      <boolProp name="ResultCollector.error_logging">false</boolProp>
-                      <objProp>
-                        <name>saveConfig</name>
-                        <value class="SampleSaveConfiguration">
-                          <time>true</time>
-                          <latency>true</latency>
-                          <timestamp>true</timestamp>
-                          <success>true</success>
-                          <label>true</label>
-                          <code>true</code>
-                          <message>true</message>
-                          <threadName>true</threadName>
-                          <dataType>true</dataType>
-                          <encoding>false</encoding>
-                          <assertions>true</assertions>
-                          <subresults>true</subresults>
-                          <responseData>false</responseData>
-                          <samplerData>false</samplerData>
-                          <xml>false</xml>
-                          <fieldNames>true</fieldNames>
-                          <responseHeaders>false</responseHeaders>
-                          <requestHeaders>false</requestHeaders>
-                          <responseDataOnError>false</responseDataOnError>
-                          <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
-                          <assertionsResultsToSave>0</assertionsResultsToSave>
-                          <bytes>true</bytes>
-                          <sentBytes>true</sentBytes>
-                          <url>true</url>
-                          <threadCounts>true</threadCounts>
-                          <idleTime>true</idleTime>
-                          <connectTime>true</connectTime>
-                        </value>
-                      </objProp>
-                      <stringProp name="filename">results.jtl</stringProp>
-                    </ResultCollector>
-                    <hashTree/>
-                  </hashTree>
-                </hashTree>
-              </hashTree>
-            </jmeterTestPlan>
-            EOF
-
-        - name: Debug JMeter test plan
-          run: |
-            echo "JMeter test plan content:"
-            cat load-test.jmx | head -20
-            echo "..."
-            echo "Target host in test plan: ${{ steps.get-app-url.outputs.target_host }}"
-
-        - name: Run JMeter load test with retry and force flag
-          id: run-jmeter
-          run: |
-            echo "Starting JMeter load test..."
-            echo "Target: ${{ steps.get-app-url.outputs.app_url }}"
-            echo "Threads: ${{ env.JMETER_THREADS }}"
-            echo "Ramp-up: ${{ env.JMETER_RAMPUP }}s"
-            echo "Duration: ${{ env.JMETER_DURATION }}s"
-            echo "Target RPS: ${{ env.JMETER_TARGET_RPS }}"
-            
-            # Clean up any existing results file:cite[1]
-            rm -f results.jtl
-            
-            # Run JMeter test with retry mechanism and force flag:cite[1]
-            for attempt in {1..3}; do
-              echo "JMeter test attempt $attempt/3..."
-              
-              # Run JMeter test with force flag to overwrite results file:cite[1]
-              jmeter -n -t load-test.jmx -l results.jtl -j jmeter.log -e -o html-report/ -f
-              
-              # Check if results were generated
-              if [ -f "results.jtl" ] && [ -s "results.jtl" ]; then
-                RECORD_COUNT=$(wc -l < results.jtl)
-                if [ "$RECORD_COUNT" -gt 1 ]; then  # More than just header
-                  echo "✅ JMeter test completed successfully with $((RECORD_COUNT-1)) records"
-                  echo "jmeter_success=true" >> $GITHUB_OUTPUT
-                  break
-                else
-                  echo "⚠️ Results file exists but has no data (attempt $attempt/3)"
-                  # Debug: show JMeter log
-                  if [ -f "jmeter.log" ]; then
-                    echo "JMeter log contents:"
-                    tail -20 jmeter.log
-                  fi
-                fi
-              else
-                echo "❌ Results file not created (attempt $attempt/3)"
-              fi
-              
-              if [ $attempt -lt 3 ]; then
-                echo "Retrying in 10 seconds..."
-                sleep 10
-                # Clean up before retry:cite[1]
-                rm -f results.jtl
-              else
-                echo "❌ All JMeter attempts failed"
-                echo "jmeter_success=false" >> $GITHUB_OUTPUT
-                
-                # Debug: show JMeter log
-                if [ -f "jmeter.log" ]; then
-                  echo "JMeter log contents:"
-                  tail -50 jmeter.log
-                fi
-              fi
-            done
-
-        - name: Analyze JMeter results
-          id: analyze-results
-          if: steps.run-jmeter.outputs.jmeter_success == 'true'
-          run: |
-            echo "Analyzing JMeter results..."
-            
-            if [ ! -f "results.jtl" ]; then
-              echo "Results file not found!"
-              exit 1
-            fi
-            
-            # Check if file has content beyond just headers
-            if [ $(wc -l < results.jtl) -le 1 ]; then
-              echo "Results file exists but has no data beyond headers!"
-              echo "First few lines of results.jtl:"
-              head -5 results.jtl
-              exit 1
-            fi
-            
-            # Skip header line and count records
-            TOTAL_REQUESTS=$(tail -n +2 results.jtl | wc -l)
-            
-            if [ "$TOTAL_REQUESTS" -eq 0 ]; then
-              echo "No test results found!"
-              echo "Contents of results.jtl:"
-              cat results.jtl
-              exit 1
-            fi
-            
-            # Count errors (false in success column)
-            ERROR_COUNT=$(tail -n +2 results.jtl | cut -d',' -f8 | grep -c "false" || echo "0")
-            
-            # Calculate error rate
-            if [ "$TOTAL_REQUESTS" -gt 0 ]; then
-              ERROR_RATE=$(echo "scale=2; $ERROR_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
-            else
-              ERROR_RATE=0
-            fi
-            
-            # Calculate average response time (column 2) - FIXED awk syntax
-            AVG_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | awk '{sum+=$1; count++} END {if(count>0) printf "%.2f", sum/count; else print "0"}')
-            
-            echo "JMETER_TOTAL_REQUESTS=$TOTAL_REQUESTS" >> $GITHUB_ENV
-            echo "JMETER_ERROR_COUNT=$ERROR_COUNT" >> $GITHUB_ENV  
-            echo "JMETER_ERROR_RATE=$ERROR_RATE" >> $GITHUB_ENV
-            echo "JMETER_AVG_RESPONSE_TIME=$AVG_RESPONSE_TIME" >> $GITHUB_ENV
-            
-            echo "JMeter Load Test Results:"
-            echo "========================="
-            echo "Total Requests: $TOTAL_REQUESTS"
-            echo "Errors: $ERROR_COUNT"
-            echo "Error Rate: $ERROR_RATE%"
-            echo "Average Response Time: ${AVG_RESPONSE_TIME}ms"
-            
-            # Performance gate - fail if error rate > 1%
-            if [ $(echo "$ERROR_RATE > 1" | bc -l) -eq 1 ]; then
-              echo "Load test FAILED: Error rate ($ERROR_RATE%) exceeds 1% threshold"
-              echo "load_test_status=failed" >> $GITHUB_OUTPUT
-              exit 1
-            else
-              echo "Load test PASSED: Error rate ($ERROR_RATE%) is within acceptable range"
-              echo "load_test_status=passed" >> $GITHUB_OUTPUT
-            fi
-
-        - name: Handle JMeter failure
-          if: steps.run-jmeter.outputs.jmeter_success != 'true'
-          run: |
-            echo "❌ JMeter test failed to generate results"
-            echo "Checking for possible issues..."
-            
-            # Check if application is still accessible
-            APP_URL="${{ steps.get-app-url.outputs.app_url }}"
-            if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
-              echo "✅ Application is still accessible"
-            else
-              echo "❌ Application is not accessible - this may be the root cause"
-            fi
-            
-            # Check disk space
-            echo "Disk space:"
-            df -h
-            
-            # Check memory
-            echo "Memory usage:"
-            free -h
-            
-            exit 1
-
-        - name: Upload JMeter reports
-          if: always()
-          uses: actions/upload-artifact@v4
-          with:
-            name: jmeter-reports-${{ github.run_number }}
-            path: |
-              results.jtl
-              jmeter.log
-              html-report/
-              load-test.jmx
-            retention-days: 30
-
-        - name: Create Load Test Summary
-          if: always()
-          run: |
-            # Check if we have results to summarize
-            if [ -f "results.jtl" ] && [ $(wc -l < results.jtl) -gt 1 ]; then
-              cat > load-test-summary.md << EOF
-            # JMeter Load Test Results
-            
-            **Test Date:** $(date -u)
-            **Target:** ${{ steps.get-app-url.outputs.app_url }}
-            **Test Configuration:**
-            - Threads: ${{ env.JMETER_THREADS }}
-            - Ramp-up: ${{ env.JMETER_RAMPUP }}s  
-            - Duration: ${{ env.JMETER_DURATION }}s
-            - Target RPS: ${{ env.JMETER_TARGET_RPS }}
-            
-            ## Results Summary
-            
-            | Metric | Value |
-            |--------|-------|
-            | Total Requests | ${{ env.JMETER_TOTAL_REQUESTS }} |
-            | Failed Requests | ${{ env.JMETER_ERROR_COUNT }} |
-            | Error Rate | ${{ env.JMETER_ERROR_RATE }}% |
-            | Average Response Time | ${{ env.JMETER_AVG_RESPONSE_TIME }}ms |
-            | Status | $([ "${{ steps.analyze-results.outputs.load_test_status }}" = "passed" ] && echo "PASSED" || echo "FAILED") |
-            
-            ## Performance Gate
-            - **Threshold:** Error rate must be ≤ 1%
-            - **Result:** $([ "${{ steps.analyze-results.outputs.load_test_status }}" = "passed" ] && echo "✅ PASSED" || echo "❌ FAILED")
-            EOF
-            else
-              cat > load-test-summary.md << EOF
-            # JMeter Load Test Failed
-            
-            **Test Date:** $(date -u)
-            **Target:** ${{ steps.get-app-url.outputs.app_url }}
-            **Status:** ❌ FAILED
-            
-            ## Error Details
-            JMeter failed to generate any test results. This could be due to:
-            - Application not responding to requests
-            - Network connectivity issues
-            - JMeter configuration problems
-            
-            Please check the JMeter logs and application status for more details.
-            EOF
-            fi
-
-        - name: Create issue on failure
-          if: ${{ failure() }}
-          uses: actions/github-script@v7
-          with:
-            script: |
-              try {
-                const assignee = "${{ github.actor }}";
-                const authorName = "${{ github.event.head_commit.author.name }}";
-                const authorEmail = "${{ github.event.head_commit.author.email }}";
-                
-                let bodyMessage = `### Load Test Failed\n\n` +
-                  `**Job:** ${context.job}\n` +
-                  `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                  `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                  `**Commit Author:** ${authorName} (${authorEmail})\n\n`;
-                
-                if ("${{ steps.run-jmeter.outputs.jmeter_success }}" === "true") {
-                  bodyMessage += `**Performance Results:**\n` +
-                    `- Error Rate: ${{ env.JMETER_ERROR_RATE }}%\n` +
-                    `- Total Requests: ${{ env.JMETER_TOTAL_REQUESTS }}\n` +
-                    `- Failed Requests: ${{ env.JMETER_ERROR_COUNT }}\n` +
-                    `- Average Response Time: ${{ env.JMETER_AVG_RESPONSE_TIME }}ms\n\n` +
-                    `Load test failed performance criteria. Please investigate.`;
-                } else {
-                  bodyMessage += `**Error:** JMeter failed to generate any test results.\n\n` +
-                    `This could be due to:\n` +
-                    `- Application not responding to requests\n` +
-                    `- Network connectivity issues\n` +
-                    `- JMeter configuration problems\n\n` +
-                    `Please check the uploaded JMeter logs for details.`;
-                }
-                
-                await github.rest.issues.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  title: `Load Test Failed in ${context.job}`,
-                  body: bodyMessage,
-                  assignees: [assignee],
-                  labels: ['ci-failure', 'performance', 'load-test']
-                });
-              } catch (error) {
-                console.error('Error creating issue:', error);
-                core.setFailed(`Failed to create issue: ${error.message}`);
-              }
-
-        - name: Slack Notification on Failure
-          if: ${{ failure() }}
-          uses: act10ns/slack@v2.1.0
-          with:
-            channel: '#githubaction'
-            status: ${{ job.status }}
-            text: "Load Test Failed in ${{ github.repository }}"
-            fields: |
-              [
-                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-                {"title": "Error Rate", "value": "${{ env.JMETER_ERROR_RATE }}%", "short": true},
-                {"title": "Total Requests", "value": "${{ env.JMETER_TOTAL_REQUESTS }}", "short": true},
-                {"title": "Failed Requests", "value": "${{ env.JMETER_ERROR_COUNT }}", "short": true},
-                {"title": "Avg Response Time", "value": "${{ env.JMETER_AVG_RESPONSE_TIME }}ms", "short": true},
-                {"title": "Target", "value": "${{ steps.get-app-url.outputs.app_url }}", "short": false}
-              ]
-            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
-
-        - name: Slack Notification on Success
-          if: ${{ success() }}
-          uses: act10ns/slack@v2.1.0
-          with:
-            channel: '#githubaction'
-            status: 'success'
-            text: "Load Test Passed in ${{ github.repository }}"
-            fields: |
-              [
-                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-                {"title": "Error Rate", "value": "${{ env.JMETER_ERROR_RATE }}%", "short": true},
-                {"title": "Total Requests", "value": "${{ env.JMETER_TOTAL_REQUESTS }}", "short": true},
-                {"title": "Failed Requests", "value": "${{ env.JMETER_ERROR_COUNT }}", "short": true},
-                {"title": "Avg Response Time", "value": "${{ env.JMETER_AVG_RESPONSE_TIME }}ms", "short": true},
-                {"title": "Performance Status", "value": "✅ PASSED", "short": true},
-                {"title": "Target", "value": "${{ steps.get-app-url.outputs.app_url }}", "short": false}
-              ]
-            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Reports>"
-
-  # 🖋️ CONTAINER SIGNING WITH COSIGN
-  # 🖋️ CONTAINER SIGNING WITH COSIGN
-  sign-container:
-    needs: [docker-build-test, owasp-zap-baseline-scan]
+    needs: [deploy-green-environment, owasp-zap-baseline-scan]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 45
+    
     steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.6.0   # <- upgraded installer
-        with:
-          cosign-release: v2.2.4
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Sign container image with Cosign
-        env:
-          COSIGN_EXPERIMENTAL: 1
+      - name: Install Java and JMeter (Production-Ready)
         run: |
-          IMAGE="${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}"
-          docker pull "$IMAGE"
+          # Install Java 17 (LTS)
+          sudo apt-get update
+          sudo apt-get install -y openjdk-17-jre-headless wget bc
+          
+          # Download and install JMeter from Apache archive
+          JMETER_VERSION="5.6.2"
+          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz
+          tar -xzf apache-jmeter-${JMETER_VERSION}.tgz
+          sudo mv apache-jmeter-${JMETER_VERSION} /opt/jmeter
+          sudo ln -sf /opt/jmeter/bin/jmeter /usr/local/bin/jmeter
+          
+          # Clean up downloaded archive
+          rm apache-jmeter-${JMETER_VERSION}.tgz
+          
+          # Verify installation
+          echo "✅ JMeter Installation:"
+          jmeter --version
+          echo "✅ Java Installation:"
+          java -version
+          
+          # Set JMeter heap size for better performance
+          export JVM_ARGS="-Xms512m -Xmx2048m"
+          echo "JVM_ARGS=$JVM_ARGS" >> $GITHUB_ENV
 
-          for i in {1..3}; do
-            echo "Signing attempt $i/3..."
-            if cosign sign --yes "$IMAGE"; then
-              echo "Container signed successfully"
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Container App URL
+        id: get-app-url
+        run: |
+          echo "🔍 Retrieving Container App URL for load testing..."
+          
+          for attempt in {1..3}; do
+            URL=$(az containerapp show \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --query "properties.configuration.ingress.fqdn" \
+              --output tsv 2>/dev/null || echo "")
+            
+            if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+              FULL_URL="https://${URL}"
+              echo "app_url=$FULL_URL" >> $GITHUB_OUTPUT
+              echo "✅ Target URL for load testing: $FULL_URL"
+              
+              # Extract host and set port for JMeter configuration
+              HOST=$(echo "$URL" | sed 's|^https\?://||')
+              echo "target_host=$HOST" >> $GITHUB_OUTPUT
+              echo "target_port=443" >> $GITHUB_OUTPUT
+              echo "target_protocol=https" >> $GITHUB_OUTPUT
+              break
+            fi
+            
+            echo "⚠️ Attempt $attempt/3 failed to get URL, retrying..."
+            sleep 5
+          done
+          
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "❌ Failed to get Container App URL after 3 attempts"
+            exit 1
+          fi
+
+      - name: Verify Application Connectivity
+        run: |
+          echo "🔍 Testing application connectivity before load testing..."
+          APP_URL="${{ steps.get-app-url.outputs.app_url }}"
+          
+          for i in {1..5}; do
+            echo "🔍 Connectivity test attempt $i/5..."
+            
+            # Test basic connectivity
+            if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
+              echo "✅ Application is accessible"
+              
+              # Get response time baseline
+              RESPONSE_TIME=$(curl -o /dev/null -s -w "%{time_total}" "$APP_URL")
+              echo "📊 Baseline response time: ${RESPONSE_TIME}s"
               break
             else
-              echo "Signing attempt $i failed, retrying..."
+              echo "❌ Application not accessible (attempt $i/5)"
+              if [ $i -eq 5 ]; then
+                echo "❌ Application connectivity test failed after 5 attempts"
+                exit 1
+              fi
               sleep 10
-            fi
-
-            if [ $i -eq 3 ]; then
-              echo "All signing attempts failed, but continuing pipeline..."
-              echo "SIGNING_FAILED=true" >> "$GITHUB_ENV"
             fi
           done
 
-      - name: Generate and attach SBOM
-        if: env.SIGNING_FAILED != 'true'
+      - name: Wait for Application Readiness
         run: |
-          IMAGE="${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}"
-          PAYLOAD=$(cat <<EOF
-          {
-            "spdxVersion": "SPDX-2.3",
-            "creationInfo": { "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)" },
-            "name": "${{ env.CONTAINER_IMAGE }}:${{ github.sha }}",
-            "packages": []
-          }
+          echo "⏳ Ensuring application is ready for load testing..."
+          APP_URL="${{ steps.get-app-url.outputs.app_url }}"
+          
+          for i in {1..10}; do
+            echo "🔍 Readiness check $i/10..."
+            
+            # Comprehensive health check
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 30 \
+              --connect-timeout 15 \
+              "$APP_URL" 2>/dev/null || echo "000")
+            
+            # Check response body for content
+            RESPONSE_BODY=$(curl -s --max-time 30 "$APP_URL" | head -c 200 || echo "NO_RESPONSE")
+            
+            echo "📊 HTTP Status: $HTTP_STATUS"
+            echo "📄 Response preview: ${RESPONSE_BODY:0:50}..."
+            
+            if [[ "$HTTP_STATUS" =~ ^(200|201|202|204|301|302|307)$ ]] && [ "$RESPONSE_BODY" != "NO_RESPONSE" ]; then
+              echo "✅ Application is ready for load testing!"
+              echo "🎯 Target validated: $APP_URL"
+              break
+            else
+              echo "⚠️ Application not ready (Status: $HTTP_STATUS, attempt $i/10)"
+              if [ $i -eq 10 ]; then
+                echo "❌ Application readiness timeout - cannot proceed with load test"
+                exit 1
+              fi
+              sleep 15
+            fi
+          done
+
+      - name: Create Production JMeter Test Plan
+        run: |
+          echo "📝 Creating production-ready JMeter test plan..."
+          
+          cat > load-test.jmx << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6">
+            <hashTree>
+              <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="YouTube Blog Converter Production Load Test">
+                <boolProp name="TestPlan.functional_mode">false</boolProp>
+                <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
+                <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+                <elementProp name="TestPlan.user_defined_variables" elementType="Arguments">
+                  <collectionProp name="Arguments.arguments">
+                    <elementProp name="TARGET_HOST" elementType="Argument">
+                      <stringProp name="Argument.name">TARGET_HOST</stringProp>
+                      <stringProp name="Argument.value">${{ steps.get-app-url.outputs.target_host }}</stringProp>
+                      <stringProp name="Argument.metadata">=</stringProp>
+                    </elementProp>
+                    <elementProp name="TARGET_PORT" elementType="Argument">
+                      <stringProp name="Argument.name">TARGET_PORT</stringProp>
+                      <stringProp name="Argument.value">443</stringProp>
+                      <stringProp name="Argument.metadata">=</stringProp>
+                    </elementProp>
+                    <elementProp name="TARGET_PROTOCOL" elementType="Argument">
+                      <stringProp name="Argument.name">TARGET_PROTOCOL</stringProp>
+                      <stringProp name="Argument.value">https</stringProp>
+                      <stringProp name="Argument.metadata">=</stringProp>
+                    </elementProp>
+                  </collectionProp>
+                </elementProp>
+              </TestPlan>
+              <hashTree>
+                <!-- Thread Group with Fixed Configuration -->
+                <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Load Test Thread Group">
+                  <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+                  <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
+                    <boolProp name="LoopController.continue_forever">false</boolProp>
+                    <stringProp name="LoopController.loops">20</stringProp>
+                  </elementProp>
+                  <stringProp name="ThreadGroup.num_threads">${{ env.JMETER_THREADS }}</stringProp>
+                  <stringProp name="ThreadGroup.ramp_time">${{ env.JMETER_RAMPUP }}</stringProp>
+                  <boolProp name="ThreadGroup.scheduler">false</boolProp>
+                  <stringProp name="ThreadGroup.duration"></stringProp>
+                  <stringProp name="ThreadGroup.delay">0</stringProp>
+                  <stringProp name="ThreadGroup.delayedStart">false</stringProp>
+                </ThreadGroup>
+                <hashTree>
+                  <!-- HTTP Request Defaults -->
+                  <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="HTTP Request Defaults">
+                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+                      <collectionProp name="Arguments.arguments"/>
+                    </elementProp>
+                    <stringProp name="HTTPSampler.domain">${TARGET_HOST}</stringProp>
+                    <stringProp name="HTTPSampler.port">${TARGET_PORT}</stringProp>
+                    <stringProp name="HTTPSampler.protocol">${TARGET_PROTOCOL}</stringProp>
+                    <stringProp name="HTTPSampler.contentEncoding"></stringProp>
+                    <stringProp name="HTTPSampler.path"></stringProp>
+                    <stringProp name="HTTPSampler.implementation">HttpClient4</stringProp>
+                    <stringProp name="HTTPSampler.connect_timeout">10000</stringProp>
+                    <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+                  </ConfigTestElement>
+                  <hashTree/>
+                  
+                  <!-- HTTP Cookie Manager -->
+                  <CookieManager guiclass="CookiePanel" testclass="CookieManager" testname="HTTP Cookie Manager">
+                    <collectionProp name="CookieManager.cookies"/>
+                    <boolProp name="CookieManager.clearEachIteration">false</boolProp>
+                    <boolProp name="CookieManager.controlledByThreadGroup">false</boolProp>
+                  </CookieManager>
+                  <hashTree/>
+                  
+                  <!-- HTTP Cache Manager -->
+                  <CacheManager guiclass="CacheManagerGui" testclass="CacheManager" testname="HTTP Cache Manager">
+                    <boolProp name="clearEachIteration">false</boolProp>
+                    <boolProp name="useExpires">true</boolProp>
+                    <boolProp name="CacheManager.controlledByThread">false</boolProp>
+                  </CacheManager>
+                  <hashTree/>
+                  
+                  <!-- Home Page Request -->
+                  <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="01 - Home Page">
+                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+                      <collectionProp name="Arguments.arguments"/>
+                    </elementProp>
+                    <stringProp name="HTTPSampler.path">/</stringProp>
+                    <stringProp name="HTTPSampler.method">GET</stringProp>
+                    <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+                    <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+                    <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+                    <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+                    <stringProp name="HTTPSampler.embedded_url_re"></stringProp>
+                    <stringProp name="HTTPSampler.implementation">HttpClient4</stringProp>
+                  </HTTPSamplerProxy>
+                  <hashTree>
+                    <!-- Response Assertion -->
+                    <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="HTTP 200 Response">
+                      <collectionProp name="Asserion.test_strings">
+                        <stringProp name="49586">200</stringProp>
+                      </collectionProp>
+                      <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+                      <boolProp name="Assertion.assume_success">false</boolProp>
+                      <intProp name="Assertion.test_type">16</intProp>
+                    </ResponseAssertion>
+                    <hashTree/>
+                    
+                    <!-- Duration Assertion -->
+                    <DurationAssertion guiclass="DurationAssertionGui" testclass="DurationAssertion" testname="Response Time Assertion">
+                      <stringProp name="DurationAssertion.duration">5000</stringProp>
+                    </DurationAssertion>
+                    <hashTree/>
+                  </hashTree>
+                  
+                  <!-- Static Assets Request (if needed) -->
+                  <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="02 - Static Assets" enabled="false">
+                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+                      <collectionProp name="Arguments.arguments"/>
+                    </elementProp>
+                    <stringProp name="HTTPSampler.path">/static/css/style.css</stringProp>
+                    <stringProp name="HTTPSampler.method">GET</stringProp>
+                    <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+                    <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+                    <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+                  </HTTPSamplerProxy>
+                  <hashTree/>
+                  
+                  <!-- Think Time between requests -->
+                  <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="Think Time">
+                    <stringProp name="ConstantTimer.delay">1000</stringProp>
+                    <stringProp name="RandomTimer.range">2000</stringProp>
+                  </UniformRandomTimer>
+                  <hashTree/>
+                  
+                  <!-- Result Collector -->
+                  <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="Summary Report">
+                    <boolProp name="ResultCollector.error_logging">false</boolProp>
+                    <objProp>
+                      <name>saveConfig</name>
+                      <value class="SampleSaveConfiguration">
+                        <time>true</time>
+                        <latency>true</latency>
+                        <timestamp>true</timestamp>
+                        <success>true</success>
+                        <label>true</label>
+                        <code>true</code>
+                        <message>true</message>
+                        <threadName>true</threadName>
+                        <dataType>true</dataType>
+                        <encoding>false</encoding>
+                        <assertions>true</assertions>
+                        <subresults>true</subresults>
+                        <responseData>false</responseData>
+                        <samplerData>false</samplerData>
+                        <xml>false</xml>
+                        <fieldNames>true</fieldNames>
+                        <responseHeaders>false</responseHeaders>
+                        <requestHeaders>false</requestHeaders>
+                        <responseDataOnError>false</responseDataOnError>
+                        <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+                        <assertionsResultsToSave>0</assertionsResultsToSave>
+                        <bytes>true</bytes>
+                        <sentBytes>true</sentBytes>
+                        <url>true</url>
+                        <threadCounts>true</threadCounts>
+                        <idleTime>true</idleTime>
+                        <connectTime>true</connectTime>
+                      </value>
+                    </objProp>
+                    <stringProp name="filename">results.jtl</stringProp>
+                  </ResultCollector>
+                  <hashTree/>
+                </hashTree>
+              </hashTree>
+            </hashTree>
+          </jmeterTestPlan>
           EOF
-          )
+          
+          echo "✅ JMeter test plan created successfully"
 
-          for i in {1..3}; do
-            echo "SBOM generation attempt $i/3..."
-            if cosign attest --yes \
-              --predicate-type="https://spdx.dev/Document" \
-              --predicate=<(echo "$PAYLOAD") "$IMAGE"; then
-              echo "SBOM attestation created successfully"
-              break
-            else
-              echo "SBOM attempt $i failed, retrying..."
-              sleep 10
-            fi
-
-            if [ $i -eq 3 ]; then
-              echo "SBOM generation failed, but continuing..."
-            fi
-          done
-
-      - name: Verify container signature
-        if: env.SIGNING_FAILED != 'true'
+      - name: Debug JMeter Configuration
         run: |
-          IMAGE="${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}"
-          cosign verify "$IMAGE" \
-            --certificate-identity-regexp=".*" \
-            --certificate-oidc-issuer-regexp=".*" \
-            || echo "Verification failed but continuing..."
+          echo "🔍 JMeter Test Configuration Debug:"
+          echo "=================================="
+          echo "Target Host: ${{ steps.get-app-url.outputs.target_host }}"
+          echo "Target URL: ${{ steps.get-app-url.outputs.app_url }}"
+          echo "Target Port: ${{ steps.get-app-url.outputs.target_port }}"
+          echo "Target Protocol: ${{ steps.get-app-url.outputs.target_protocol }}"
+          echo "Threads: ${{ env.JMETER_THREADS }}"
+          echo "Ramp-up: ${{ env.JMETER_RAMPUP }}s"
+          echo "Loops per thread: 20"
+          echo "Total expected requests: $((${{ env.JMETER_THREADS }} * 20))"
+          echo ""
+          echo "📄 Test plan validation:"
+          head -20 load-test.jmx
+          echo "..."
 
-      - name: Create issue on failure
+      - name: Run JMeter Load Test (Production)
+        id: run-jmeter
+        run: |
+          echo "🚀 Starting production JMeter load test..."
+          echo "============================================"
+          echo "🎯 Target: ${{ steps.get-app-url.outputs.app_url }}"
+          echo "🧵 Threads: ${{ env.JMETER_THREADS }}"
+          echo "⏰ Ramp-up: ${{ env.JMETER_RAMPUP }}s"
+          echo "🔄 Loops: 20 per thread"
+          echo "📊 Expected total requests: $((${{ env.JMETER_THREADS }} * 20))"
+          echo ""
+          
+          # Clean up any existing results
+          rm -f results.jtl jmeter.log
+          
+          # Run JMeter test
+          echo "▶️  Executing JMeter test..."
+          
+          # Use timeout to prevent hanging
+          timeout 900 jmeter \
+            -n -t load-test.jmx \
+            -l results.jtl \
+            -j jmeter.log \
+            -Jjmeter.save.saveservice.output_format=csv \
+            -Jjmeter.save.saveservice.response_data=false \
+            -Jjmeter.save.saveservice.samplerData=false \
+            -Jjmeter.reportgenerator.overall_granularity=60000 \
+            || JMETER_EXIT_CODE=$?
+          
+          # Check exit code
+          if [ "${JMETER_EXIT_CODE:-0}" -eq 124 ]; then
+            echo "⚠️ JMeter test timed out after 15 minutes"
+          elif [ "${JMETER_EXIT_CODE:-0}" -ne 0 ]; then
+            echo "⚠️ JMeter test failed with exit code: ${JMETER_EXIT_CODE:-0}"
+          fi
+          
+          # Check if results were generated
+          if [ -f "results.jtl" ] && [ -s "results.jtl" ]; then
+            RECORD_COUNT=$(wc -l < results.jtl)
+            if [ "$RECORD_COUNT" -gt 1 ]; then  # More than just header
+              echo "✅ JMeter test completed with $((RECORD_COUNT-1)) records"
+              echo "jmeter_success=true" >> $GITHUB_OUTPUT
+              
+              # Show first few results for debugging
+              echo "📊 Sample results:"
+              head -5 results.jtl
+              
+              # Generate HTML report separately
+              echo "📈 Generating HTML report..."
+              jmeter -g results.jtl -o html-report/ || echo "⚠️ HTML report generation failed"
+              
+            else
+              echo "❌ Results file exists but has no data"
+              echo "jmeter_success=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ Results file not created or empty"
+            echo "jmeter_success=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Show JMeter log if test failed
+          if [ "${{ steps.run-jmeter.outputs.jmeter_success }}" != "true" ]; then
+            echo "📋 JMeter log (last 50 lines):"
+            tail -50 jmeter.log 2>/dev/null || echo "No log file found"
+          fi
+
+      - name: Analyze Load Test Results
+        id: analyze-results
+        if: steps.run-jmeter.outputs.jmeter_success == 'true'
+        run: |
+          echo "📊 Analyzing JMeter load test results..."
+          echo "======================================="
+          
+          if [ ! -f "results.jtl" ]; then
+            echo "❌ Results file not found!"
+            exit 1
+          fi
+          
+          # Verify file has content beyond headers
+          TOTAL_LINES=$(wc -l < results.jtl)
+          if [ "$TOTAL_LINES" -le 1 ]; then
+            echo "❌ Results file has no data beyond headers!"
+            echo "📄 File contents:"
+            cat results.jtl
+            exit 1
+          fi
+          
+          # Parse results (skip header line)
+          TOTAL_REQUESTS=$(tail -n +2 results.jtl | wc -l)
+          
+          if [ "$TOTAL_REQUESTS" -eq 0 ]; then
+            echo "❌ No test results found in file!"
+            exit 1
+          fi
+          
+          echo "📈 Processing $TOTAL_REQUESTS requests..."
+          
+          # Calculate metrics (assuming CSV format: timeStamp,elapsed,label,responseCode,success,...)
+          # Success column is typically column 5 (index 5)
+          ERROR_COUNT=$(tail -n +2 results.jtl | cut -d',' -f5 | grep -c "false" || echo "0")
+          SUCCESS_COUNT=$((TOTAL_REQUESTS - ERROR_COUNT))
+          
+          # Calculate error rate
+          if [ "$TOTAL_REQUESTS" -gt 0 ]; then
+            ERROR_RATE=$(echo "scale=2; $ERROR_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
+            SUCCESS_RATE=$(echo "scale=2; $SUCCESS_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
+          else
+            ERROR_RATE=0
+            SUCCESS_RATE=0
+          fi
+          
+          # Calculate response times (elapsed time is typically column 2)
+          AVG_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | awk '{sum+=$1; count++} END {if(count>0) printf "%.2f", sum/count; else print "0"}')
+          MIN_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | head -1)
+          MAX_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | tail -1)
+          
+          # Calculate 95th percentile
+          PERCENTILE_95=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | awk '{all[NR] = $0} END{print all[int(NR*0.95)]}')
+          
+          # Calculate throughput (requests per second)
+          FIRST_TIMESTAMP=$(tail -n +2 results.jtl | head -1 | cut -d',' -f1)
+          LAST_TIMESTAMP=$(tail -n +2 results.jtl | tail -1 | cut -d',' -f1)
+          
+          if [ "$FIRST_TIMESTAMP" != "$LAST_TIMESTAMP" ]; then
+            DURATION_MS=$((LAST_TIMESTAMP - FIRST_TIMESTAMP))
+            DURATION_SEC=$(echo "scale=2; $DURATION_MS / 1000" | bc -l)
+            THROUGHPUT=$(echo "scale=2; $TOTAL_REQUESTS / $DURATION_SEC" | bc -l)
+          else
+            DURATION_SEC=1
+            THROUGHPUT=$TOTAL_REQUESTS
+          fi
+          
+          # Set environment variables for later use
+          echo "JMETER_TOTAL_REQUESTS=$TOTAL_REQUESTS" >> $GITHUB_ENV
+          echo "JMETER_SUCCESS_COUNT=$SUCCESS_COUNT" >> $GITHUB_ENV
+          echo "JMETER_ERROR_COUNT=$ERROR_COUNT" >> $GITHUB_ENV
+          echo "JMETER_ERROR_RATE=$ERROR_RATE" >> $GITHUB_ENV
+          echo "JMETER_SUCCESS_RATE=$SUCCESS_RATE" >> $GITHUB_ENV
+          echo "JMETER_AVG_RESPONSE_TIME=$AVG_RESPONSE_TIME" >> $GITHUB_ENV
+          echo "JMETER_MIN_RESPONSE_TIME=$MIN_RESPONSE_TIME" >> $GITHUB_ENV
+          echo "JMETER_MAX_RESPONSE_TIME=$MAX_RESPONSE_TIME" >> $GITHUB_ENV
+          echo "JMETER_95TH_PERCENTILE=$PERCENTILE_95" >> $GITHUB_ENV
+          echo "JMETER_THROUGHPUT=$THROUGHPUT" >> $GITHUB_ENV
+          echo "JMETER_DURATION_SEC=$DURATION_SEC" >> $GITHUB_ENV
+          
+          # Display results
+          echo ""
+          echo "🎯 Load Test Results Summary:"
+          echo "============================"
+          echo "📊 Total Requests: $TOTAL_REQUESTS"
+          echo "✅ Successful: $SUCCESS_COUNT ($SUCCESS_RATE%)"
+          echo "❌ Failed: $ERROR_COUNT ($ERROR_RATE%)"
+          echo "⚡ Throughput: ${THROUGHPUT} req/sec"
+          echo "⏱️  Test Duration: ${DURATION_SEC}s"
+          echo ""
+          echo "📈 Response Times:"
+          echo "=================="
+          echo "📊 Average: ${AVG_RESPONSE_TIME}ms"
+          echo "⚡ Minimum: ${MIN_RESPONSE_TIME}ms"
+          echo "🔥 Maximum: ${MAX_RESPONSE_TIME}ms"
+          echo "📈 95th Percentile: ${PERCENTILE_95}ms"
+          echo ""
+          
+          # Performance gate evaluation
+          PERFORMANCE_PASSED=true
+          
+          echo "🚦 Performance Gate Evaluation:"
+          echo "==============================="
+          
+          # Check error rate threshold
+          if [ $(echo "$ERROR_RATE > 1" | bc -l) -eq 1 ]; then
+            echo "❌ FAIL: Error rate ($ERROR_RATE%) exceeds 1% threshold"
+            PERFORMANCE_PASSED=false
+          else
+            echo "✅ PASS: Error rate ($ERROR_RATE%) is within acceptable range (≤1%)"
+          fi
+          
+          # Check average response time threshold
+          if [ $(echo "$AVG_RESPONSE_TIME > 2000" | bc -l) -eq 1 ]; then
+            echo "❌ FAIL: Average response time (${AVG_RESPONSE_TIME}ms) exceeds 2000ms threshold"
+            PERFORMANCE_PASSED=false
+          else
+            echo "✅ PASS: Average response time (${AVG_RESPONSE_TIME}ms) is within acceptable range (≤2000ms)"
+          fi
+          
+          # Check 95th percentile threshold
+          if [ -n "$PERCENTILE_95" ] && [ $(echo "$PERCENTILE_95 > 5000" | bc -l) -eq 1 ]; then
+            echo "❌ FAIL: 95th percentile response time (${PERCENTILE_95}ms) exceeds 5000ms threshold"
+            PERFORMANCE_PASSED=false
+          else
+            echo "✅ PASS: 95th percentile response time (${PERCENTILE_95}ms) is within acceptable range (≤5000ms)"
+          fi
+          
+          # Check minimum throughput
+          if [ $(echo "$THROUGHPUT < 10" | bc -l) -eq 1 ]; then
+            echo "❌ FAIL: Throughput (${THROUGHPUT} req/sec) is below minimum threshold (10 req/sec)"
+            PERFORMANCE_PASSED=false
+          else
+            echo "✅ PASS: Throughput (${THROUGHPUT} req/sec) meets minimum requirements (≥10 req/sec)"
+          fi
+          
+          # Set final result
+          if [ "$PERFORMANCE_PASSED" = true ]; then
+            echo ""
+            echo "🎉 PERFORMANCE GATE: PASSED"
+            echo "load_test_status=passed" >> $GITHUB_OUTPUT
+          else
+            echo ""
+            echo "💥 PERFORMANCE GATE: FAILED"
+            echo "load_test_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Handle JMeter Failure
+        if: steps.run-jmeter.outputs.jmeter_success != 'true'
+        run: |
+          echo "❌ JMeter load test failed to generate results"
+          echo "============================================="
+          echo ""
+          echo "🔍 Investigating possible issues..."
+          
+          # Check application accessibility
+          APP_URL="${{ steps.get-app-url.outputs.app_url }}"
+          echo "🌐 Testing application accessibility:"
+          if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
+            echo "✅ Application is still accessible via HTTP"
+            
+            # Get current response time
+            CURRENT_RT=$(curl -o /dev/null -s -w "%{time_total}" "$APP_URL")
+            echo "📊 Current response time: ${CURRENT_RT}s"
+          else
+            echo "❌ Application is not accessible - this may be the root cause"
+          fi
+          
+          # Check system resources
+          echo ""
+          echo "💾 System Resources:"
+          echo "Disk space:"
+          df -h
+          echo ""
+          echo "Memory usage:"
+          free -h
+          echo ""
+          echo "CPU usage:"
+          top -bn1 | head -5
+          
+          # Check JMeter specific issues
+          echo ""
+          echo "🔧 JMeter Diagnostics:"
+          if [ -f "jmeter.log" ]; then
+            echo "📋 Recent JMeter log entries:"
+            tail -20 jmeter.log
+          else
+            echo "❌ JMeter log file not found"
+          fi
+          
+          # Check test plan
+          echo ""
+          echo "📄 Test Plan Validation:"
+          if [ -f "load-test.jmx" ]; then
+            echo "✅ Test plan file exists ($(wc -l < load-test.jmx) lines)"
+            echo "Target host in test plan: ${{ steps.get-app-url.outputs.target_host }}"
+          else
+            echo "❌ Test plan file missing"
+          fi
+          
+          exit 1
+
+      - name: Upload JMeter Reports and Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmeter-reports-${{ github.run_number }}
+          path: |
+            results.jtl
+            jmeter.log
+            html-report/
+            load-test.jmx
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Create Comprehensive Load Test Summary
+        if: always()
+        run: |
+          echo "📋 Creating comprehensive load test summary..."
+          
+          # Check if we have results to summarize
+          if [ -f "results.jtl" ] && [ $(wc -l < results.jtl) -gt 1 ]; then
+            # Create detailed summary with results
+            cat > load-test-summary.md << EOF
+          # 📊 JMeter Load Test Results
+          
+          **Test Date:** $(date -u)  
+          **Target Application:** ${{ steps.get-app-url.outputs.app_url }}  
+          **Commit:** \`${{ github.sha }}\`  
+          **Workflow Run:** [${{ github.workflow }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ## 🎯 Test Configuration
+          
+          | Parameter | Value |
+          |-----------|-------|
+          | **Threads** | ${{ env.JMETER_THREADS }} |
+          | **Ramp-up Time** | ${{ env.JMETER_RAMPUP }}s |
+          | **Loops per Thread** | 20 |
+          | **Expected Total Requests** | $((${{ env.JMETER_THREADS }} * 20)) |
+          | **Target Host** | ${{ steps.get-app-url.outputs.target_host }} |
+          | **Protocol** | HTTPS |
+          
+          ## 📈 Test Results Summary
+          
+          | Metric | Value | Status |
+          |--------|-------|---------|
+          | **Total Requests** | ${{ env.JMETER_TOTAL_REQUESTS }} | $([ "${{ steps.analyze-results.outputs.load_test_status }}" = "passed" ] && echo "✅" || echo "❌") |
+          | **Successful Requests** | ${{ env.JMETER_SUCCESS_COUNT }} (${{ env.JMETER_SUCCESS_RATE }}%) | $([ $(echo "${{ env.JMETER_ERROR_RATE }} <= 1" | bc -l) -eq 1 ] && echo "✅" || echo "❌") |
+          | **Failed Requests** | ${{ env.JMETER_ERROR_COUNT }} (${{ env.JMETER_ERROR_RATE }}%) | $([ $(echo "${{ env.JMETER_ERROR_RATE }} <= 1" | bc -l) -eq 1 ] && echo "✅" || echo "❌") |
+          | **Throughput** | ${{ env.JMETER_THROUGHPUT }} req/sec | $([ $(echo "${{ env.JMETER_THROUGHPUT }} >= 10" | bc -l) -eq 1 ] && echo "✅" || echo "❌") |
+          | **Test Duration** | ${{ env.JMETER_DURATION_SEC }}s | ✅ |
+          
+          ## ⏱️ Response Time Analysis
+          
+          | Metric | Value | Threshold | Status |
+          |--------|-------|-----------|---------|
+          | **Average Response Time** | ${{ env.JMETER_AVG_RESPONSE_TIME }}ms | ≤ 2000ms | $([ $(echo "${{ env.JMETER_AVG_RESPONSE_TIME }} <= 2000" | bc -l) -eq 1 ] && echo "✅ PASS" || echo "❌ FAIL") |
+          | **Minimum Response Time** | ${{ env.JMETER_MIN_RESPONSE_TIME }}ms | - | ℹ️ |
+          | **Maximum Response Time** | ${{ env.JMETER_MAX_RESPONSE_TIME }}ms | - | ℹ️ |
+          | **95th Percentile** | ${{ env.JMETER_95TH_PERCENTILE }}ms | ≤ 5000ms | $([ -n "${{ env.JMETER_95TH_PERCENTILE }}" ] && [ $(echo "${{ env.JMETER_95TH_PERCENTILE }} <= 5000" | bc -l) -eq 1 ] && echo "✅ PASS" || echo "❌ FAIL") |
+          
+          ## 🚦 Performance Gate Results
+          
+          **Overall Status:** $([ "${{ steps.analyze-results.outputs.load_test_status }}" = "passed" ] && echo "✅ **PASSED**" || echo "❌ **FAILED**")
+          
+          ### Gate Criteria:
+          - ✅ **Error Rate:** Must be ≤ 1%
+          - ✅ **Average Response Time:** Must be ≤ 2000ms  
+          - ✅ **95th Percentile Response Time:** Must be ≤ 5000ms
+          - ✅ **Minimum Throughput:** Must be ≥ 10 req/sec
+          
+          ## 📊 Additional Information
+          
+          - **JMeter Version:** 5.6.2
+          - **Java Version:** OpenJDK 17
+          - **Test Environment:** GitHub Actions (ubuntu-latest)
+          - **Load Pattern:** Gradual ramp-up with sustained load
+          
+          ## 📁 Available Reports
+          
+          - **JTL Results File:** Available in workflow artifacts
+          - **HTML Dashboard:** Available in workflow artifacts  
+          - **JMeter Log:** Available in workflow artifacts
+          - **Test Plan:** Available in workflow artifacts
+          
+          ---
+          *Generated automatically by GitHub Actions workflow*
+          EOF
+          
+          else
+            # Create failure summary
+            cat > load-test-summary.md << EOF
+          # ❌ JMeter Load Test Failed
+          
+          **Test Date:** $(date -u)  
+          **Target Application:** ${{ steps.get-app-url.outputs.app_url }}  
+          **Commit:** \`${{ github.sha }}\`  
+          **Status:** **FAILED**
+          
+          ## 🚨 Failure Details
+          
+          The JMeter load test failed to generate any meaningful results. This could be due to:
+          
+          ### Possible Causes:
+          - **Application Unavailability:** Target application may not be responding
+          - **Network Connectivity Issues:** DNS resolution or network routing problems
+          - **JMeter Configuration Issues:** Test plan or parameter configuration errors
+          - **Resource Constraints:** Insufficient system resources during test execution
+          - **Timeout Issues:** Test execution exceeded expected timeframe
+          
+          ### Troubleshooting Steps:
+          1. **Check Application Status:** Verify the target application is accessible
+          2. **Review JMeter Logs:** Examine jmeter.log for specific error messages
+          3. **Validate Test Plan:** Ensure test plan configuration is correct
+          4. **Check System Resources:** Monitor CPU, memory, and disk usage
+          5. **Network Diagnostics:** Verify DNS resolution and connectivity
+          
+          ## 📋 Test Configuration (Attempted)
+          
+          | Parameter | Value |
+          |-----------|-------|
+          | **Target URL** | ${{ steps.get-app-url.outputs.app_url }} |
+          | **Target Host** | ${{ steps.get-app-url.outputs.target_host }} |
+          | **Threads** | ${{ env.JMETER_THREADS }} |
+          | **Ramp-up Time** | ${{ env.JMETER_RAMPUP }}s |
+          | **Expected Requests** | $((${{ env.JMETER_THREADS }} * 20)) |
+          
+          ## 🔧 Next Steps
+          
+          1. Review the workflow logs for detailed error information
+          2. Check the application deployment status
+          3. Verify network connectivity to the target application
+          4. Consider adjusting test parameters if resource-related
+          5. Re-run the test after addressing identified issues
+          
+          ---
+          *Generated automatically by GitHub Actions workflow*
+          EOF
+          fi
+          
+          echo "✅ Load test summary report created"
+
+      - name: Create GitHub Issue on Load Test Failure
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
-            const assignee = "${{ github.actor }}";
-            const authorName = "${{ github.event.head_commit.author.name }}";
-            const authorEmail = "${{ github.event.head_commit.author.email }}";
+            try {
+              const assignee = "${{ github.actor }}";
+              const authorName = "${{ github.event.head_commit.author.name }}";
+              const authorEmail = "${{ github.event.head_commit.author.email }}";
+              
+              // Determine failure type and create appropriate message
+              let bodyMessage = `### 🚫 Load Test Failed\n\n` +
+                `**Job:** ${context.job}\n` +
+                `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n` +
+                `**Author:** ${authorName} (${authorEmail})\n` +
+                `**Target:** ${{ steps.get-app-url.outputs.app_url }}\n\n`;
+              
+              if ("${{ steps.run-jmeter.outputs.jmeter_success }}" === "true") {
+                // Performance gate failure
+                bodyMessage += `### 📊 Performance Gate Failure\n\n` +
+                  `The load test completed but failed performance criteria:\n\n` +
+                  `**Performance Results:**\n` +
+                  `- **Total Requests:** ${{ env.JMETER_TOTAL_REQUESTS }}\n` +
+                  `- **Error Rate:** ${{ env.JMETER_ERROR_RATE }}% (Threshold: ≤1%)\n` +
+                  `- **Average Response Time:** ${{ env.JMETER_AVG_RESPONSE_TIME }}ms (Threshold: ≤2000ms)\n` +
+                  `- **Throughput:** ${{ env.JMETER_THROUGHPUT }} req/sec (Threshold: ≥10 req/sec)\n` +
+                  `- **95th Percentile:** ${{ env.JMETER_95TH_PERCENTILE }}ms (Threshold: ≤5000ms)\n\n` +
+                  `**Action Required:** Performance optimization needed before deployment.`;
+              } else {
+                // Test execution failure
+                bodyMessage += `### ⚠️ Test Execution Failure\n\n` +
+                  `JMeter failed to execute the load test successfully. Possible causes:\n\n` +
+                  `- Application not responding to requests\n` +
+                  `- Network connectivity issues\n` +
+                  `- JMeter configuration problems\n` +
+                  `- System resource constraints\n\n` +
+                  `**Action Required:** Investigate infrastructure and application status.\n\n` +
+                  `**Troubleshooting:**\n` +
+                  `1. Check application logs and health status\n` +
+                  `2. Verify network connectivity to target\n` +
+                  `3. Review JMeter logs in workflow artifacts\n` +
+                  `4. Validate test configuration parameters`;
+              }
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🚫 Load Test Failed: ${context.sha.substring(0,7)} - ${{ steps.run-jmeter.outputs.jmeter_success == 'true' && 'Performance Gate' || 'Test Execution' }} Failure`,
+                body: bodyMessage,
+                assignees: [assignee],
+                labels: ['ci-failure', 'performance', 'load-test', 'urgent']
+              });
+              
+              console.log('✅ GitHub issue created for load test failure');
+            } catch (error) {
+              console.error('❌ Error creating GitHub issue:', error);
+              core.setFailed(`Failed to create issue: ${error.message}`);
+            }
 
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Container Signing Failed in ${context.job}`,
-              body: `### Container Signing Failed\n\n` +
-                    `**Job:** ${context.job}\n` +
-                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                    `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
-                    `Container signing failed. Please check the logs.`,
-              assignees: [assignee],
-              labels: ['ci-failure', 'security', 'container']
-            });
-
-      - name: Slack Notification on Failure
+      - name: Slack Notification on Load Test Failure
         if: failure()
         uses: act10ns/slack@v2.1.0
         with:
           channel: '#githubaction'
-          status: ${{ job.status }}
-          text: "Container Signing Failed in ${{ github.repository }}"
+          status: 'failure'
+          text: "🚫 Load Test Failed in ${{ github.repository }}"
           fields: |
             [
-              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-              {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
-              {"title": "Job", "value": "${{ github.job }}", "short": true},
-              {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
-              {"title": "Commit", "value": "${{ github.sha }}", "short": true},
-              {"title": "Image", "value": "${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}", "short": false}
+              {"title": "🎯 Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "📊 Test Status", "value": "${{ steps.run-jmeter.outputs.jmeter_success == 'true' && 'Performance Gate Failed' || 'Test Execution Failed' }}", "short": true},
+              {"title": "🚨 Error Rate", "value": "${{ env.JMETER_ERROR_RATE || 'N/A' }}%", "short": true},
+              {"title": "📈 Avg Response", "value": "${{ env.JMETER_AVG_RESPONSE_TIME || 'N/A' }}ms", "short": true},
+              {"title": "🔢 Total Requests", "value": "${{ env.JMETER_TOTAL_REQUESTS || '0' }}", "short": true},
+              {"title": "⚡ Throughput", "value": "${{ env.JMETER_THROUGHPUT || 'N/A' }} req/sec", "short": true},
+              {"title": "🎯 Target", "value": "${{ steps.get-app-url.outputs.app_url }}", "short": false},
+              {"title": "👤 Author", "value": "${{ github.event.head_commit.author.name }}", "short": true},
+              {"title": "💻 Commit", "value": "${{ github.sha }}", "short": true}
             ]
-          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
-  deploy-to-dockerhub:
-      needs: [docker-build-test, owasp-zap-baseline-scan]  # Added DAST dependency
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      runs-on: ubuntu-latest
-      steps:
-        - name: Show commit author
-          run: |
-            echo "Commit by ${{ github.actor }}"
-            echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
-            echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View Detailed Report>"
 
-        - name: Checkout code
-          uses: actions/checkout@v4
-
-        - name: Set up Docker Buildx
-          uses: docker/setup-buildx-action@v3
-
-        - name: Login to Docker Hub
-          uses: docker/login-action@v3
-          with:
-            username: ${{ secrets.DOCKERHUB_USERNAME }}
-            password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-        - name: Build and push Docker image
-          uses: docker/build-push-action@v5
-          with:
-            context: .
-            push: true
-            tags: |
-              ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:latest
-              ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}
-            cache-from: type=gha
-            cache-to: type=gha,mode=max
-
-        - name: Verify deployment
-          run: |
-            echo "Successfully deployed to Docker Hub!"
-            echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
-
-        - name: Create issue on failure
-          if: ${{ failure() }}
-          uses: actions/github-script@v7
-          with:
-            script: |
-              try {
-                const assignee = "${{ github.actor }}";
-                const authorName = "${{ github.event.head_commit.author.name }}";
-                const authorEmail = "${{ github.event.head_commit.author.email }}";
-                
-                await github.rest.issues.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  title: `Deployment Failed in ${context.job}`,
-                  body: `### ❌ Deployment to Docker Hub Failed\n\n` +
-                        `**Job:** ${context.job}\n` +
-                        `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                        `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                        `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
-                        `Deployment to Docker Hub failed. Please check build logs.`,
-                  assignees: [assignee],
-                  labels: ['ci-failure', 'deployment']
-                });
-              } catch (error) {
-                console.error('Error creating issue:', error);
-                core.setFailed(`Failed to create issue: ${error.message}`);
-              }
-
-        - name: Slack Notification on Failure
-          if: ${{ failure() }}
-          uses: act10ns/slack@v2.1.0
-          with:
-            channel: '#githubaction'
-            status: ${{ job.status }}
-            text: "❌ Deployment Failed in ${{ github.repository }}"
-            fields: |
-              [
-                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-                {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
-                {"title": "Job", "value": "${{ github.job }}", "short": true},
-                {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
-                {"title": "Commit", "value": "${{ github.sha }}", "short": true},
-                {"title": "Commit Author", "value": "${{ github.event.head_commit.author.name }}", "short": true}
-              ]
-            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
-
-    # 🔵 BLUE-GREEN DEPLOYMENT IMPLEMENTATION
-  deploy-green-environment:
-      needs: [deploy-to-dockerhub, owasp-zap-baseline-scan]  # Added DAST dependency
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      runs-on: ubuntu-latest
-      outputs:
-        green-revision: ${{ steps.deploy-green.outputs.revision_name }}
-        app-url: ${{ steps.get-url.outputs.url }}
-        
-      steps:
-        - name: Show commit author
-          run: |
-            echo "Commit by ${{ github.actor }}"
-            echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
-            echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
-
-        - name: Checkout code
-          uses: actions/checkout@v4
-
-        - name: Azure Login
-          uses: azure/login@v2
-          with:
-            creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-        - name: Configure Docker Hub registry
-          run: |
-            echo "🔄 Configuring Docker Hub registry..."
-            az containerapp registry remove \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --server docker.io || true
-
-            az containerapp registry set \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --server docker.io \
-              --username ${{ secrets.DOCKERHUB_USERNAME }} \
-              --password ${{ secrets.DOCKERHUB_TOKEN }}
-
-        - name: Deploy to Green Environment
-          id: deploy-green
-          run: |
-            # Generate sequential revision suffix using GitHub run number
-            RUN_NUMBER=$(printf "%07d" ${{ github.run_number }})
-            GREEN_REVISION_SUFFIX="green-${RUN_NUMBER}"
-            REVISION_NAME="${{ secrets.CONTAINER_APP_NAME }}--${GREEN_REVISION_SUFFIX}"
-            
-            echo "🟢 Deploying to GREEN environment..."
-            echo "Container App: ${{ secrets.CONTAINER_APP_NAME }}"
-            echo "Resource Group: ${{ secrets.RESOURCE_GROUP }}"
-            echo "Container Name: ytblogger"
-            echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}"
-            echo "Green Revision Suffix: $GREEN_REVISION_SUFFIX"
-            echo "Full Revision Name: $REVISION_NAME (${#REVISION_NAME} chars)"
-            
-            # Validate revision name length
-            if [ ${#REVISION_NAME} -gt 54 ]; then
-              echo "❌ ERROR: Revision name too long (${#REVISION_NAME} chars, max 54)"
-              exit 1
-            fi
-            
-            echo "✅ Revision name validation passed"
-            
-            az containerapp update \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --container-name ytblogger \
-              --image ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }} \
-              --revision-suffix $GREEN_REVISION_SUFFIX \
-              --set-env-vars DEPLOYMENT_COLOR=green DEPLOYMENT_VERSION=${{ github.sha }} \
-              --output table
-            
-            echo "revision_name=$REVISION_NAME" >> $GITHUB_OUTPUT
-            echo "✅ Green revision created: $REVISION_NAME"
-
-        - name: Wait for Green Deployment
-          run: |
-            echo "⏳ Waiting for GREEN deployment to stabilize..."
-            sleep 60
-            
-            REVISION_NAME="${{ steps.deploy-green.outputs.revision_name }}"
-            
-            for i in {1..15}; do
-              REVISION_STATUS=$(az containerapp revision show \
-                --revision $REVISION_NAME \
-                --resource-group ${{ secrets.RESOURCE_GROUP }} \
-                --query "properties.provisioningState" \
-                --output tsv 2>/dev/null || echo "Unknown")
-              
-              echo "GREEN revision status: $REVISION_STATUS (attempt $i/15)"
-              
-              if [ "$REVISION_STATUS" = "Succeeded" ]; then
-                echo "✅ GREEN revision is ready!"
-                break
-              elif [ "$REVISION_STATUS" = "Failed" ]; then
-                echo "❌ GREEN revision deployment failed!"
-                az containerapp revision show \
-                  --revision $REVISION_NAME \
-                  --resource-group ${{ secrets.RESOURCE_GROUP }} \
-                  --query "{name: name, status: properties.provisioningState, replicas: properties.replicas}" \
-                  --output table
-                exit 1
-              fi
-              
-              sleep 15
-            done
-
-        - name: Add Green Label
-          run: |
-            echo "🏷️ Adding 'green' label to revision..."
-            
-            # Remove existing green label if it exists (with --yes flag)
-            az containerapp revision label remove \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --label green \
-              --yes || echo "No existing green label to remove"
-            
-            # Add green label to new revision (with --yes flag)
-            az containerapp revision label add \
-              --name ${{ secrets.CONTAINER_APP_NAME }} \
-              --resource-group ${{ secrets.RESOURCE_GROUP }} \
-              --label green \
-              --revision ${{ steps.deploy-green.outputs.revision_name }} \
-              --yes
-            
-            echo "✅ Green label added successfully"
-
-        - name: Get Application URL
-          id: get-url
-          run: |
-            echo "🔍 Retrieving app URL..."
-            
-            # Retry getting URL in case of temporary issues
-            for i in {1..3}; do
-              URL=$(az containerapp show \
-                --name ${{ secrets.CONTAINER_APP_NAME }} \
-                --resource-group ${{ secrets.RESOURCE_GROUP }} \
-                --query "properties.configuration.ingress.fqdn" \
-                --output tsv)
-              
-              if [ -n "$URL" ] && [ "$URL" != "null" ]; then
-                break
-              fi
-              
-              echo "⚠️ Failed to get URL on attempt $i/3, retrying..."
-              sleep 10
-            done
-            
-            if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-              echo "❌ Failed to get Container App URL after 3 attempts"
-              exit 1
-            fi
-            
-            FULL_URL="https://${URL}"
-            echo "url=$FULL_URL" >> $GITHUB_OUTPUT
-            echo "✅ Container App URL: $FULL_URL"
-
-        - name: Health Check Green Environment
-          run: |
-            echo "🩺 Testing GREEN environment health..."
-            
-            GREEN_URL="${{ steps.get-url.outputs.url }}?label=green"
-            echo "Testing GREEN URL: $GREEN_URL"
-            
-            # Extended health check with more retries for Container Apps cold start
-            for i in {1..12}; do
-              echo "🔍 Health check attempt $i/12 for GREEN environment..."
-              
-              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 --connect-timeout 30 "$GREEN_URL" || echo "000")
-              echo "HTTP Status: $HTTP_STATUS"
-              
-              if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "302" ]; then
-                echo "✅ GREEN environment health check passed! (Status: $HTTP_STATUS)"
-                break
-              else
-                echo "⚠️ GREEN environment health check failed (Status: $HTTP_STATUS)"
-                if [ $i -eq 12 ]; then
-                  echo "❌ GREEN environment failed all health checks"
-                  echo "📋 Container App status:"
-                  az containerapp show \
-                    --name ${{ secrets.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ secrets.RESOURCE_GROUP }} \
-                    --query "{name: name, status: properties.provisioningState, replicas: properties.template.scale, ingress: properties.configuration.ingress.fqdn}" \
-                    --output table
-                  
-                  echo "📋 GREEN revision logs (last 50 lines):"
-                  az containerapp logs show \
-                    --name ${{ secrets.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ secrets.RESOURCE_GROUP }} \
-                    --revision ${{ steps.deploy-green.outputs.revision_name }} \
-                    --tail 50 || echo "Could not fetch logs"
-                  exit 1
-                fi
-                sleep 45
-              fi
-            done
-
-        - name: Create issue on failure
-          if: ${{ failure() }}
-          uses: actions/github-script@v7
-          with:
-            script: |
-              try {
-                const assignee = "${{ github.actor }}";
-                const authorName = "${{ github.event.head_commit.author.name }}";
-                const authorEmail = "${{ github.event.head_commit.author.email }}";
-                
-                await github.rest.issues.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  title: `GREEN Environment Deployment Failed in ${context.job}`,
-                  body: `### 🟢❌ GREEN Environment Deployment Failed\n\n` +
-                        `**Job:** ${context.job}\n` +
-                        `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                        `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                        `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
-                        `**Container App:** ${{ secrets.CONTAINER_APP_NAME }}\n` +
-                        `**Resource Group:** ${{ secrets.RESOURCE_GROUP }}\n` +
-                        `**Image:** ${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${context.sha}\n\n` +
-                        `GREEN environment deployment failed. Blue-green deployment halted.`,
-                  assignees: [assignee],
-                  labels: ['ci-failure', 'blue-green-deployment', 'urgent']
-                });
-              } catch (error) {
-                console.error('Error creating issue:', error);
-                core.setFailed(`Failed to create issue: ${error.message}`);
-              }
-
-        - name: Slack Notification on Failure
-          if: ${{ failure() }}
-          uses: act10ns/slack@v2.1.0
-          with:
-            channel: '#githubaction'
-            status: ${{ job.status }}
-            text: "🟢❌ GREEN Environment Deployment Failed in ${{ github.repository }}"
-            fields: |
-              [
-                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-                {"title": "Workflow", "value": "${{ github.workflow }}", "short": true},
-                {"title": "Job", "value": "${{ github.job }}", "short": true},
-                {"title": "Run ID", "value": "${{ github.run_id }}", "short": true},
-                {"title": "Commit", "value": "${{ github.sha }}", "short": true},
-                {"title": "Container App", "value": "${{ secrets.CONTAINER_APP_NAME }}", "short": true},
-                {"title": "Image", "value": "${{ secrets.DOCKERHUB_USERNAME }}/youtube-blog-converter:${{ github.sha }}", "short": false}
-              ]
-            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+      - name: Slack Notification on Load Test Success
+        if: success()
+        uses: act10ns/slack@v2.1.0
+        with:
+          channel: '#githubaction'
+          status: 'success'
+          text: "✅ Load Test Passed in ${{ github.repository }}"
+          fields: |
+            [
+              {"title": "🎯 Repository", "value": "${{ github.repository }}", "short": true},
+              {"title": "📊 Performance Status", "value": "✅ All Gates Passed", "short": true},
+              {"title": "🚨 Error Rate", "value": "${{ env.JMETER_ERROR_RATE }}%", "short": true},
+              {"title": "📈 Avg Response", "value": "${{ env.JMETER_AVG_RESPONSE_TIME }}ms", "short": true},
+              {"title": "🔢 Total Requests", "value": "${{ env.JMETER_TOTAL_REQUESTS }}", "short": true},
+              {"title": "⚡ Throughput", "value": "${{ env.JMETER_THROUGHPUT }} req/sec", "short": true},
+              {"title": "📊 95th Percentile", "value": "${{ env.JMETER_95TH_PERCENTILE }}ms", "short": true},
+              {"title": "⏱️ Duration", "value": "${{ env.JMETER_DURATION_SEC }}s", "short": true},
+              {"title": "🎯 Target", "value": "${{ steps.get-app-url.outputs.app_url }}", "short": false},
+              {"title": "👤 Author", "value": "${{ github.event.head_commit.author.name }}", "short": true},
+              {"title": "💻 Commit", "value": "${{ github.sha }}", "short": true}
+            ]
+          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📈 View Performance Reports>"
 
   blue-green-traffic-switch:
       needs: deploy-green-environment
@@ -2554,7 +2882,6 @@ jobs:
               ]
             footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
-    # 🔄 AUTOMATIC ROLLBACK ON FAILURE
   rollback-on-failure:
       needs: [deploy-green-environment, blue-green-traffic-switch]
       if: failure()
@@ -2765,8 +3092,6 @@ jobs:
                 {"title": "Status", "value": "System restored to stable state", "short": false}
               ]
             footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
-
-      # 📊 FINAL NOTIFICATION
   notify:
       name: Pipeline Status Notification
       if: always()
@@ -2954,8 +3279,6 @@ jobs:
               [
                 {"title": "Rollback Status", "value": "✅ System restored to stable state", "short": false}
               ]
-
-
   artifact-management:
     name: Artifact Management
     if: always()
