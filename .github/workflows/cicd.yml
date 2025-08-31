@@ -2013,10 +2013,12 @@ jobs:
           TOTAL_LINES=$(wc -l < results.jtl)
           if [ "$TOTAL_LINES" -le 1 ]; then
             echo "❌ Results file has no data beyond headers!"
+            echo "📄 File contents:"
+            cat results.jtl
             exit 1
           fi
           
-          # Parse results (skip header line) - FIX: Use single-line output
+          # Parse results (skip header line)
           TOTAL_REQUESTS=$(tail -n +2 results.jtl | wc -l)
           
           if [ "$TOTAL_REQUESTS" -eq 0 ]; then
@@ -2026,19 +2028,19 @@ jobs:
           
           echo "📈 Processing $TOTAL_REQUESTS requests..."
           
-          # FIX: Calculate metrics with proper error handling
-          ERROR_COUNT=$(tail -n +2 results.jtl | cut -d',' -f5 | grep -c "false" 2>/dev/null || echo "0")
+          # FIX: Calculate metrics with proper single-line output handling
+          # Use head -1 to ensure single line output and handle empty results
+          ERROR_COUNT=$(tail -n +2 results.jtl | cut -d',' -f5 | grep -c "false" 2>/dev/null | head -1)
+          ERROR_COUNT=${ERROR_COUNT:-0}  # Default to 0 if empty
+          
+          # Ensure ERROR_COUNT is a clean integer
+          ERROR_COUNT=$(echo "$ERROR_COUNT" | tr -cd '0-9')
+          ERROR_COUNT=${ERROR_COUNT:-0}
+          
+          # Calculate success count safely
           SUCCESS_COUNT=$((TOTAL_REQUESTS - ERROR_COUNT))
           
-          # FIX: Ensure single-value results for calculations
-          ERROR_COUNT=$(echo "$ERROR_COUNT" | head -1 | tr -cd '0-9')
-          SUCCESS_COUNT=$(echo "$SUCCESS_COUNT" | head -1 | tr -cd '0-9')
-          
-          # Set defaults if empty
-          ERROR_COUNT=${ERROR_COUNT:-0}
-          SUCCESS_COUNT=${SUCCESS_COUNT:-0}
-          
-          # Calculate rates safely
+          # Calculate rates with proper error handling
           if [ "$TOTAL_REQUESTS" -gt 0 ]; then
             ERROR_RATE=$(echo "scale=2; $ERROR_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
             SUCCESS_RATE=$(echo "scale=2; $SUCCESS_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
@@ -2148,6 +2150,7 @@ jobs:
             echo "load_test_status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
+
 
 
       - name: Handle JMeter Failure
