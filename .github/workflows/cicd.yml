@@ -286,6 +286,7 @@ jobs:
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
   generate-sbom:
+    needs: [build-and-test]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -754,7 +755,7 @@ jobs:
               ]
             footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
   sign-container:
-    needs: [docker-build-test, owasp-zap-baseline-scan]
+    needs: [deploy-to-dockerhub]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
@@ -2012,12 +2013,10 @@ jobs:
           TOTAL_LINES=$(wc -l < results.jtl)
           if [ "$TOTAL_LINES" -le 1 ]; then
             echo "❌ Results file has no data beyond headers!"
-            echo "📄 File contents:"
-            cat results.jtl
             exit 1
           fi
           
-          # Parse results (skip header line)
+          # Parse results (skip header line) - FIX: Use single-line output
           TOTAL_REQUESTS=$(tail -n +2 results.jtl | wc -l)
           
           if [ "$TOTAL_REQUESTS" -eq 0 ]; then
@@ -2027,42 +2026,49 @@ jobs:
           
           echo "📈 Processing $TOTAL_REQUESTS requests..."
           
-          # Calculate metrics (assuming CSV format: timeStamp,elapsed,label,responseCode,success,...)
-          # Success column is typically column 5 (index 5)
-          ERROR_COUNT=$(tail -n +2 results.jtl | cut -d',' -f5 | grep -c "false" || echo "0")
+          # FIX: Calculate metrics with proper error handling
+          ERROR_COUNT=$(tail -n +2 results.jtl | cut -d',' -f5 | grep -c "false" 2>/dev/null || echo "0")
           SUCCESS_COUNT=$((TOTAL_REQUESTS - ERROR_COUNT))
           
-          # Calculate error rate
+          # FIX: Ensure single-value results for calculations
+          ERROR_COUNT=$(echo "$ERROR_COUNT" | head -1 | tr -cd '0-9')
+          SUCCESS_COUNT=$(echo "$SUCCESS_COUNT" | head -1 | tr -cd '0-9')
+          
+          # Set defaults if empty
+          ERROR_COUNT=${ERROR_COUNT:-0}
+          SUCCESS_COUNT=${SUCCESS_COUNT:-0}
+          
+          # Calculate rates safely
           if [ "$TOTAL_REQUESTS" -gt 0 ]; then
             ERROR_RATE=$(echo "scale=2; $ERROR_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
             SUCCESS_RATE=$(echo "scale=2; $SUCCESS_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
           else
-            ERROR_RATE=0
-            SUCCESS_RATE=0
+            ERROR_RATE="0.00"
+            SUCCESS_RATE="0.00"
           fi
           
-          # Calculate response times (elapsed time is typically column 2)
+          # Calculate response times with error handling
           AVG_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | awk '{sum+=$1; count++} END {if(count>0) printf "%.2f", sum/count; else print "0"}')
           MIN_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | head -1)
           MAX_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | tail -1)
           
-          # Calculate 95th percentile
-          PERCENTILE_95=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | awk '{all[NR] = $0} END{print all[int(NR*0.95)]}')
+          # Calculate 95th percentile with error handling
+          PERCENTILE_95=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | awk '{all[NR] = $0} END{if(NR>0) print all[int(NR*0.95)]; else print "0"}')
           
-          # Calculate throughput (requests per second)
+          # Calculate throughput safely
           FIRST_TIMESTAMP=$(tail -n +2 results.jtl | head -1 | cut -d',' -f1)
           LAST_TIMESTAMP=$(tail -n +2 results.jtl | tail -1 | cut -d',' -f1)
           
-          if [ "$FIRST_TIMESTAMP" != "$LAST_TIMESTAMP" ]; then
+          if [ "$FIRST_TIMESTAMP" != "$LAST_TIMESTAMP" ] && [ "$LAST_TIMESTAMP" -gt "$FIRST_TIMESTAMP" ]; then
             DURATION_MS=$((LAST_TIMESTAMP - FIRST_TIMESTAMP))
             DURATION_SEC=$(echo "scale=2; $DURATION_MS / 1000" | bc -l)
             THROUGHPUT=$(echo "scale=2; $TOTAL_REQUESTS / $DURATION_SEC" | bc -l)
           else
-            DURATION_SEC=1
-            THROUGHPUT=$TOTAL_REQUESTS
+            DURATION_SEC="1.00"
+            THROUGHPUT="$TOTAL_REQUESTS.00"
           fi
           
-          # Set environment variables for later use
+          # Set environment variables with clean values
           echo "JMETER_TOTAL_REQUESTS=$TOTAL_REQUESTS" >> $GITHUB_ENV
           echo "JMETER_SUCCESS_COUNT=$SUCCESS_COUNT" >> $GITHUB_ENV
           echo "JMETER_ERROR_COUNT=$ERROR_COUNT" >> $GITHUB_ENV
@@ -2091,16 +2097,16 @@ jobs:
           echo "⚡ Minimum: ${MIN_RESPONSE_TIME}ms"
           echo "🔥 Maximum: ${MAX_RESPONSE_TIME}ms"
           echo "📈 95th Percentile: ${PERCENTILE_95}ms"
-          echo ""
           
-          # Performance gate evaluation
+          # Performance gate evaluation with proper comparisons
           PERFORMANCE_PASSED=true
           
+          echo ""
           echo "🚦 Performance Gate Evaluation:"
           echo "==============================="
           
-          # Check error rate threshold
-          if [ $(echo "$ERROR_RATE > 1" | bc -l) -eq 1 ]; then
+          # Check error rate threshold - FIX: Use proper decimal comparison
+          if [ $(echo "$ERROR_RATE > 1.0" | bc -l) -eq 1 ]; then
             echo "❌ FAIL: Error rate ($ERROR_RATE%) exceeds 1% threshold"
             PERFORMANCE_PASSED=false
           else
@@ -2108,7 +2114,7 @@ jobs:
           fi
           
           # Check average response time threshold
-          if [ $(echo "$AVG_RESPONSE_TIME > 2000" | bc -l) -eq 1 ]; then
+          if [ $(echo "$AVG_RESPONSE_TIME > 2000.0" | bc -l) -eq 1 ]; then
             echo "❌ FAIL: Average response time (${AVG_RESPONSE_TIME}ms) exceeds 2000ms threshold"
             PERFORMANCE_PASSED=false
           else
@@ -2116,15 +2122,15 @@ jobs:
           fi
           
           # Check 95th percentile threshold
-          if [ -n "$PERCENTILE_95" ] && [ $(echo "$PERCENTILE_95 > 5000" | bc -l) -eq 1 ]; then
+          if [ -n "$PERCENTILE_95" ] && [ $(echo "$PERCENTILE_95 > 5000.0" | bc -l) -eq 1 ]; then
             echo "❌ FAIL: 95th percentile response time (${PERCENTILE_95}ms) exceeds 5000ms threshold"
             PERFORMANCE_PASSED=false
           else
             echo "✅ PASS: 95th percentile response time (${PERCENTILE_95}ms) is within acceptable range (≤5000ms)"
           fi
           
-          # Check minimum throughput
-          if [ $(echo "$THROUGHPUT < 10" | bc -l) -eq 1 ]; then
+          # Check minimum throughput - FIX: Use proper decimal comparison
+          if [ $(echo "$THROUGHPUT < 10.0" | bc -l) -eq 1 ]; then
             echo "❌ FAIL: Throughput (${THROUGHPUT} req/sec) is below minimum threshold (10 req/sec)"
             PERFORMANCE_PASSED=false
           else
@@ -2142,6 +2148,7 @@ jobs:
             echo "load_test_status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
+
 
       - name: Handle JMeter Failure
         if: steps.run-jmeter.outputs.jmeter_success != 'true'
