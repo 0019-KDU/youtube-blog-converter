@@ -1144,524 +1144,533 @@ jobs:
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View Detailed Report>"
 
-  # 🧪 JMETER LOAD TESTING
   jmeter-load-test:
-    needs: [deploy-green-environment, owasp-zap-baseline-scan]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      needs: [deploy-green-environment, owasp-zap-baseline-scan]
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      runs-on: ubuntu-latest
+      timeout-minutes: 45
+      
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
 
-      - name: Install Java and JMeter (Fixed)
-        run: |
-          # Install Java
-          sudo apt-get update
-          sudo apt-get install -y openjdk-17-jre-headless wget
-          
-          # Download and install JMeter from Apache archive
-          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.2.tgz
-          tar -xzf apache-jmeter-5.6.2.tgz
-          sudo mv apache-jmeter-5.6.2 /opt/jmeter
-          sudo ln -sf /opt/jmeter/bin/jmeter /usr/local/bin/jmeter
-          
-          # Verify installation
-          jmeter --version
-          java -version
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Get Container App URL
-        id: get-app-url
-        run: |
-          echo "Retrieving Container App URL..."
-          
-          for attempt in {1..3}; do
-            URL=$(az containerapp show \
-              --name ${{ env.CONTAINER_APP_NAME }} \
-              --resource-group ${{ env.RESOURCE_GROUP }} \
-              --query "properties.configuration.ingress.fqdn" \
-              --output tsv 2>/dev/null || echo "")
+        - name: Install Java and JMeter (Fixed)
+          run: |
+            # Install Java
+            sudo apt-get update
+            sudo apt-get install -y openjdk-17-jre-headless wget
             
-            if [ -n "$URL" ] && [ "$URL" != "null" ]; then
-              FULL_URL="https://${URL}"
-              echo "app_url=$FULL_URL" >> $GITHUB_OUTPUT
-              echo "Target URL for load testing: $FULL_URL"
+            # Download and install JMeter from Apache archive
+            wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.2.tgz
+            tar -xzf apache-jmeter-5.6.2.tgz
+            sudo mv apache-jmeter-5.6.2 /opt/jmeter
+            sudo ln -sf /opt/jmeter/bin/jmeter /usr/local/bin/jmeter
+            
+            # Verify installation
+            jmeter --version
+            java -version
+
+        - name: Azure Login
+          uses: azure/login@v2
+          with:
+            creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+        - name: Get Container App URL
+          id: get-app-url
+          run: |
+            echo "Retrieving Container App URL..."
+            
+            for attempt in {1..3}; do
+              URL=$(az containerapp show \
+                --name ${{ env.CONTAINER_APP_NAME }} \
+                --resource-group ${{ env.RESOURCE_GROUP }} \
+                --query "properties.configuration.ingress.fqdn" \
+                --output tsv 2>/dev/null || echo "")
               
-              # Extract host and set port
-              HOST=$(echo "$URL" | sed 's|^https\?://||')
-              echo "target_host=$HOST" >> $GITHUB_OUTPUT
-              echo "target_port=443" >> $GITHUB_OUTPUT
-              break
-            fi
-            
-            echo "Attempt $attempt/3 failed to get URL, retrying..."
-            sleep 5
-          done
-          
-          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-            echo "Failed to get Container App URL after 3 attempts"
-            exit 1
-          fi
-
-      - name: Verify application is accessible
-        run: |
-          echo "Testing application connectivity..."
-          APP_URL="${{ steps.get-app-url.outputs.app_url }}"
-          
-          for i in {1..5}; do
-            echo "Connectivity test attempt $i/5..."
-            if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
-              echo "✅ Application is accessible"
-              break
-            else
-              echo "❌ Application not accessible (attempt $i/5)"
-              if [ $i -eq 5 ]; then
-                echo "Application connectivity test failed after 5 attempts"
-                exit 1
+              if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+                FULL_URL="https://${URL}"
+                echo "app_url=$FULL_URL" >> $GITHUB_OUTPUT
+                echo "Target URL for load testing: $FULL_URL"
+                
+                # Extract host and set port
+                HOST=$(echo "$URL" | sed 's|^https\?://||')
+                echo "target_host=$HOST" >> $GITHUB_OUTPUT
+                echo "target_port=443" >> $GITHUB_OUTPUT
+                break
               fi
-              sleep 10
+              
+              echo "Attempt $attempt/3 failed to get URL, retrying..."
+              sleep 5
+            done
+            
+            if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+              echo "Failed to get Container App URL after 3 attempts"
+              exit 1
             fi
-          done
 
-      - name: Wait for Application Readiness
-        run: |
-          echo "Waiting for application to be ready..."
-          APP_URL="${{ steps.get-app-url.outputs.app_url }}"
-          
-          for i in {1..10}; do
-            echo "Readiness check $i/10..."
+        - name: Verify application is accessible
+          run: |
+            echo "Testing application connectivity..."
+            APP_URL="${{ steps.get-app-url.outputs.app_url }}"
             
-            # More comprehensive health check
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              --max-time 30 \
-              --connect-timeout 15 \
-              "$APP_URL" 2>/dev/null || echo "000")
-            
-            # Also check if we get any response body
-            RESPONSE_BODY=$(curl -s --max-time 30 "$APP_URL" | head -c 100 || echo "NO_RESPONSE")
-            
-            echo "HTTP Status: $HTTP_STATUS"
-            echo "Response snippet: $RESPONSE_BODY"
-            
-            if [[ "$HTTP_STATUS" =~ ^(200|201|202|204|301|302|307)$ ]] || [ "$RESPONSE_BODY" != "NO_RESPONSE" ]; then
-              echo "✅ Application is ready for load testing!"
-              break
-            else
-              echo "⚠️ Application not ready (Status: $HTTP_STATUS, attempt $i/10)"
-              if [ $i -eq 10 ]; then
-                echo "❌ Application readiness timeout - cannot proceed with load test"
-                exit 1
-              fi
-              sleep 15
-            fi
-          done
-
-      - name: Create JMeter test plan
-        run: |
-          cat > load-test.jmx << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6">
-            <hashTree>
-              <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="YouTube Blog Converter Load Test">
-                <boolProp name="TestPlan.functional_mode">false</boolProp>
-                <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
-                <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
-                <elementProp name="TestPlan.user_defined_variables" elementType="Arguments">
-                  <collectionProp name="Arguments.arguments"/>
-                </elementProp>
-              </TestPlan>
-              <hashTree>
-                <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Load Test Thread Group">
-                  <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
-                  <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
-                    <boolProp name="LoopController.continue_forever">false</boolProp>
-                    <stringProp name="LoopController.loops">-1</stringProp>
-                  </elementProp>
-                  <stringProp name="ThreadGroup.num_threads">${{ env.JMETER_THREADS }}</stringProp>
-                  <stringProp name="ThreadGroup.ramp_time">${{ env.JMETER_RAMPUP }}</stringProp>
-                  <boolProp name="ThreadGroup.scheduler">true</boolProp>
-                  <stringProp name="ThreadGroup.duration">${{ env.JMETER_DURATION }}</stringProp>
-                  <stringProp name="ThreadGroup.delay">0</stringProp>
-                </ThreadGroup>
-                <hashTree>
-                  <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Home Page Request">
-                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
-                      <collectionProp name="Arguments.arguments"/>
-                    </elementProp>
-                    <stringProp name="HTTPSampler.domain">${{ steps.get-app-url.outputs.target_host }}</stringProp>
-                    <stringProp name="HTTPSampler.port">443</stringProp>
-                    <stringProp name="HTTPSampler.protocol">https</stringProp>
-                    <stringProp name="HTTPSampler.path">/</stringProp>
-                    <stringProp name="HTTPSampler.method">GET</stringProp>
-                    <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-                    <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
-                    <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
-                    <stringProp name="HTTPSampler.connect_timeout">10000</stringProp>
-                    <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
-                  </HTTPSamplerProxy>
-                  <hashTree>
-                    <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="HTTP 200 Response">
-                      <collectionProp name="Asserion.test_strings">
-                        <stringProp name="49586">200</stringProp>
-                      </collectionProp>
-                      <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
-                      <boolProp name="Assertion.assume_success">false</boolProp>
-                      <intProp name="Assertion.test_type">16</intProp>
-                    </ResponseAssertion>
-                    <hashTree/>
-                  </hashTree>
-                  <ConstantThroughputTimer guiclass="TestBeanGUI" testclass="ConstantThroughputTimer" testname="Throughput Controller">
-                    <intProp name="calcMode">0</intProp>
-                    <doubleProp name="throughput">${{ env.JMETER_TARGET_RPS }}</doubleProp>
-                  </ConstantThroughputTimer>
-                  <hashTree/>
-                  <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="Summary Report">
-                    <boolProp name="ResultCollector.error_logging">false</boolProp>
-                    <objProp>
-                      <name>saveConfig</name>
-                      <value class="SampleSaveConfiguration">
-                        <time>true</time>
-                        <latency>true</latency>
-                        <timestamp>true</timestamp>
-                        <success>true</success>
-                        <label>true</label>
-                        <code>true</code>
-                        <message>true</message>
-                        <threadName>true</threadName>
-                        <dataType>true</dataType>
-                        <encoding>false</encoding>
-                        <assertions>true</assertions>
-                        <subresults>true</subresults>
-                        <responseData>false</responseData>
-                        <samplerData>false</samplerData>
-                        <xml>false</xml>
-                        <fieldNames>true</fieldNames>
-                        <responseHeaders>false</responseHeaders>
-                        <requestHeaders>false</requestHeaders>
-                        <responseDataOnError>false</responseDataOnError>
-                        <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
-                        <assertionsResultsToSave>0</assertionsResultsToSave>
-                        <bytes>true</bytes>
-                        <sentBytes>true</sentBytes>
-                        <url>true</url>
-                        <threadCounts>true</threadCounts>
-                        <idleTime>true</idleTime>
-                        <connectTime>true</connectTime>
-                      </value>
-                    </objProp>
-                    <stringProp name="filename">results.jtl</stringProp>
-                  </ResultCollector>
-                  <hashTree/>
-                </hashTree>
-              </hashTree>
-            </hashTree>
-          </jmeterTestPlan>
-          EOF
-
-      - name: Debug JMeter test plan
-        run: |
-          echo "JMeter test plan content:"
-          cat load-test.jmx | head -20
-          echo "..."
-          echo "Target host in test plan: ${{ steps.get-app-url.outputs.target_host }}"
-
-      - name: Run JMeter load test with retry
-        id: run-jmeter
-        run: |
-          echo "Starting JMeter load test..."
-          echo "Target: ${{ steps.get-app-url.outputs.app_url }}"
-          echo "Threads: ${{ env.JMETER_THREADS }}"
-          echo "Ramp-up: ${{ env.JMETER_RAMPUP }}s"
-          echo "Duration: ${{ env.JMETER_DURATION }}s"
-          echo "Target RPS: ${{ env.JMETER_TARGET_RPS }}"
-          
-          # Run JMeter test with retry mechanism
-          for attempt in {1..3}; do
-            echo "JMeter test attempt $attempt/3..."
-            
-            # Run JMeter test
-            jmeter -n -t load-test.jmx -l results.jtl -j jmeter.log -e -o html-report/
-            
-            # Check if results were generated
-            if [ -f "results.jtl" ] && [ -s "results.jtl" ]; then
-              RECORD_COUNT=$(wc -l < results.jtl)
-              if [ "$RECORD_COUNT" -gt 1 ]; then  # More than just header
-                echo "✅ JMeter test completed successfully with $((RECORD_COUNT-1)) records"
-                echo "jmeter_success=true" >> $GITHUB_OUTPUT
+            for i in {1..5}; do
+              echo "Connectivity test attempt $i/5..."
+              if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
+                echo "✅ Application is accessible"
                 break
               else
-                echo "⚠️ Results file exists but has no data (attempt $attempt/3)"
+                echo "❌ Application not accessible (attempt $i/5)"
+                if [ $i -eq 5 ]; then
+                  echo "Application connectivity test failed after 5 attempts"
+                  exit 1
+                fi
+                sleep 10
               fi
-            else
-              echo "❌ Results file not created (attempt $attempt/3)"
+            done
+
+        - name: Wait for Application Readiness
+          run: |
+            echo "Waiting for application to be ready..."
+            APP_URL="${{ steps.get-app-url.outputs.app_url }}"
+            
+            for i in {1..10}; do
+              echo "Readiness check $i/10..."
+              
+              # More comprehensive health check
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                --max-time 30 \
+                --connect-timeout 15 \
+                "$APP_URL" 2>/dev/null || echo "000")
+              
+              # Also check if we get any response body
+              RESPONSE_BODY=$(curl -s --max-time 30 "$APP_URL" | head -c 100 || echo "NO_RESPONSE")
+              
+              echo "HTTP Status: $HTTP_STATUS"
+              echo "Response snippet: $RESPONSE_BODY"
+              
+              if [[ "$HTTP_STATUS" =~ ^(200|201|202|204|301|302|307)$ ]] || [ "$RESPONSE_BODY" != "NO_RESPONSE" ]; then
+                echo "✅ Application is ready for load testing!"
+                break
+              else
+                echo "⚠️ Application not ready (Status: $HTTP_STATUS, attempt $i/10)"
+                if [ $i -eq 10 ]; then
+                  echo "❌ Application readiness timeout - cannot proceed with load test"
+                  exit 1
+                fi
+                sleep 15
+              fi
+            done
+
+        - name: Create JMeter test plan
+          run: |
+            cat > load-test.jmx << 'EOF'
+            <?xml version="1.0" encoding="UTF-8"?>
+            <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6">
+              <hashTree>
+                <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="YouTube Blog Converter Load Test">
+                  <boolProp name="TestPlan.functional_mode">false</boolProp>
+                  <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
+                  <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+                  <elementProp name="TestPlan.user_defined_variables" elementType="Arguments">
+                    <collectionProp name="Arguments.arguments"/>
+                  </elementProp>
+                </TestPlan>
+                <hashTree>
+                  <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Load Test Thread Group">
+                    <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+                    <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
+                      <boolProp name="LoopController.continue_forever">false</boolProp>
+                      <stringProp name="LoopController.loops">-1</stringProp>
+                    </elementProp>
+                    <stringProp name="ThreadGroup.num_threads">${{ env.JMETER_THREADS }}</stringProp>
+                    <stringProp name="ThreadGroup.ramp_time">${{ env.JMETER_RAMPUP }}</stringProp>
+                    <boolProp name="ThreadGroup.scheduler">true</boolProp>
+                    <stringProp name="ThreadGroup.duration">${{ env.JMETER_DURATION }}</stringProp>
+                    <stringProp name="ThreadGroup.delay">0</stringProp>
+                  </ThreadGroup>
+                  <hashTree>
+                    <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Home Page Request">
+                      <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+                        <collectionProp name="Arguments.arguments"/>
+                      </elementProp>
+                      <stringProp name="HTTPSampler.domain">${{ steps.get-app-url.outputs.target_host }}</stringProp>
+                      <stringProp name="HTTPSampler.port">443</stringProp>
+                      <stringProp name="HTTPSampler.protocol">https</stringProp>
+                      <stringProp name="HTTPSampler.path">/</stringProp>
+                      <stringProp name="HTTPSampler.method">GET</stringProp>
+                      <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+                      <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+                      <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+                      <stringProp name="HTTPSampler.connect_timeout">10000</stringProp>
+                      <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+                    </HTTPSamplerProxy>
+                    <hashTree>
+                      <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="HTTP 200 Response">
+                        <collectionProp name="Asserion.test_strings">
+                          <stringProp name="49586">200</stringProp>
+                        </collectionProp>
+                        <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+                        <boolProp name="Assertion.assume_success">false</boolProp>
+                        <intProp name="Assertion.test_type">16</intProp>
+                      </ResponseAssertion>
+                      <hashTree/>
+                    </hashTree>
+                    <ConstantThroughputTimer guiclass="TestBeanGUI" testclass="ConstantThroughputTimer" testname="Throughput Controller">
+                      <intProp name="calcMode">0</intProp>
+                      <doubleProp name="throughput">${{ env.JMETER_TARGET_RPS }}</doubleProp>
+                    </ConstantThroughputTimer>
+                    <hashTree/>
+                    <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="Summary Report">
+                      <boolProp name="ResultCollector.error_logging">false</boolProp>
+                      <objProp>
+                        <name>saveConfig</name>
+                        <value class="SampleSaveConfiguration">
+                          <time>true</time>
+                          <latency>true</latency>
+                          <timestamp>true</timestamp>
+                          <success>true</success>
+                          <label>true</label>
+                          <code>true</code>
+                          <message>true</message>
+                          <threadName>true</threadName>
+                          <dataType>true</dataType>
+                          <encoding>false</encoding>
+                          <assertions>true</assertions>
+                          <subresults>true</subresults>
+                          <responseData>false</responseData>
+                          <samplerData>false</samplerData>
+                          <xml>false</xml>
+                          <fieldNames>true</fieldNames>
+                          <responseHeaders>false</responseHeaders>
+                          <requestHeaders>false</requestHeaders>
+                          <responseDataOnError>false</responseDataOnError>
+                          <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+                          <assertionsResultsToSave>0</assertionsResultsToSave>
+                          <bytes>true</bytes>
+                          <sentBytes>true</sentBytes>
+                          <url>true</url>
+                          <threadCounts>true</threadCounts>
+                          <idleTime>true</idleTime>
+                          <connectTime>true</connectTime>
+                        </value>
+                      </objProp>
+                      <stringProp name="filename">results.jtl</stringProp>
+                    </ResultCollector>
+                    <hashTree/>
+                  </hashTree>
+                </hashTree>
+              </hashTree>
+            </jmeterTestPlan>
+            EOF
+
+        - name: Debug JMeter test plan
+          run: |
+            echo "JMeter test plan content:"
+            cat load-test.jmx | head -20
+            echo "..."
+            echo "Target host in test plan: ${{ steps.get-app-url.outputs.target_host }}"
+
+        - name: Run JMeter load test with retry and force flag
+          id: run-jmeter
+          run: |
+            echo "Starting JMeter load test..."
+            echo "Target: ${{ steps.get-app-url.outputs.app_url }}"
+            echo "Threads: ${{ env.JMETER_THREADS }}"
+            echo "Ramp-up: ${{ env.JMETER_RAMPUP }}s"
+            echo "Duration: ${{ env.JMETER_DURATION }}s"
+            echo "Target RPS: ${{ env.JMETER_TARGET_RPS }}"
+            
+            # Clean up any existing results file:cite[1]
+            rm -f results.jtl
+            
+            # Run JMeter test with retry mechanism and force flag:cite[1]
+            for attempt in {1..3}; do
+              echo "JMeter test attempt $attempt/3..."
+              
+              # Run JMeter test with force flag to overwrite results file:cite[1]
+              jmeter -n -t load-test.jmx -l results.jtl -j jmeter.log -e -o html-report/ -f
+              
+              # Check if results were generated
+              if [ -f "results.jtl" ] && [ -s "results.jtl" ]; then
+                RECORD_COUNT=$(wc -l < results.jtl)
+                if [ "$RECORD_COUNT" -gt 1 ]; then  # More than just header
+                  echo "✅ JMeter test completed successfully with $((RECORD_COUNT-1)) records"
+                  echo "jmeter_success=true" >> $GITHUB_OUTPUT
+                  break
+                else
+                  echo "⚠️ Results file exists but has no data (attempt $attempt/3)"
+                  # Debug: show JMeter log
+                  if [ -f "jmeter.log" ]; then
+                    echo "JMeter log contents:"
+                    tail -20 jmeter.log
+                  fi
+                fi
+              else
+                echo "❌ Results file not created (attempt $attempt/3)"
+              fi
+              
+              if [ $attempt -lt 3 ]; then
+                echo "Retrying in 10 seconds..."
+                sleep 10
+                # Clean up before retry:cite[1]
+                rm -f results.jtl
+              else
+                echo "❌ All JMeter attempts failed"
+                echo "jmeter_success=false" >> $GITHUB_OUTPUT
+                
+                # Debug: show JMeter log
+                if [ -f "jmeter.log" ]; then
+                  echo "JMeter log contents:"
+                  tail -50 jmeter.log
+                fi
+              fi
+            done
+
+        - name: Analyze JMeter results
+          id: analyze-results
+          if: steps.run-jmeter.outputs.jmeter_success == 'true'
+          run: |
+            echo "Analyzing JMeter results..."
+            
+            if [ ! -f "results.jtl" ]; then
+              echo "Results file not found!"
+              exit 1
             fi
             
-            if [ $attempt -lt 3 ]; then
-              echo "Retrying in 10 seconds..."
-              sleep 10
-            else
-              echo "❌ All JMeter attempts failed"
-              echo "jmeter_success=false" >> $GITHUB_OUTPUT
-              
-              # Debug: show JMeter log
-              if [ -f "jmeter.log" ]; then
-                echo "JMeter log contents:"
-                tail -50 jmeter.log
-              fi
+            # Check if file has content beyond just headers
+            if [ $(wc -l < results.jtl) -le 1 ]; then
+              echo "Results file exists but has no data beyond headers!"
+              echo "First few lines of results.jtl:"
+              head -5 results.jtl
+              exit 1
             fi
-          done
+            
+            # Skip header line and count records
+            TOTAL_REQUESTS=$(tail -n +2 results.jtl | wc -l)
+            
+            if [ "$TOTAL_REQUESTS" -eq 0 ]; then
+              echo "No test results found!"
+              echo "Contents of results.jtl:"
+              cat results.jtl
+              exit 1
+            fi
+            
+            # Count errors (false in success column)
+            ERROR_COUNT=$(tail -n +2 results.jtl | cut -d',' -f8 | grep -c "false" || echo "0")
+            
+            # Calculate error rate
+            if [ "$TOTAL_REQUESTS" -gt 0 ]; then
+              ERROR_RATE=$(echo "scale=2; $ERROR_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
+            else
+              ERROR_RATE=0
+            fi
+            
+            # Calculate average response time (column 2) - FIXED awk syntax
+            AVG_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | awk '{sum+=$1; count++} END {if(count>0) printf "%.2f", sum/count; else print "0"}')
+            
+            echo "JMETER_TOTAL_REQUESTS=$TOTAL_REQUESTS" >> $GITHUB_ENV
+            echo "JMETER_ERROR_COUNT=$ERROR_COUNT" >> $GITHUB_ENV  
+            echo "JMETER_ERROR_RATE=$ERROR_RATE" >> $GITHUB_ENV
+            echo "JMETER_AVG_RESPONSE_TIME=$AVG_RESPONSE_TIME" >> $GITHUB_ENV
+            
+            echo "JMeter Load Test Results:"
+            echo "========================="
+            echo "Total Requests: $TOTAL_REQUESTS"
+            echo "Errors: $ERROR_COUNT"
+            echo "Error Rate: $ERROR_RATE%"
+            echo "Average Response Time: ${AVG_RESPONSE_TIME}ms"
+            
+            # Performance gate - fail if error rate > 1%
+            if [ $(echo "$ERROR_RATE > 1" | bc -l) -eq 1 ]; then
+              echo "Load test FAILED: Error rate ($ERROR_RATE%) exceeds 1% threshold"
+              echo "load_test_status=failed" >> $GITHUB_OUTPUT
+              exit 1
+            else
+              echo "Load test PASSED: Error rate ($ERROR_RATE%) is within acceptable range"
+              echo "load_test_status=passed" >> $GITHUB_OUTPUT
+            fi
 
-      - name: Analyze JMeter results
-        id: analyze-results
-        if: steps.run-jmeter.outputs.jmeter_success == 'true'
-        run: |
-          echo "Analyzing JMeter results..."
-          
-          if [ ! -f "results.jtl" ]; then
-            echo "Results file not found!"
+        - name: Handle JMeter failure
+          if: steps.run-jmeter.outputs.jmeter_success != 'true'
+          run: |
+            echo "❌ JMeter test failed to generate results"
+            echo "Checking for possible issues..."
+            
+            # Check if application is still accessible
+            APP_URL="${{ steps.get-app-url.outputs.app_url }}"
+            if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
+              echo "✅ Application is still accessible"
+            else
+              echo "❌ Application is not accessible - this may be the root cause"
+            fi
+            
+            # Check disk space
+            echo "Disk space:"
+            df -h
+            
+            # Check memory
+            echo "Memory usage:"
+            free -h
+            
             exit 1
-          fi
-          
-          # Check if file has content beyond just headers
-          if [ $(wc -l < results.jtl) -le 1 ]; then
-            echo "Results file exists but has no data beyond headers!"
-            echo "First few lines of results.jtl:"
-            head -5 results.jtl
-            exit 1
-          fi
-          
-          # Skip header line and count records
-          TOTAL_REQUESTS=$(tail -n +2 results.jtl | wc -l)
-          
-          if [ "$TOTAL_REQUESTS" -eq 0 ]; then
-            echo "No test results found!"
-            echo "Contents of results.jtl:"
-            cat results.jtl
-            exit 1
-          fi
-          
-          # Count errors (false in success column)
-          ERROR_COUNT=$(tail -n +2 results.jtl | cut -d',' -f8 | grep -c "false" || echo "0")
-          
-          # Calculate error rate
-          if [ "$TOTAL_REQUESTS" -gt 0 ]; then
-            ERROR_RATE=$(echo "scale=2; $ERROR_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
-          else
-            ERROR_RATE=0
-          fi
-          
-          # Calculate average response time (column 2) - FIXED awk syntax
-          AVG_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | awk '{sum+=$1; count++} END {if(count>0) printf "%.2f", sum/count; else print "0"}')
-          
-          echo "JMETER_TOTAL_REQUESTS=$TOTAL_REQUESTS" >> $GITHUB_ENV
-          echo "JMETER_ERROR_COUNT=$ERROR_COUNT" >> $GITHUB_ENV  
-          echo "JMETER_ERROR_RATE=$ERROR_RATE" >> $GITHUB_ENV
-          echo "JMETER_AVG_RESPONSE_TIME=$AVG_RESPONSE_TIME" >> $GITHUB_ENV
-          
-          echo "JMeter Load Test Results:"
-          echo "========================="
-          echo "Total Requests: $TOTAL_REQUESTS"
-          echo "Errors: $ERROR_COUNT"
-          echo "Error Rate: $ERROR_RATE%"
-          echo "Average Response Time: ${AVG_RESPONSE_TIME}ms"
-          
-          # Performance gate - fail if error rate > 1%
-          if [ $(echo "$ERROR_RATE > 1" | bc -l) -eq 1 ]; then
-            echo "Load test FAILED: Error rate ($ERROR_RATE%) exceeds 1% threshold"
-            echo "load_test_status=failed" >> $GITHUB_OUTPUT
-            exit 1
-          else
-            echo "Load test PASSED: Error rate ($ERROR_RATE%) is within acceptable range"
-            echo "load_test_status=passed" >> $GITHUB_OUTPUT
-          fi
 
-      - name: Handle JMeter failure
-        if: steps.run-jmeter.outputs.jmeter_success != 'true'
-        run: |
-          echo "❌ JMeter test failed to generate results"
-          echo "Checking for possible issues..."
-          
-          # Check if application is still accessible
-          APP_URL="${{ steps.get-app-url.outputs.app_url }}"
-          if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
-            echo "✅ Application is still accessible"
-          else
-            echo "❌ Application is not accessible - this may be the root cause"
-          fi
-          
-          # Check disk space
-          echo "Disk space:"
-          df -h
-          
-          # Check memory
-          echo "Memory usage:"
-          free -h
-          
-          exit 1
+        - name: Upload JMeter reports
+          if: always()
+          uses: actions/upload-artifact@v4
+          with:
+            name: jmeter-reports-${{ github.run_number }}
+            path: |
+              results.jtl
+              jmeter.log
+              html-report/
+              load-test.jmx
+            retention-days: 30
 
-      - name: Upload JMeter reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: jmeter-reports-${{ github.run_number }}
-          path: |
-            results.jtl
-            jmeter.log
-            html-report/
-            load-test.jmx
-          retention-days: 30
+        - name: Create Load Test Summary
+          if: always()
+          run: |
+            # Check if we have results to summarize
+            if [ -f "results.jtl" ] && [ $(wc -l < results.jtl) -gt 1 ]; then
+              cat > load-test-summary.md << EOF
+            # JMeter Load Test Results
+            
+            **Test Date:** $(date -u)
+            **Target:** ${{ steps.get-app-url.outputs.app_url }}
+            **Test Configuration:**
+            - Threads: ${{ env.JMETER_THREADS }}
+            - Ramp-up: ${{ env.JMETER_RAMPUP }}s  
+            - Duration: ${{ env.JMETER_DURATION }}s
+            - Target RPS: ${{ env.JMETER_TARGET_RPS }}
+            
+            ## Results Summary
+            
+            | Metric | Value |
+            |--------|-------|
+            | Total Requests | ${{ env.JMETER_TOTAL_REQUESTS }} |
+            | Failed Requests | ${{ env.JMETER_ERROR_COUNT }} |
+            | Error Rate | ${{ env.JMETER_ERROR_RATE }}% |
+            | Average Response Time | ${{ env.JMETER_AVG_RESPONSE_TIME }}ms |
+            | Status | $([ "${{ steps.analyze-results.outputs.load_test_status }}" = "passed" ] && echo "PASSED" || echo "FAILED") |
+            
+            ## Performance Gate
+            - **Threshold:** Error rate must be ≤ 1%
+            - **Result:** $([ "${{ steps.analyze-results.outputs.load_test_status }}" = "passed" ] && echo "✅ PASSED" || echo "❌ FAILED")
+            EOF
+            else
+              cat > load-test-summary.md << EOF
+            # JMeter Load Test Failed
+            
+            **Test Date:** $(date -u)
+            **Target:** ${{ steps.get-app-url.outputs.app_url }}
+            **Status:** ❌ FAILED
+            
+            ## Error Details
+            JMeter failed to generate any test results. This could be due to:
+            - Application not responding to requests
+            - Network connectivity issues
+            - JMeter configuration problems
+            
+            Please check the JMeter logs and application status for more details.
+            EOF
+            fi
 
-      - name: Create Load Test Summary
-        if: always()
-        run: |
-          # Check if we have results to summarize
-          if [ -f "results.jtl" ] && [ $(wc -l < results.jtl) -gt 1 ]; then
-            cat > load-test-summary.md << EOF
-          # JMeter Load Test Results
-          
-          **Test Date:** $(date -u)
-          **Target:** ${{ steps.get-app-url.outputs.app_url }}
-          **Test Configuration:**
-          - Threads: ${{ env.JMETER_THREADS }}
-          - Ramp-up: ${{ env.JMETER_RAMPUP }}s  
-          - Duration: ${{ env.JMETER_DURATION }}s
-          - Target RPS: ${{ env.JMETER_TARGET_RPS }}
-          
-          ## Results Summary
-          
-          | Metric | Value |
-          |--------|-------|
-          | Total Requests | ${{ env.JMETER_TOTAL_REQUESTS }} |
-          | Failed Requests | ${{ env.JMETER_ERROR_COUNT }} |
-          | Error Rate | ${{ env.JMETER_ERROR_RATE }}% |
-          | Average Response Time | ${{ env.JMETER_AVG_RESPONSE_TIME }}ms |
-          | Status | $([ "${{ steps.analyze-results.outputs.load_test_status }}" = "passed" ] && echo "PASSED" || echo "FAILED") |
-          
-          ## Performance Gate
-          - **Threshold:** Error rate must be ≤ 1%
-          - **Result:** $([ "${{ steps.analyze-results.outputs.load_test_status }}" = "passed" ] && echo "✅ PASSED" || echo "❌ FAILED")
-          EOF
-          else
-            cat > load-test-summary.md << EOF
-          # JMeter Load Test Failed
-          
-          **Test Date:** $(date -u)
-          **Target:** ${{ steps.get-app-url.outputs.app_url }}
-          **Status:** ❌ FAILED
-          
-          ## Error Details
-          JMeter failed to generate any test results. This could be due to:
-          - Application not responding to requests
-          - Network connectivity issues
-          - JMeter configuration problems
-          
-          Please check the JMeter logs and application status for more details.
-          EOF
-          fi
-
-      - name: Create issue on failure
-        if: ${{ failure() }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            try {
-              const assignee = "${{ github.actor }}";
-              const authorName = "${{ github.event.head_commit.author.name }}";
-              const authorEmail = "${{ github.event.head_commit.author.email }}";
-              
-              let bodyMessage = `### Load Test Failed\n\n` +
-                `**Job:** ${context.job}\n` +
-                `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                `**Commit Author:** ${authorName} (${authorEmail})\n\n`;
-              
-              if ("${{ steps.run-jmeter.outputs.jmeter_success }}" === "true") {
-                bodyMessage += `**Performance Results:**\n` +
-                  `- Error Rate: ${{ env.JMETER_ERROR_RATE }}%\n` +
-                  `- Total Requests: ${{ env.JMETER_TOTAL_REQUESTS }}\n` +
-                  `- Failed Requests: ${{ env.JMETER_ERROR_COUNT }}\n` +
-                  `- Average Response Time: ${{ env.JMETER_AVG_RESPONSE_TIME }}ms\n\n` +
-                  `Load test failed performance criteria. Please investigate.`;
-              } else {
-                bodyMessage += `**Error:** JMeter failed to generate any test results.\n\n` +
-                  `This could be due to:\n` +
-                  `- Application not responding to requests\n` +
-                  `- Network connectivity issues\n` +
-                  `- JMeter configuration problems\n\n` +
-                  `Please check the uploaded JMeter logs for details.`;
+        - name: Create issue on failure
+          if: ${{ failure() }}
+          uses: actions/github-script@v7
+          with:
+            script: |
+              try {
+                const assignee = "${{ github.actor }}";
+                const authorName = "${{ github.event.head_commit.author.name }}";
+                const authorEmail = "${{ github.event.head_commit.author.email }}";
+                
+                let bodyMessage = `### Load Test Failed\n\n` +
+                  `**Job:** ${context.job}\n` +
+                  `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                  `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                  `**Commit Author:** ${authorName} (${authorEmail})\n\n`;
+                
+                if ("${{ steps.run-jmeter.outputs.jmeter_success }}" === "true") {
+                  bodyMessage += `**Performance Results:**\n` +
+                    `- Error Rate: ${{ env.JMETER_ERROR_RATE }}%\n` +
+                    `- Total Requests: ${{ env.JMETER_TOTAL_REQUESTS }}\n` +
+                    `- Failed Requests: ${{ env.JMETER_ERROR_COUNT }}\n` +
+                    `- Average Response Time: ${{ env.JMETER_AVG_RESPONSE_TIME }}ms\n\n` +
+                    `Load test failed performance criteria. Please investigate.`;
+                } else {
+                  bodyMessage += `**Error:** JMeter failed to generate any test results.\n\n` +
+                    `This could be due to:\n` +
+                    `- Application not responding to requests\n` +
+                    `- Network connectivity issues\n` +
+                    `- JMeter configuration problems\n\n` +
+                    `Please check the uploaded JMeter logs for details.`;
+                }
+                
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `Load Test Failed in ${context.job}`,
+                  body: bodyMessage,
+                  assignees: [assignee],
+                  labels: ['ci-failure', 'performance', 'load-test']
+                });
+              } catch (error) {
+                console.error('Error creating issue:', error);
+                core.setFailed(`Failed to create issue: ${error.message}`);
               }
-              
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `Load Test Failed in ${context.job}`,
-                body: bodyMessage,
-                assignees: [assignee],
-                labels: ['ci-failure', 'performance', 'load-test']
-              });
-            } catch (error) {
-              console.error('Error creating issue:', error);
-              core.setFailed(`Failed to create issue: ${error.message}`);
-            }
 
-      - name: Slack Notification on Failure
-        if: ${{ failure() }}
-        uses: act10ns/slack@v2.1.0
-        with:
-          channel: '#githubaction'
-          status: ${{ job.status }}
-          text: "Load Test Failed in ${{ github.repository }}"
-          fields: |
-            [
-              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-              {"title": "Error Rate", "value": "${{ env.JMETER_ERROR_RATE }}%", "short": true},
-              {"title": "Total Requests", "value": "${{ env.JMETER_TOTAL_REQUESTS }}", "short": true},
-              {"title": "Failed Requests", "value": "${{ env.JMETER_ERROR_COUNT }}", "short": true},
-              {"title": "Avg Response Time", "value": "${{ env.JMETER_AVG_RESPONSE_TIME }}ms", "short": true},
-              {"title": "Target", "value": "${{ steps.get-app-url.outputs.app_url }}", "short": false}
-            ]
-          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+        - name: Slack Notification on Failure
+          if: ${{ failure() }}
+          uses: act10ns/slack@v2.1.0
+          with:
+            channel: '#githubaction'
+            status: ${{ job.status }}
+            text: "Load Test Failed in ${{ github.repository }}"
+            fields: |
+              [
+                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+                {"title": "Error Rate", "value": "${{ env.JMETER_ERROR_RATE }}%", "short": true},
+                {"title": "Total Requests", "value": "${{ env.JMETER_TOTAL_REQUESTS }}", "short": true},
+                {"title": "Failed Requests", "value": "${{ env.JMETER_ERROR_COUNT }}", "short": true},
+                {"title": "Avg Response Time", "value": "${{ env.JMETER_AVG_RESPONSE_TIME }}ms", "short": true},
+                {"title": "Target", "value": "${{ steps.get-app-url.outputs.app_url }}", "short": false}
+              ]
+            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
 
-      - name: Slack Notification on Success
-        if: ${{ success() }}
-        uses: act10ns/slack@v2.1.0
-        with:
-          channel: '#githubaction'
-          status: 'success'
-          text: "Load Test Passed in ${{ github.repository }}"
-          fields: |
-            [
-              {"title": "Repository", "value": "${{ github.repository }}", "short": true},
-              {"title": "Error Rate", "value": "${{ env.JMETER_ERROR_RATE }}%", "short": true},
-              {"title": "Total Requests", "value": "${{ env.JMETER_TOTAL_REQUESTS }}", "short": true},
-              {"title": "Failed Requests", "value": "${{ env.JMETER_ERROR_COUNT }}", "short": true},
-              {"title": "Avg Response Time", "value": "${{ env.JMETER_AVG_RESPONSE_TIME }}ms", "short": true},
-              {"title": "Performance Status", "value": "✅ PASSED", "short": true},
-              {"title": "Target", "value": "${{ steps.get-app-url.outputs.app_url }}", "short": false}
-            ]
-          footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Reports>"
+        - name: Slack Notification on Success
+          if: ${{ success() }}
+          uses: act10ns/slack@v2.1.0
+          with:
+            channel: '#githubaction'
+            status: 'success'
+            text: "Load Test Passed in ${{ github.repository }}"
+            fields: |
+              [
+                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+                {"title": "Error Rate", "value": "${{ env.JMETER_ERROR_RATE }}%", "short": true},
+                {"title": "Total Requests", "value": "${{ env.JMETER_TOTAL_REQUESTS }}", "short": true},
+                {"title": "Failed Requests", "value": "${{ env.JMETER_ERROR_COUNT }}", "short": true},
+                {"title": "Avg Response Time", "value": "${{ env.JMETER_AVG_RESPONSE_TIME }}ms", "short": true},
+                {"title": "Performance Status", "value": "✅ PASSED", "short": true},
+                {"title": "Target", "value": "${{ steps.get-app-url.outputs.app_url }}", "short": false}
+              ]
+            footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Reports>"
 
+  # 🖋️ CONTAINER SIGNING WITH COSIGN
   # 🖋️ CONTAINER SIGNING WITH COSIGN
   sign-container:
     needs: [docker-build-test, owasp-zap-baseline-scan]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Cosign with TUF verification disabled
-        uses: sigstore/cosign-installer@v3.1.1
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.6.0   # <- upgraded installer
         with:
-          cosign-release: 'v2.2.4'  # Use a stable version
-          skip-tuf-verify: true  # This skips the TUF verification that was failing
+          cosign-release: v2.2.4
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -1673,85 +1682,90 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: 1
         run: |
-          # Pull the image first to ensure it exists locally
-          docker pull ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
-          
-          # Sign with explicit key reference
+          IMAGE="${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}"
+          docker pull "$IMAGE"
+
           for i in {1..3}; do
             echo "Signing attempt $i/3..."
-            if cosign sign --yes --key "https://raw.githubusercontent.com/sigstore/cosign/v2.2.4/release/release-cosign.pub" \
-              ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}; then
+            if cosign sign --yes "$IMAGE"; then
               echo "Container signed successfully"
               break
             else
               echo "Signing attempt $i failed, retrying..."
               sleep 10
             fi
-            
+
             if [ $i -eq 3 ]; then
               echo "All signing attempts failed, but continuing pipeline..."
-              echo "SIGNING_FAILED=true" >> $GITHUB_ENV
+              echo "SIGNING_FAILED=true" >> "$GITHUB_ENV"
             fi
           done
 
       - name: Generate and attach SBOM
         if: env.SIGNING_FAILED != 'true'
         run: |
-          # Generate SBOM for the container
-          echo "Generating SBOM attestation..."
+          IMAGE="${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}"
+          PAYLOAD=$(cat <<EOF
+          {
+            "spdxVersion": "SPDX-2.3",
+            "creationInfo": { "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)" },
+            "name": "${{ env.CONTAINER_IMAGE }}:${{ github.sha }}",
+            "packages": []
+          }
+          EOF
+          )
+
           for i in {1..3}; do
             echo "SBOM generation attempt $i/3..."
-            if cosign attest --yes --predicate-type="https://spdx.dev/Document" --predicate=<(echo '{"spdxVersion":"SPDX-2.3","creationInfo":{"created":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},"name":"'${{ env.CONTAINER_IMAGE }}:${{ github.sha }}'","packages":[]}') ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}; then
+            if cosign attest --yes \
+              --predicate-type="https://spdx.dev/Document" \
+              --predicate=<(echo "$PAYLOAD") "$IMAGE"; then
               echo "SBOM attestation created successfully"
               break
             else
               echo "SBOM attempt $i failed, retrying..."
               sleep 10
             fi
-            
+
             if [ $i -eq 3 ]; then
               echo "SBOM generation failed, but continuing..."
             fi
           done
 
-      - name: Verify container signature (if signed)
+      - name: Verify container signature
         if: env.SIGNING_FAILED != 'true'
         run: |
-          echo "Verifying container signature..."
-          cosign verify ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }} \
+          IMAGE="${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}"
+          cosign verify "$IMAGE" \
             --certificate-identity-regexp=".*" \
-            --certificate-oidc-issuer-regexp=".*" || echo "Verification failed but continuing..."
+            --certificate-oidc-issuer-regexp=".*" \
+            || echo "Verification failed but continuing..."
 
       - name: Create issue on failure
-        if: ${{ failure() }}
+        if: failure()
         uses: actions/github-script@v7
         with:
           script: |
-            try {
-              const assignee = "${{ github.actor }}";
-              const authorName = "${{ github.event.head_commit.author.name }}";
-              const authorEmail = "${{ github.event.head_commit.author.email }}";
-              
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `Container Signing Failed in ${context.job}`,
-                body: `### Container Signing Failed\n\n` +
-                      `**Job:** ${context.job}\n` +
-                      `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
-                      `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
-                      `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
-                      `Container signing failed. Please check the logs.`,
-                assignees: [assignee],
-                labels: ['ci-failure', 'security', 'container']
-              });
-            } catch (error) {
-              console.error('Error creating issue:', error);
-              core.setFailed(`Failed to create issue: ${error.message}`);
-            }
+            const assignee = "${{ github.actor }}";
+            const authorName = "${{ github.event.head_commit.author.name }}";
+            const authorEmail = "${{ github.event.head_commit.author.email }}";
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Container Signing Failed in ${context.job}`,
+              body: `### Container Signing Failed\n\n` +
+                    `**Job:** ${context.job}\n` +
+                    `**Commit:** [${context.sha.substring(0,7)}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\n` +
+                    `**Workflow:** [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\n` +
+                    `**Commit Author:** ${authorName} (${authorEmail})\n\n` +
+                    `Container signing failed. Please check the logs.`,
+              assignees: [assignee],
+              labels: ['ci-failure', 'security', 'container']
+            });
 
       - name: Slack Notification on Failure
-        if: ${{ failure() }}
+        if: failure()
         uses: act10ns/slack@v2.1.0
         with:
           channel: '#githubaction'
@@ -1767,7 +1781,6 @@ jobs:
               {"title": "Image", "value": "${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}", "short": false}
             ]
           footer: "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
-
   deploy-to-dockerhub:
       needs: [docker-build-test, owasp-zap-baseline-scan]  # Added DAST dependency
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
