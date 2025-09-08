@@ -86,8 +86,8 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: 3.11
-          
-      - name: Cache dependencies
+
+      - name: Cache pip dependencies
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
@@ -112,6 +112,15 @@ jobs:
       - name: Run Flake8 (linting)
         run: |
           flake8 app/ tests/ --max-line-length=100 --ignore=E203,W503 --exclude=migrations
+
+      - name: Run Bandit (security checks)
+        run: |
+          bandit -r app/ -lll
+
+      - name: Run Safety (dependency vulnerability check)
+        run: |
+          safety check
+
 
       - name: Create issue on linting failure
         if: failure()
