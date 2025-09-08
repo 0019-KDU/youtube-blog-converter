@@ -6,8 +6,37 @@ import logging
 import os
 import threading
 import atexit
+import sys
+import time
+import traceback
 
 logger = logging.getLogger(__name__)
+
+# Windows COM initialization for threading compatibility
+def _initialize_com_for_thread():
+    """Initialize COM for the current thread on Windows"""
+    try:
+        if sys.platform == "win32":
+            import pythoncom
+            pythoncom.CoInitialize()
+            logger.debug("COM initialized for thread")
+    except ImportError:
+        # pythoncom not available, continue without COM init
+        pass
+    except Exception as e:
+        logger.warning(f"COM initialization failed: {e}")
+
+def _uninitialize_com_for_thread():
+    """Uninitialize COM for the current thread on Windows"""
+    try:
+        if sys.platform == "win32":
+            import pythoncom
+            pythoncom.CoUninitialize()
+            logger.debug("COM uninitialized for thread")
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"COM uninitialization failed: {e}")
 
 class MongoDBConnectionManager:
     """Singleton MongoDB connection manager for proper resource handling"""
@@ -44,6 +73,9 @@ class MongoDBConnectionManager:
     
     def _connect(self):
         """Establish MongoDB connection with proper configuration"""
+        # Initialize COM for Windows threading compatibility
+        _initialize_com_for_thread()
+        
         try:
             logger.info("Establishing MongoDB connection...")
             
@@ -53,31 +85,50 @@ class MongoDBConnectionManager:
             if not self._mongodb_uri:
                 raise ValueError("MONGODB_URI environment variable not set")
             
-            # Configure connection with proper pooling and timeouts
-            self.client = MongoClient(
-                self._mongodb_uri,
-                maxPoolSize=self._connection_pool_size,
-                minPoolSize=5,
-                maxIdleTimeMS=self._max_idle_time_ms,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=10000,
-                socketTimeoutMS=20000,
-                retryWrites=True,
-                w='majority'
-            )
+            # Log the URI (masked for security)
+            masked_uri = self._mongodb_uri[:20] + "***" + self._mongodb_uri[-20:] if len(self._mongodb_uri) > 40 else "***"
+            logger.info(f"Connecting to MongoDB: {masked_uri}")
+            
+            # Use the simplest connection that we know works from testing
+            logger.info("Attempting MongoDB connection...")
+            self.client = MongoClient(self._mongodb_uri)
             
             # Get database
             self.db = self.client[self._mongodb_db_name]
             
             # Test connection
-            self.client.admin.command('ping')
-            # Remove emoji for Windows compatibility
-            logger.info(f"MongoDB connected successfully to database: {self._mongodb_db_name}")
+            logger.info("Testing MongoDB connection...")
+            result = self.client.server_info()
+            logger.info(f"MongoDB server version: {result.get('version', 'unknown')}")
             
+            # Test ping
+            self.client.admin.command('ping')
+            logger.info(f"MongoDB connected successfully to database: {self._mongodb_db_name}")
+                
         except Exception as e:
-            logger.error(f"MongoDB connection failed: {str(e)}")
+            # Handle Windows encoding issues in error messages
+            try:
+                error_str = str(e)
+                error_type = type(e).__name__
+                error_trace = traceback.format_exc()
+            except UnicodeEncodeError:
+                error_str = repr(e)  # Use repr to avoid encoding issues
+                error_type = type(e).__name__
+                error_trace = "Traceback unavailable due to encoding error"
+            
+            logger.error(f"All MongoDB connection attempts failed: {error_str}")
+            logger.error(f"Error type: {error_type}")
+            logger.error(f"Full traceback: {error_trace}")
             self.close_connection()
-            raise
+            
+            # Create a simplified error for Windows compatibility
+            if sys.platform == "win32" and "Invalid syntax" in error_str:
+                raise ConnectionError("MongoDB connection failed due to Windows compatibility issue. Please check your connection string.")
+            else:
+                raise
+        finally:
+            # Clean up COM for this thread
+            _uninitialize_com_for_thread()
     
     def close_connection(self):
         """Close MongoDB connection safely"""

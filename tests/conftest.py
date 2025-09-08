@@ -293,5 +293,37 @@ def setup_test_environment():
     # Cleanup
     for key in ['TESTING', 'FLASK_ENV', 'CI', 'LOG_TO_FILE', 'LOG_LEVEL']:
         os.environ.pop(key, None)
+
+# E2E Test Configuration
+def pytest_addoption(parser):
+    """Add command line options for test execution"""
+    parser.addoption(
+        "--run-e2e",
+        action="store_true",
+        default=False,
+        help="Run end-to-end tests"
+    )
+    parser.addoption(
+        "--run-integration",
+        action="store_true",
+        default=False,
+        help="Run integration tests"
+    )
+
+def pytest_collection_modifyitems(config, items):
+    """Modify test collection based on command line options"""
+    # Skip E2E tests unless explicitly requested
+    if not config.getoption("--run-e2e"):
+        skip_e2e = pytest.mark.skip(reason="E2E tests skipped (use --run-e2e to enable)")
+        for item in items:
+            if "e2e" in item.keywords:
+                item.add_marker(skip_e2e)
+    
+    # Skip integration tests unless explicitly requested or in CI
+    if not config.getoption("--run-integration") and not os.environ.get('CI'):
+        skip_integration = pytest.mark.skip(reason="Integration tests skipped (use --run-integration to enable)")
+        for item in items:
+            if "integration" in item.keywords:
+                item.add_marker(skip_integration)
          
             

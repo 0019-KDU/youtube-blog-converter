@@ -1,5 +1,6 @@
 from crewai import Agent
-from src.tool import YouTubeTranscriptTool, BlogGeneratorTool
+from app.services.youtube_service import YouTubeTranscriptTool
+from app.services.blog_service import BlogGeneratorTool
 import logging
 
 logger = logging.getLogger(__name__)

@@ -16,7 +16,7 @@
                     <p class="dashboard-subtitle">Manage your generated blog posts and track your progress</p>
                 </div>
                 <div class="col-lg-4 text-lg-end">
-                    <a href="{{ url_for('generate_page') }}" class="btn btn-orange btn-lg">
+                    <a href="{{ url_for('blog.generate_page') }}" class="btn btn-orange btn-lg">
                         <i class="fas fa-plus me-2"></i>Generate New Blog
                     </a>
                 </div>
@@ -163,7 +163,7 @@
                 </div>
                 <h4>No Blog Posts Yet</h4>
                 <p>Start creating amazing blog posts from YouTube videos</p>
-                <a href="{{ url_for('generate_page') }}" class="btn btn-orange">
+                <a href="{{ url_for('blog.generate_page') }}" class="btn btn-orange">
                     <i class="fas fa-plus me-2"></i>Create Your First Blog
                 </a>
             </div>
@@ -180,7 +180,7 @@
                         </div>
                         <h5>Generate New Blog</h5>
                         <p>Transform another YouTube video into a blog post</p>
-                        <a href="{{ url_for('generate_page') }}" class="btn btn-orange btn-sm">
+                        <a href="{{ url_for('blog.generate_page') }}" class="btn btn-orange btn-sm">
                             Get Started
                         </a>
                     </div>

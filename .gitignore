@@ -46,13 +46,14 @@ pip-delete-this-directory.txt
 # Unit Test / Coverage Reports
 # ===================================
 htmlcov/
+htmlcov-*/
 .tox/
 .nox/
 .coverage
 .coverage.*
+coverage*.xml
 .cache
 nosetests.xml
-coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
@@ -68,8 +69,6 @@ cover/
 # ===================================
 # Django
 # ===================================
-*.log
-*.logs
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -110,9 +109,11 @@ profile_default/
 ipython_config.py
 
 # ===================================
-# Environment Managers
+# Environment Variables & Config
 # ===================================
 .env
+.env.local
+.env.*.local
 .venv
 env/
 venv/
@@ -181,18 +182,38 @@ cython_debug/
 .pypirc
 
 # ===================================
-# Logs & Temp Files
+# Logs & Application Files
 # ===================================
+logs/
+*.log
+*.logs
 *.tmp
 *.swp
 *.swo
 
 # ===================================
-# Docker (optional)
+# Docker (Legacy)
 # ===================================
 *.pid
 *.pid.lock
 docker-compose.override.yml
+
+# ===================================
+# Terraform
+# ===================================
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.tfvars
+!terraform.tfvars.example
+.terraform/
+.terraform.lock.hcl
+terraform.tfplan
+tfplan
+tfplan.*
+backend.conf
+crash.log
+crash.*.log
 
 # ===================================
 # Databases (local only)
@@ -202,7 +223,52 @@ docker-compose.override.yml
 *.sqlite
 
 # ===================================
+# Security & Credentials
+# ===================================
+cookies.txt
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ===================================
+# Security Reports
+# ===================================
+bandit-report.json
+safety-report.json
+
+# ===================================
 # OS-specific
 # ===================================
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# ===================================
+# Node.js (if using any frontend tools)
+# ===================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===================================
+# Project-specific
+# ===================================
+# Claude Code
+.claude/
+
+# Temporary downloads
+downloads/
+temp/
+tmp/
+
+# User uploads (if not using cloud storage)
+uploads/
+
+# ===================================
+# Deployment Artifacts
+# ===================================
+deploy.zip
+*.war
+*.jar

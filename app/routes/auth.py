@@ -1,81 +1,13 @@
 from flask import Blueprint, request, jsonify, render_template, redirect, url_for, session
 from flask_jwt_extended import create_access_token, decode_token
-from .models import User, BlogPost
+from app.models.user import User
 import re
 import datetime
-import sys
-from pathlib import Path
 import logging
-
-# Import metrics from main app
-from prometheus_client import Counter
 
 logger = logging.getLogger(__name__)
 
-auth_bp = Blueprint('auth', __name__, template_folder='../templates')
-
-# Metrics for authentication
-user_registrations = Counter(
-    'user_registrations_total',
-    'Total user registrations',
-    ['status']
-)
-
-user_logins = Counter(
-    'user_logins_total',
-    'Total user login attempts',
-    ['status']
-)
-
-authentication_errors = Counter(
-    'authentication_errors_total',
-    'Total authentication errors',
-    ['error_type']
-)
-
-# Helper function to get current user (local to auth module)
-def get_current_user():
-    """Get current user from various authentication sources"""
-    try:
-        token = None
-        
-        # Check Authorization header
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-        
-        # Check session
-        if not token:
-            token = session.get('access_token')
-        
-        # Check user_id directly in session as fallback
-        if not token:
-            user_id = session.get('user_id')
-            if user_id:
-                user_model = User()
-                current_user = user_model.get_user_by_id(user_id)
-                if current_user:
-                    return current_user
-        
-        if token:
-            try:
-                decoded_token = decode_token(token)
-                current_user_id = decoded_token.get('sub')
-                
-                if current_user_id:
-                    user_model = User()
-                    current_user = user_model.get_user_by_id(current_user_id)
-                    return current_user
-            except Exception:
-                # Clear invalid token
-                session.pop('access_token', None)
-        
-        return None
-        
-    except Exception as e:
-        authentication_errors.labels(error_type=type(e).__name__).inc()
-        logger.error(f"Error getting current user: {e}")
-        return None
+auth_bp = Blueprint('auth', __name__, template_folder='../../templates')
 
 def is_valid_email(email):
     """Validate email format"""
@@ -88,12 +20,12 @@ def is_valid_password(password):
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
-    """User registration with metrics tracking"""
+    """User registration"""
     if request.method == 'GET':
-        # Check if user is already logged in
+        from app.utils.security import get_current_user
         current_user = get_current_user()
         if current_user:
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('blog.dashboard'))
         return render_template('register.html')
     
     try:
@@ -117,36 +49,31 @@ def register():
         # Validation
         if not all([username, email, password]):
             error_msg = 'All fields are required'
-            user_registrations.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('register.html', error=error_msg)
         
         if not is_valid_email(email):
             error_msg = 'Invalid email format'
-            user_registrations.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('register.html', error=error_msg)
         
         if not is_valid_password(password):
             error_msg = 'Password must be at least 8 characters long'
-            user_registrations.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('register.html', error=error_msg)
         
         if len(username) < 3:
             error_msg = 'Username must be at least 3 characters long'
-            user_registrations.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('register.html', error=error_msg)
         
-        # Password confirmation check (for JSON requests)
+        # Password confirmation check
         if request.is_json and confirm_password and password != confirm_password:
             error_msg = 'Passwords do not match'
-            user_registrations.labels(status='failed_validation').inc()
             return jsonify({'success': False, 'message': error_msg}), 400
         
         # Create user
@@ -155,7 +82,6 @@ def register():
         
         if not result.get('success'):
             error_msg = result.get('message', 'Registration failed')
-            user_registrations.labels(status='failed_exists').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 409
             return render_template('register.html', error=error_msg)
@@ -172,8 +98,6 @@ def register():
         session['access_token'] = access_token
         session['user_id'] = str(user['_id'])
         
-        # Track successful registration
-        user_registrations.labels(status='success').inc()
         logger.info(f"User registered successfully: {user['username']}")
         
         if request.is_json:
@@ -185,14 +109,12 @@ def register():
                     'username': user['username'],
                     'email': user['email']
                 },
-                'redirect_url': url_for('dashboard')
+                'redirect_url': url_for('blog.dashboard')
             })
         else:
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('blog.dashboard'))
             
     except Exception as e:
-        user_registrations.labels(status='failed_error').inc()
-        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Registration error: {str(e)}")
         error_msg = 'Registration failed. Please try again.'
         if request.is_json:
@@ -201,12 +123,12 @@ def register():
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
-    """User login with metrics tracking"""
+    """User login"""
     if request.method == 'GET':
-        # Check if user is already logged in
+        from app.utils.security import get_current_user
         current_user = get_current_user()
         if current_user:
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('blog.dashboard'))
         return render_template('login.html')
     
     try:
@@ -224,7 +146,6 @@ def login():
         
         if not email or not password:
             error_msg = 'Email and password are required'
-            user_logins.labels(status='failed_validation').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 400
             return render_template('login.html', error=error_msg)
@@ -244,8 +165,6 @@ def login():
             session['access_token'] = access_token
             session['user_id'] = str(user['_id'])
             
-            # Track successful login
-            user_logins.labels(status='success').inc()
             logger.info(f"User logged in successfully: {user['username']}")
             
             if request.is_json:
@@ -257,20 +176,17 @@ def login():
                         'username': user['username'],
                         'email': user['email']
                     },
-                    'redirect_url': url_for('dashboard')
+                    'redirect_url': url_for('blog.dashboard')
                 })
             else:
-                return redirect(url_for('dashboard'))
+                return redirect(url_for('blog.dashboard'))
         else:
             error_msg = 'Invalid email or password'
-            user_logins.labels(status='failed_credentials').inc()
             if request.is_json:
                 return jsonify({'success': False, 'message': error_msg}), 401
             return render_template('login.html', error=error_msg)
             
     except Exception as e:
-        user_logins.labels(status='failed_error').inc()
-        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Login error: {str(e)}")
         error_msg = 'Login failed. Please try again.'
         if request.is_json:
@@ -291,15 +207,14 @@ def logout():
         if request.is_json:
             return jsonify({'success': True, 'message': 'Logged out successfully'})
         else:
-            return redirect(url_for('index'))
+            return redirect(url_for('blog.index'))
             
     except Exception as e:
-        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Logout error: {str(e)}")
         if request.is_json:
             return jsonify({'success': False, 'message': 'Logout failed'}), 500
         else:
-            return redirect(url_for('index'))
+            return redirect(url_for('blog.index'))
 
 @auth_bp.route('/set-session-token', methods=['POST'])
 def set_session_token():
@@ -309,14 +224,12 @@ def set_session_token():
         token = data.get('access_token')
         
         if token:
-            # Store token in server session
             session['access_token'] = token
             return jsonify({'success': True})
         else:
             return jsonify({'success': False, 'message': 'No token provided'}), 400
             
     except Exception as e:
-        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Set session token error: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -324,6 +237,7 @@ def set_session_token():
 def verify_token():
     """Verify if current token is valid"""
     try:
+        from app.utils.security import get_current_user
         current_user = get_current_user()
         if current_user:
             return jsonify({
@@ -338,6 +252,5 @@ def verify_token():
             return jsonify({'success': False, 'message': 'Invalid token'}), 401
             
     except Exception as e:
-        authentication_errors.labels(error_type=type(e).__name__).inc()
         logger.error(f"Token verification error: {str(e)}")
         return jsonify({'success': False, 'message': 'Token verification failed'}), 500
