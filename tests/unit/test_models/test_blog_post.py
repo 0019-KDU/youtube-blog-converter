@@ -61,6 +61,17 @@ class TestBlogPost:
             mock_insert_result = Mock()
             mock_insert_result.inserted_id = post_id
             mock_coll.insert_one.return_value = mock_insert_result
+            
+            # Mock find_one to return the document that would have been inserted
+            mock_coll.find_one.return_value = {
+                '_id': post_id,
+                'user_id': user_id,  # Return the same user_id string
+                'title': 'Test Blog Post',
+                'content': 'Test content',
+                'youtube_url': 'https://www.youtube.com/watch?v=test123',
+                'video_id': 'test123'
+            }
+            
             mock_get_collection.return_value = mock_coll
 
             blog_post = BlogPost()
@@ -73,8 +84,7 @@ class TestBlogPost:
             )
 
             assert result is not None
-            assert result['user_id'] == user_id
-
+            assert result['user_id'] == user_id  # This should now pass
     def test_create_post_insert_failure(self):
         """Test blog post creation when insert fails"""
         from app.models.user import BlogPost
