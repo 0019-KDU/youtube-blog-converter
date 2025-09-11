@@ -154,8 +154,7 @@ class TestLoadPerformance:
             # Dashboard should load in under 3 seconds even with many posts
             assert duration < 3.0
             print(
-                f"Dashboard load time with {num_posts} posts: {
-                    duration:.3f} seconds")
+                f"Dashboard load time with {num_posts} posts: {duration:.3f} seconds")
 
             # Verify pagination or reasonable display
             response_text = response.get_data(as_text=True)

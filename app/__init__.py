@@ -148,8 +148,7 @@ def create_app():
     def unauthorized(error):
         """Handle unauthorized access"""
         logger.warning(
-            f"Unauthorized access attempt from {
-                request.remote_addr}")
+            f"Unauthorized access attempt from {request.remote_addr}")
         return redirect(url_for("auth.login"))
 
     @app.errorhandler(404)

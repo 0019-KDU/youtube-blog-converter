@@ -18,8 +18,7 @@ class TestCompleteWorkflow:
                     patch('app.utils.security.store_large_data') as mock_store:
 
                 mock_auth_service.get_current_user.return_value = authenticated_user
-                mock_generate.return_value = f'# Blog in {
-                    lang.upper()}\n\nThis is content in {lang} language with sufficient length to pass validation checks and meet the minimum 100 character requirement for blog generation.'
+                mock_generate.return_value = f'# Blog in {lang.upper()}\n\nThis is content in {lang} language with sufficient length to pass validation checks and meet the minimum 100 character requirement for blog generation.'
 
                 mock_blog = Mock()
                 mock_blog.create_post.return_value = {

@@ -111,10 +111,7 @@ class MongoDBConnectionManager:
             logger.info("Testing MongoDB connection...")
             result = self.client.server_info()
             logger.info(
-                f"MongoDB server version: {
-                    result.get(
-                        'version',
-                        'unknown')}")
+                f"MongoDB server version: {result.get('version', 'unknown')}")
 
             # Test ping
             self.client.admin.command("ping")

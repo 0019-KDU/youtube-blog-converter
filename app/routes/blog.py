@@ -40,8 +40,7 @@ def generate_page():
             return redirect(url_for("auth.login"))
 
         logger.info(
-            f"Generate page accessed by user: {
-                current_user['username']}")
+            f"Generate page accessed by user: {current_user['username']}")
         return render_template("generate.html")
     except Exception as e:
         logger.error(f"Error loading generate page: {str(e)}", exc_info=True)

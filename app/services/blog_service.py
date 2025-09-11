@@ -113,8 +113,7 @@ class BlogGeneratorTool:
             cleaned_content = self._clean_markdown_content(generated_content)
 
             logger.info(
-                f"✅ Blog generation successful: {
-                    len(cleaned_content)} characters")
+                f"✅ Blog generation successful: {len(cleaned_content)} characters")
             return cleaned_content
 
         except Exception as e:

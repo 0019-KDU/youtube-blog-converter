@@ -122,10 +122,7 @@ def health_metrics():
         metrics.append(f"app_memory_used_bytes {memory.used}")
         metrics.append(f"app_memory_total_bytes {memory.total}")
         metrics.append(
-            f"app_disk_percent {
-                round(
-                    (disk.used / disk.total) * 100,
-                    2)}")
+            f"app_disk_percent {round((disk.used / disk.total) * 100, 2)}")
         metrics.append(f"app_disk_used_bytes {disk.used}")
         metrics.append(f"app_disk_total_bytes {disk.total}")
 
