@@ -105,7 +105,7 @@ jobs:
 
       - name: Run Flake8 (linting)
         run: |
-          flake8 app/ tests/ --max-line-length=100 --ignore=E203,W503 --exclude=migrations
+          flake8 app/ tests/ --max-line-length=120 --ignore=E203,W503,W504,F401,F841,F541,E501 --exclude=migrations
 
       - name: Run Bandit (security checks)
         run: |

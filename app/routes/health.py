@@ -121,15 +121,24 @@ def health_metrics():
         metrics.append(f"app_memory_percent {memory.percent}")
         metrics.append(f"app_memory_used_bytes {memory.used}")
         metrics.append(f"app_memory_total_bytes {memory.total}")
-        metrics.append(f"app_disk_percent {round((disk.used / disk.total) * 100, 2)}")
+        metrics.append(
+            f"app_disk_percent {
+                round(
+                    (disk.used / disk.total) * 100,
+                    2)}")
         metrics.append(f"app_disk_used_bytes {disk.used}")
         metrics.append(f"app_disk_total_bytes {disk.total}")
 
         # Application metrics
-        metrics.append(f"app_temp_storage_items {len(current_app.temp_storage)}")
         metrics.append(
-            f'app_uptime_seconds {int(time.time() - current_app.start_time) if hasattr(current_app, "start_time") else 0}'
-        )
+            f"app_temp_storage_items {len(current_app.temp_storage)}")
+        metrics.append(
+            f'app_uptime_seconds {
+                int(
+                    time.time() -
+                    current_app.start_time) if hasattr(
+                    current_app,
+                    "start_time") else 0}')
 
         # Join all metrics
         response_text = "\n".join(metrics) + "\n"
@@ -139,5 +148,6 @@ def health_metrics():
     except Exception as e:
         logger.error(f"Health metrics error: {e}", exc_info=True)
         # Return error metric
-        error_response = f'app_health_status 0\napp_error {{error="{str(e)}"}} 1\n'
+        error_response = f'app_health_status 0\napp_error {{error="{
+            str(e)}"}} 1\n'
         return Response(error_response, mimetype="text/plain"), 503

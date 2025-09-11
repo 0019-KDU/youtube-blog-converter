@@ -27,9 +27,8 @@ def create_app():
     static_dir = codebase_dir / "static"
     templates_dir = codebase_dir / "templates"
     # Create Flask app
-    app = Flask(
-        __name__, static_folder=str(static_dir), template_folder=str(templates_dir)
-    )
+    app = Flask(__name__, static_folder=str(static_dir),
+                template_folder=str(templates_dir))
 
     # Configuration
     app.config["SECRET_KEY"] = (
@@ -148,7 +147,9 @@ def create_app():
     @app.errorhandler(401)
     def unauthorized(error):
         """Handle unauthorized access"""
-        logger.warning(f"Unauthorized access attempt from {request.remote_addr}")
+        logger.warning(
+            f"Unauthorized access attempt from {
+                request.remote_addr}")
         return redirect(url_for("auth.login"))
 
     @app.errorhandler(404)
@@ -161,7 +162,8 @@ def create_app():
     def internal_error(error):
         """Handle 500 errors"""
         logger.error(f"Internal server error: {error}", exc_info=True)
-        return render_template("error.html", error="Internal server error"), 500
+        return render_template(
+            "error.html", error="Internal server error"), 500
 
     # Application cleanup
     @app.teardown_appcontext

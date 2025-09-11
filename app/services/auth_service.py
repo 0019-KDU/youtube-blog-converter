@@ -44,7 +44,8 @@ class AuthService:
 
                     if current_user_id:
                         user_model = User()
-                        current_user = user_model.get_user_by_id(current_user_id)
+                        current_user = user_model.get_user_by_id(
+                            current_user_id)
                         if current_user:
                             g.user_id = str(current_user["_id"])
                             return current_user

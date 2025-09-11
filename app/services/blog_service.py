@@ -59,9 +59,9 @@ class BlogGeneratorTool:
             logger.info("Generating blog content from transcript...")
 
             # Enhanced prompt for better formatting
-            prompt = f"""
+            prompt = """
             Create a comprehensive, well-formatted blog article from the following YouTube transcript.
-            
+
             FORMATTING REQUIREMENTS:
             - Use clean Markdown formatting
             - Start with a compelling title using # (single hash only)
@@ -71,20 +71,20 @@ class BlogGeneratorTool:
             - No markdown artifacts like **, ---, ||, or excess symbols
             - Proper spacing between sections
             - Professional, readable tone
-            
+
             CONTENT REQUIREMENTS:
             - Preserve all specific tool names, company names, and technical terms
             - Include detailed explanations and comparisons
             - Maintain original structure and recommendations
             - Add an engaging introduction and conclusion
             - Use proper paragraph breaks for readability
-            
+
             AVOID:
             - Markdown artifacts (**, ---, ||, etc.)
             - Excessive symbols or decorative elements
             - Poor spacing or formatting
             - Vague generalizations
-            
+
             Transcript:
             {transcript[:15000]}
             """
@@ -113,8 +113,8 @@ class BlogGeneratorTool:
             cleaned_content = self._clean_markdown_content(generated_content)
 
             logger.info(
-                f"✅ Blog generation successful: {len(cleaned_content)} characters"
-            )
+                f"✅ Blog generation successful: {
+                    len(cleaned_content)} characters")
             return cleaned_content
 
         except Exception as e:
@@ -130,8 +130,12 @@ class BlogGeneratorTool:
             return content
 
         # Remove markdown artifacts
-        content = re.sub(r"\*\*([^*]+)\*\*", r"\1", content)  # Remove bold asterisks
-        content = re.sub(r"\*([^*]+)\*", r"\1", content)  # Remove italic asterisks
+        content = re.sub(
+            r"\*\*([^*]+)\*\*",
+            r"\1",
+            content)  # Remove bold asterisks
+        # Remove italic asterisks
+        content = re.sub(r"\*([^*]+)\*", r"\1", content)
         content = re.sub(r"_{2,}", "", content)  # Remove underscores
         content = re.sub(r"-{3,}", "", content)  # Remove horizontal rules
         content = re.sub(r"\|{2,}", "", content)  # Remove pipe symbols
@@ -151,7 +155,11 @@ class BlogGeneratorTool:
         content = re.sub(
             r"^#{4,}\s*", "### ", content, flags=re.MULTILINE
         )  # Max 3 levels
-        content = re.sub(r"^(#{1,3})\s*(.+?)$", r"\1 \2\n", content, flags=re.MULTILINE)
+        content = re.sub(
+            r"^(#{1,3})\s*(.+?)$",
+            r"\1 \2\n",
+            content,
+            flags=re.MULTILINE)
 
         # Fix list formatting
         content = re.sub(
@@ -209,7 +217,8 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
     if not youtube_url or not re.match(
         r"^https?://(www\.)?(youtube\.com|youtu\.be)/", youtube_url
     ):
-        return _create_error_response(youtube_url, "Invalid YouTube URL provided")
+        return _create_error_response(
+            youtube_url, "Invalid YouTube URL provided")
 
     video_id = _extract_video_id(youtube_url)
     if not video_id:
@@ -227,18 +236,24 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
             cleaned_output = _clean_final_output(result_text)
             duration = time.time() - start_time
             logger.info(
-                f"✅ Blog generated successfully in {duration:.2f}s (cleaned length: {len(cleaned_output)})"
-            )
+                f"✅ Blog generated successfully in {
+                    duration:.2f}s (cleaned length: {
+                    len(cleaned_output)})")
             return cleaned_output
 
         duration = time.time() - start_time
         logger.error(f"❌ Blog generation failed after {duration:.2f}s")
-        return _create_error_response(youtube_url, "Could not generate blog content")
+        return _create_error_response(
+            youtube_url, "Could not generate blog content")
 
     except Exception as e:
         duration = time.time() - start_time
-        logger.error(f"❌ Blog generation failed after {duration:.2f}s: {str(e)}")
-        return _create_error_response(youtube_url, f"Unexpected error: {str(e)}")
+        logger.error(
+            f"❌ Blog generation failed after {
+                duration:.2f}s: {
+                str(e)}")
+        return _create_error_response(
+            youtube_url, f"Unexpected error: {str(e)}")
 
 
 def individual_components_test(youtube_url: str, language: str = "en") -> str:
@@ -253,12 +268,13 @@ def individual_components_test(youtube_url: str, language: str = "en") -> str:
         transcript_result = transcript_tool._run(youtube_url, language)
 
         if transcript_result.startswith("ERROR:"):
-            logger.error(f"❌ Transcript extraction failed: {transcript_result}")
+            logger.error(
+                f"❌ Transcript extraction failed: {transcript_result}")
             return _create_error_response(youtube_url, transcript_result)
 
         logger.info(
-            f"✅ Transcript extraction successful: {len(transcript_result)} characters"
-        )
+            f"✅ Transcript extraction successful: {
+                len(transcript_result)} characters")
 
         # Test Blog Generator Tool
         logger.info("Testing Blog Generator Tool...")
@@ -269,12 +285,17 @@ def individual_components_test(youtube_url: str, language: str = "en") -> str:
             logger.error(f"❌ Blog generation failed: {blog_result}")
             return _create_error_response(youtube_url, blog_result)
 
-        logger.info(f"✅ Blog generation successful: {len(blog_result)} characters")
+        logger.info(
+            f"✅ Blog generation successful: {
+                len(blog_result)} characters")
         return blog_result
 
     except Exception as e:
         logger.error(f"❌ Component test failed: {str(e)}")
-        return _create_error_response(youtube_url, f"Component test failed: {str(e)}")
+        return _create_error_response(
+            youtube_url,
+            f"Component test failed: {
+                str(e)}")
 
 
 def _extract_video_id(url: str) -> str:
@@ -310,7 +331,11 @@ def _clean_final_output(content: str) -> str:
     content = re.sub(r"Action:\s*\w+", "", content, flags=re.IGNORECASE)
     content = re.sub(r"Tool:\s*\w+", "", content, flags=re.IGNORECASE)
     content = re.sub(r"BlogGeneratorTool", "", content, flags=re.IGNORECASE)
-    content = re.sub(r"YouTubeTranscriptTool", "", content, flags=re.IGNORECASE)
+    content = re.sub(
+        r"YouTubeTranscriptTool",
+        "",
+        content,
+        flags=re.IGNORECASE)
 
     # Remove JSON artifacts and unmatched braces
     content = re.sub(r'\{[^{}]*"[^"]*"[^{}]*\}', "", content, flags=re.DOTALL)
@@ -325,7 +350,11 @@ def _clean_final_output(content: str) -> str:
 
     # Fix heading formatting with proper spacing
     content = re.sub(r"^(\s*#{4,})\s*", r"\1### ", content, flags=re.MULTILINE)
-    content = re.sub(r"^(\s*#{1,3})\s*(\S)", r"\1 \2", content, flags=re.MULTILINE)
+    content = re.sub(
+        r"^(\s*#{1,3})\s*(\S)",
+        r"\1 \2",
+        content,
+        flags=re.MULTILINE)
 
     # Ensure proper spacing between sections
     content = re.sub(r"\n{3,}", "\n\n", content)
@@ -368,7 +397,7 @@ def _create_error_response(youtube_url: str, error_msg: str) -> str:
     """Create informative error response"""
     import time
 
-    return f"""# YouTube Video Analysis - Technical Issue
+    return """# YouTube Video Analysis - Technical Issue
 
 ## Video Information
 

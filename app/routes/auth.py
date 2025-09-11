@@ -4,9 +4,10 @@ import re
 
 from flask import (Blueprint, jsonify, redirect, render_template, request,
                    session, url_for)
-from flask_jwt_extended import create_access_token, decode_token
+from flask_jwt_extended import create_access_token
 
 from app.models.user import User
+
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +168,9 @@ def login():
         if user:
             # Create JWT token
             access_token = create_access_token(
-                identity=str(user["_id"]), expires_delta=datetime.timedelta(days=1)
-            )
+                identity=str(
+                    user["_id"]), expires_delta=datetime.timedelta(
+                    days=1))
 
             # Store in session
             session["access_token"] = access_token
@@ -217,7 +219,8 @@ def logout():
         session.clear()
 
         if request.is_json:
-            return jsonify({"success": True, "message": "Logged out successfully"})
+            return jsonify({"success": True,
+                            "message": "Logged out successfully"})
         else:
             return redirect(url_for("blog.index"))
 
@@ -240,7 +243,8 @@ def set_session_token():
             session["access_token"] = token
             return jsonify({"success": True})
         else:
-            return jsonify({"success": False, "message": "No token provided"}), 400
+            return jsonify(
+                {"success": False, "message": "No token provided"}), 400
 
     except Exception as e:
         logger.error(f"Set session token error: {str(e)}")
@@ -270,4 +274,5 @@ def verify_token():
 
     except Exception as e:
         logger.error(f"Token verification error: {str(e)}")
-        return jsonify({"success": False, "message": "Token verification failed"}), 500
+        return jsonify(
+            {"success": False, "message": "Token verification failed"}), 500

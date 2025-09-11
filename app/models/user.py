@@ -4,7 +4,6 @@ import logging
 import os
 import sys
 import threading
-import time
 import traceback
 
 from bson import ObjectId
@@ -54,7 +53,8 @@ class MongoDBConnectionManager:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = super(MongoDBConnectionManager, cls).__new__(cls)
+                    cls._instance = super(
+                        MongoDBConnectionManager, cls).__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
 
@@ -86,7 +86,8 @@ class MongoDBConnectionManager:
             logger.info("Establishing MongoDB connection...")
 
             self._mongodb_uri = os.getenv("MONGODB_URI")
-            self._mongodb_db_name = os.getenv("MONGODB_DB_NAME", "youtube_blog_db")
+            self._mongodb_db_name = os.getenv(
+                "MONGODB_DB_NAME", "youtube_blog_db")
 
             if not self._mongodb_uri:
                 raise ValueError("MONGODB_URI environment variable not set")
@@ -109,13 +110,17 @@ class MongoDBConnectionManager:
             # Test connection
             logger.info("Testing MongoDB connection...")
             result = self.client.server_info()
-            logger.info(f"MongoDB server version: {result.get('version', 'unknown')}")
+            logger.info(
+                f"MongoDB server version: {
+                    result.get(
+                        'version',
+                        'unknown')}")
 
             # Test ping
             self.client.admin.command("ping")
             logger.info(
-                f"MongoDB connected successfully to database: {self._mongodb_db_name}"
-            )
+                f"MongoDB connected successfully to database: {
+                    self._mongodb_db_name}")
 
         except Exception as e:
             # Handle Windows encoding issues in error messages
@@ -128,7 +133,8 @@ class MongoDBConnectionManager:
                 error_type = type(e).__name__
                 error_trace = "Traceback unavailable due to encoding error"
 
-            logger.error(f"All MongoDB connection attempts failed: {error_str}")
+            logger.error(
+                f"All MongoDB connection attempts failed: {error_str}")
             logger.error(f"Error type: {error_type}")
             logger.error(f"Full traceback: {error_trace}")
             self.close_connection()
@@ -208,12 +214,14 @@ class BaseModel:
             self._ensure_connection()
             return mongo_manager.get_collection(self.collection_name)
         except Exception as e:
-            logger.error(f"Failed to get collection {self.collection_name}: {str(e)}")
+            logger.error(
+                f"Failed to get collection {
+                    self.collection_name}: {
+                    str(e)}")
             raise
 
     def __del__(self):
         """Destructor - no need to close connection as it's managed by singleton"""
-        pass
 
 
 class User(BaseModel):
@@ -348,7 +356,8 @@ class User(BaseModel):
             # Add updated timestamp
             update_data["updated_at"] = datetime.datetime.utcnow()
 
-            result = collection.update_one({"_id": user_id}, {"$set": update_data})
+            result = collection.update_one(
+                {"_id": user_id}, {"$set": update_data})
 
             return result.modified_count > 0
 
@@ -505,7 +514,8 @@ class BlogPost(BaseModel):
             if isinstance(user_id, str):
                 user_id = ObjectId(user_id)
 
-            result = collection.delete_one({"_id": post_id, "user_id": user_id})
+            result = collection.delete_one(
+                {"_id": post_id, "user_id": user_id})
 
             if result.deleted_count > 0:
                 logger.info(f"Blog post deleted successfully: {post_id}")

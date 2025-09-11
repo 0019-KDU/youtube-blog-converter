@@ -73,7 +73,8 @@ def inject_config():
 def inject_user():
     """Inject current user into all templates"""
     current_user = get_current_user()
-    return dict(current_user=current_user, user_logged_in=current_user is not None)
+    return dict(current_user=current_user,
+                user_logged_in=current_user is not None)
 
 
 def store_large_data(key, data, user_id=None):
@@ -81,7 +82,8 @@ def store_large_data(key, data, user_id=None):
     import time
 
     storage_key = f"{user_id}_{key}" if user_id else key
-    current_app.temp_storage[storage_key] = {"data": data, "timestamp": time.time()}
+    current_app.temp_storage[storage_key] = {
+        "data": data, "timestamp": time.time()}
 
     # Clean old data (older than 1 hour)
     cleanup_old_storage()

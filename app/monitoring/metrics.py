@@ -41,7 +41,10 @@ blog_generation_duration = Histogram(
     registry=REGISTRY,
 )
 
-active_users = Gauge("active_users", "Number of active users", registry=REGISTRY)
+active_users = Gauge(
+    "active_users",
+    "Number of active users",
+    registry=REGISTRY)
 
 youtube_urls_processed = Counter(
     "youtube_urls_processed_total",
@@ -54,7 +57,10 @@ openai_tokens_used = Counter(
     "openai_tokens_used_total", "Total OpenAI tokens used", registry=REGISTRY
 )
 
-pdf_downloads = Counter("pdf_downloads_total", "Total PDF downloads", registry=REGISTRY)
+pdf_downloads = Counter(
+    "pdf_downloads_total",
+    "Total PDF downloads",
+    registry=REGISTRY)
 
 database_operations = Counter(
     "database_operations_total",
@@ -64,7 +70,10 @@ database_operations = Counter(
 )
 
 # System metrics
-cpu_usage = Gauge("system_cpu_usage_percent", "CPU usage percentage", registry=REGISTRY)
+cpu_usage = Gauge(
+    "system_cpu_usage_percent",
+    "CPU usage percentage",
+    registry=REGISTRY)
 
 memory_usage = Gauge(
     "system_memory_usage_bytes", "Memory usage in bytes", registry=REGISTRY
@@ -95,8 +104,10 @@ user_registrations = Counter(
 )
 
 user_logins = Counter(
-    "user_logins_total", "Total user login attempts", ["status"], registry=REGISTRY
-)
+    "user_logins_total",
+    "Total user login attempts",
+    ["status"],
+    registry=REGISTRY)
 
 # Error metrics
 application_errors = Counter(
@@ -106,9 +117,8 @@ application_errors = Counter(
     registry=REGISTRY,
 )
 
-api_errors = Counter(
-    "api_errors_total", "Total API errors", ["api", "error_type"], registry=REGISTRY
-)
+api_errors = Counter("api_errors_total", "Total API errors", [
+    "api", "error_type"], registry=REGISTRY)
 
 # Log metrics for Loki integration
 log_entries_total = Counter(
@@ -151,7 +161,9 @@ class ContextAwareLogMetricsFilter(logging.Filter):
 
     def filter(self, record):
         # Track log entries by level
-        log_entries_total.labels(level=record.levelname, logger=record.name).inc()
+        log_entries_total.labels(
+            level=record.levelname,
+            logger=record.name).inc()
 
         # Add context information to log records safely
         if has_app_context():
@@ -230,7 +242,9 @@ def setup_metrics(app):
     def metrics():
         """Prometheus metrics endpoint"""
         try:
-            return Response(generate_latest(REGISTRY), mimetype=CONTENT_TYPE_LATEST)
+            return Response(
+                generate_latest(REGISTRY),
+                mimetype=CONTENT_TYPE_LATEST)
         except Exception as e:
             logger.error(f"Error generating metrics: {e}", exc_info=True)
             return "Error generating metrics", 500

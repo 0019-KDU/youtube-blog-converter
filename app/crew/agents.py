@@ -13,7 +13,8 @@ def create_agents():
 
     transcriber = Agent(
         role="YouTube Technical Content Extractor",
-        goal="Extract complete, detailed transcripts preserving all technical terms and specific tool names",
+        goal=("Extract complete, detailed transcripts preserving "
+              "all technical terms and specific tool names"),
         backstory=(
             "You are an expert at extracting technical content from videos. "
             "You never generalize or summarize - you capture every specific detail, "
@@ -25,12 +26,13 @@ def create_agents():
         memory=False,  # Disable memory to prevent input reuse
         allow_delegation=False,
         max_retry_limit=1,  # Limit retries to prevent loops
-        step_callback=lambda step: logger.info(f"Transcriber step completed"),
+        step_callback=lambda step: logger.info("Transcriber step completed"),
     )
 
     writer = Agent(
         role="Technical Blog Writer",
-        goal="Create detailed technical blog posts that preserve every specific detail from transcripts",
+        goal=("Create detailed technical blog posts that preserve "
+              "every specific detail from transcripts"),
         backstory=(
             "You are a technical writer who specializes in creating comprehensive, "
             "detailed blog posts from video transcripts. You never generalize or "
@@ -42,7 +44,7 @@ def create_agents():
         memory=False,  # Disable memory to prevent conflicts
         allow_delegation=False,
         max_retry_limit=1,
-        step_callback=lambda step: logger.info(f"Writer step completed"),
+        step_callback=lambda step: logger.info("Writer step completed"),
     )
 
     logger.info("Enhanced agents created successfully")

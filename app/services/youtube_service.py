@@ -58,7 +58,7 @@ class YouTubeTranscriptTool:
             return f"ERROR: Request failed - {str(e)}"
         except json.JSONDecodeError:
             logger.error("Invalid JSON response from API")
-            return f"ERROR: Invalid response from transcript API"
+            return "ERROR: Invalid response from transcript API"
         except Exception as e:
             logger.error(f"Unexpected error: {str(e)}")
             return f"ERROR: Unexpected error - {str(e)}"

@@ -28,7 +28,8 @@ class LokiHandler(logging.Handler):
 
         # Batch processing
         self.log_queue = Queue()
-        self.batch_thread = threading.Thread(target=self._batch_sender, daemon=True)
+        self.batch_thread = threading.Thread(
+            target=self._batch_sender, daemon=True)
         self.batch_thread.start()
 
     def emit(self, record):
@@ -63,9 +64,8 @@ class LokiHandler(logging.Handler):
                 labels["error_type"] = record.error_type
 
             # Create Loki entry
-            loki_entry = {
-                "streams": [{"stream": labels, "values": [[timestamp, log_entry]]}]
-            }
+            loki_entry = {"streams": [
+                {"stream": labels, "values": [[timestamp, log_entry]]}]}
 
             # Add to queue for batch processing
             self.log_queue.put(loki_entry)
@@ -118,7 +118,8 @@ class LokiHandler(logging.Handler):
                             "stream": stream["stream"],
                             "values": [],
                         }
-                    merged_streams[stream_key]["values"].extend(stream["values"])
+                    merged_streams[stream_key]["values"].extend(
+                        stream["values"])
 
             # Create final payload
             payload = {"streams": list(merged_streams.values())}
@@ -133,7 +134,8 @@ class LokiHandler(logging.Handler):
             )
 
             if response.status_code != 204:
-                print(f"Loki push failed: {response.status_code} - {response.text}")
+                print(
+                    f"Loki push failed: {response.status_code} - {response.text}")
 
         except Exception as e:
             print(f"Failed to send logs to Loki: {e}")
@@ -145,7 +147,8 @@ class LokiJsonFormatter(logging.Formatter):
     def format(self, record):
         # Create base log entry
         log_entry = {
-            "timestamp": datetime.datetime.fromtimestamp(record.created).isoformat(),
+            "timestamp": datetime.datetime.fromtimestamp(
+                record.created).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -249,9 +252,8 @@ def setup_logging(app):
 
     # Determine log directory based on environment
     shared_log_path = os.getenv("SHARED_LOG_PATH", "/shared-logs")
-    log_dir = (
-        Path(shared_log_path) if os.path.exists(shared_log_path) else Path("./logs")
-    )
+    log_dir = (Path(shared_log_path) if os.path.exists(
+        shared_log_path) else Path("./logs"))
 
     # Create log directory
     log_dir.mkdir(parents=True, exist_ok=True)

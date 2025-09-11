@@ -1,6 +1,5 @@
 import gc
 import logging
-import os
 import re
 
 from fpdf import FPDF
@@ -90,7 +89,8 @@ class PDFGeneratorTool:
 
             # Extract and add title
             title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-            title = title_match.group(1) if title_match else "Generated Blog Article"
+            title = title_match.group(
+                1) if title_match else "Generated Blog Article"
             title = self._clean_unicode_text(title)
 
             # Title formatting
@@ -106,7 +106,8 @@ class PDFGeneratorTool:
                 current_line = ""
 
                 for word in words:
-                    test_line = current_line + (" " if current_line else "") + word
+                    test_line = current_line + \
+                        (" " if current_line else "") + word
                     if pdf.get_string_width(test_line) <= effective_width:
                         current_line = test_line
                     else:

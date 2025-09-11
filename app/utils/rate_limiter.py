@@ -29,7 +29,8 @@ class RateLimiter:
         # Check minute limit
         minute_requests = len(self.minute_buckets[identifier])
         if minute_requests >= self.requests_per_minute:
-            logger.warning(f"Rate limit exceeded (per minute) for {identifier}")
+            logger.warning(
+                f"Rate limit exceeded (per minute) for {identifier}")
             return False
 
         # Check hour limit
@@ -78,4 +79,6 @@ class RateLimiter:
             0, self.requests_per_hour - len(self.hour_buckets[identifier])
         )
 
-        return {"minute_remaining": minute_remaining, "hour_remaining": hour_remaining}
+        return {
+            "minute_remaining": minute_remaining,
+            "hour_remaining": hour_remaining}

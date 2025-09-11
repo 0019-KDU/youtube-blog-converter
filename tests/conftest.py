@@ -3,12 +3,10 @@ import os
 import shutil
 import sys
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from flask import Flask
 
 # Ensure app directory is in path before any imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -36,7 +34,7 @@ except ImportError:
     class ObjectId:
         def __init__(self, oid=None):
             self._id = oid or 'test_object_id_12345'
-        
+
         def __str__(self):
             return str(self._id)
 
@@ -46,7 +44,7 @@ def mock_environment_variables(monkeypatch):
     """Mock environment variables for all tests"""
     env_vars = {
         "OPENAI_API_KEY": "test_openai_key_12345",
-        "SUPADATA_API_KEY": "test_supadata_key_12345", 
+        "SUPADATA_API_KEY": "test_supadata_key_12345",
         "MONGODB_URI": "mongodb://test:test@localhost:27017/test_db",
         "MONGODB_DB_NAME": "test_blog_db",
         "JWT_SECRET_KEY": "test_jwt_secret_key_12345",
@@ -58,7 +56,7 @@ def mock_environment_variables(monkeypatch):
         "LOKI_URL": "http://test-loki:3100",
         "GA_MEASUREMENT_ID": "GA-TEST-123456",
     }
-    
+
     for key, value in env_vars.items():
         monkeypatch.setenv(key, value)
 
@@ -80,9 +78,9 @@ def mock_logging():
 def mock_mongodb_globally():
     """Mock MongoDB connections globally for all tests"""
     with patch('app.models.user.MongoClient') as mock_client, \
-         patch('app.models.user.mongo_manager') as mock_manager, \
-         patch('pymongo.MongoClient') as mock_pymongo_client:
-        
+            patch('app.models.user.mongo_manager') as mock_manager, \
+            patch('pymongo.MongoClient') as mock_pymongo_client:
+
         # Configure mock collection
         mock_collection = MagicMock()
         mock_collection.find_one.return_value = None
@@ -92,11 +90,11 @@ def mock_mongodb_globally():
         mock_collection.find.return_value = Mock()
         mock_collection.find.return_value.sort.return_value.limit.return_value.skip.return_value = []
         mock_collection.count_documents.return_value = 0
-        
+
         # Configure mock database
         mock_db = MagicMock()
         mock_db.__getitem__.return_value = mock_collection
-        
+
         # Configure mock client
         mock_client_instance = MagicMock()
         mock_client_instance.__getitem__.return_value = mock_db
@@ -104,14 +102,14 @@ def mock_mongodb_globally():
         mock_client_instance.admin.command.return_value = {'ok': 1}
         mock_client.return_value = mock_client_instance
         mock_pymongo_client.return_value = mock_client_instance
-        
+
         # Configure mock manager
         mock_manager.is_connected.return_value = True
         mock_manager.get_collection.return_value = mock_collection
         mock_manager.get_database.return_value = mock_db
         mock_manager.client = mock_client_instance
         mock_manager.db = mock_db
-        
+
         yield {
             'client': mock_client,
             'manager': mock_manager,
@@ -136,18 +134,18 @@ def app():
         'JWT_ACCESS_TOKEN_EXPIRES': '86400',
         'FLASK_ENV': 'testing',
     })
-    
+
     # Use the app factory to create the app with all blueprints registered
     from app import create_app
     app = create_app()
-    
+
     # Override config for testing
     app.config.update({
         'TESTING': True,
         'WTF_CSRF_ENABLED': False,
         'SESSION_COOKIE_SECURE': False,
     })
-    
+
     yield app
 
 
@@ -188,15 +186,14 @@ def mock_requests_session():
     mock_response.json.return_value = {
         'content': 'This is a comprehensive test transcript about artificial intelligence and machine learning technologies.',
         'video_id': 'test123',
-        'title': 'Technology Innovation Video'
-    }
+        'title': 'Technology Innovation Video'}
     mock_response.raise_for_status.return_value = None
-    
+
     mock_session.get.return_value = mock_response
     mock_session.post.return_value = mock_response
     mock_session.close.return_value = None
     mock_session.headers = {}
-    
+
     yield mock_session
 
 
@@ -236,7 +233,7 @@ def create_test_user(user_model, **kwargs):
     """Helper to create test user"""
     user_data = {
         'username': 'testuser',
-        'email': 'test@example.com', 
+        'email': 'test@example.com',
         'password': 'testpassword123',
         **kwargs
     }
@@ -297,7 +294,11 @@ def sample_invalid_urls():
 # Pytest configuration
 def pytest_configure(config):
     """Configure pytest with custom markers"""
-    config.addinivalue_line("markers", "crewai: mark test to run only if crewai is available")
-    config.addinivalue_line("markers", "integration: mark test as integration test")
+    config.addinivalue_line(
+        "markers",
+        "crewai: mark test to run only if crewai is available")
+    config.addinivalue_line(
+        "markers",
+        "integration: mark test as integration test")
     config.addinivalue_line("markers", "slow: mark test as slow running")
     config.addinivalue_line("markers", "unit: mark test as unit test")
