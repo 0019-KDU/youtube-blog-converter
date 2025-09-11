@@ -65,7 +65,8 @@ class TestYouTubeTranscriptTool:
         """Test transcript extraction with request exception"""
         from app.services.youtube_service import YouTubeTranscriptTool
         
-        mock_requests_session.get.side_effect = requests.exceptions.RequestException("Connection error")
+        mock_requests_session.get.side_effect = requests.exceptions.RequestException(
+            "Connection error")
         
         with patch.dict('os.environ', {'SUPADATA_API_KEY': 'test-key'}), \
              patch('app.services.youtube_service.requests.Session', return_value=mock_requests_session):

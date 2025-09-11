@@ -164,7 +164,7 @@ class ContextAwareLogMetricsFilter(logging.Filter):
 
                 if not hasattr(record, "endpoint"):
                     record.endpoint = request.endpoint if request else "unknown"
-            except:
+            except (AttributeError, RuntimeError):
                 record.request_id = "no-request"
                 record.user_id = "anonymous"
                 record.endpoint = "unknown"

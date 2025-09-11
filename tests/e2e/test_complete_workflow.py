@@ -45,7 +45,8 @@ class TestCompleteWorkflow:
                 assert f'Blog in {lang.upper()}' in data['blog_content']
                 
                 # Verify language was passed to service
-                mock_generate.assert_called_with(f'https://www.youtube.com/watch?v={video_ids[lang]}', lang)
+                mock_generate.assert_called_with(
+                    f'https://www.youtube.com/watch?v={video_ids[lang]}', lang)
     
     def test_bulk_operations_workflow(self, client, authenticated_user):
         """Test workflow with multiple blog posts and operations"""

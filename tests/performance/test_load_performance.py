@@ -118,7 +118,8 @@ class TestLoadPerformance:
         for result in successful_results:
             assert result['duration'] < 10.0  # Under 10 seconds
         
-        avg_duration = sum(result['duration'] for result in successful_results) / len(successful_results)
+        avg_duration = sum(result['duration']
+                           for result in successful_results) / len(successful_results)
         print(f"Average blog generation time: {avg_duration:.3f} seconds")
     
     def test_dashboard_load_with_many_posts(self, client, authenticated_user):

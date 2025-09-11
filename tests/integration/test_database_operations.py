@@ -28,7 +28,8 @@ class TestDatabaseOperations:
                 'updated_at': datetime.datetime.utcnow(),
                 'is_active': True
             }
-            mock_collection.find_one.side_effect = [None, created_user]  # First call: no existing user, second call: return created user
+            # First call: no existing user, second call: return created user
+            mock_collection.find_one.side_effect = [None, created_user]
             mock_collection.insert_one.return_value.inserted_id = created_user['_id']
             
             result = user.create_user('testuser', 'test@example.com', 'password123')

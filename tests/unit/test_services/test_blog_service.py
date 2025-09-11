@@ -413,7 +413,8 @@ class TestBlogServiceFunctions:
             result = individual_components_test("https://www.youtube.com/watch?v=test123")
             
             assert result == mock_blog_content
-            mock_yt_instance._run.assert_called_once_with("https://www.youtube.com/watch?v=test123", "en")
+            mock_yt_instance._run.assert_called_once_with(
+                "https://www.youtube.com/watch?v=test123", "en")
             mock_blog_instance._run.assert_called_once_with(mock_transcript)
     
     def test_individual_components_test_transcript_error(self):
@@ -489,7 +490,8 @@ class TestBlogServiceFunctions:
             result = individual_components_test("https://www.youtube.com/watch?v=test123", "es")
             
             assert result == mock_blog_content
-            mock_yt_instance._run.assert_called_once_with("https://www.youtube.com/watch?v=test123", "es")
+            mock_yt_instance._run.assert_called_once_with(
+                "https://www.youtube.com/watch?v=test123", "es")
 
 
 class TestOpenAIClientContext:

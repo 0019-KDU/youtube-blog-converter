@@ -191,7 +191,9 @@ class TestValidators:
         
         for input_name, expected in test_cases:
             result = sanitize_filename(input_name)
-            assert result == expected, f"Expected '{expected}' but got '{result}' for input '{input_name}'"
+            assert result == expected, (
+                f"Expected '{expected}' but got '{result}' for input '{input_name}'"
+            )
     
     def test_sanitize_filename_special_chars(self):
         """Test filename sanitization with special characters"""
@@ -208,7 +210,9 @@ class TestValidators:
         
         for input_name, expected in test_cases:
             result = sanitize_filename(input_name)
-            assert result == expected, f"Expected '{expected}' but got '{result}' for input '{input_name}'"
+            assert result == expected, (
+                f"Expected '{expected}' but got '{result}' for input '{input_name}'"
+            )
 
     def test_sanitize_filename_edge_cases(self):
         """Test sanitize_filename with edge cases"""
@@ -239,4 +243,6 @@ class TestValidators:
         
         for input_name, expected in test_cases:
             result = sanitize_filename(input_name)
-            assert result == expected, f"Expected '{expected}' but got '{result}' for input '{input_name}'"
+            assert result == expected, (
+                f"Expected '{expected}' but got '{result}' for input '{input_name}'"
+            )

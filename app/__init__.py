@@ -60,7 +60,7 @@ def create_app():
     app.start_time = time.time()
 
     # Initialize JWT
-    jwt = JWTManager(app)
+    JWTManager(app)
 
     # Register blueprints
     from app.routes.auth import auth_bp
@@ -100,7 +100,7 @@ def create_app():
                 date_obj = datetime.datetime.fromisoformat(
                     date_obj.replace("Z", "+00:00")
                 )
-            except:
+            except (ValueError, TypeError):
                 return date_obj
 
         return date_obj.strftime("%b %d, %Y")
@@ -123,7 +123,7 @@ def create_app():
                         self.date = datetime.datetime.fromisoformat(
                             self.date.replace("Z", "+00:00")
                         )
-                    except:
+                    except (ValueError, TypeError):
                         return self.date
 
                 format_map = {

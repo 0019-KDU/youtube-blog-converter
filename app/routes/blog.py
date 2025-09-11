@@ -56,7 +56,6 @@ def generate_blog():
     """Process YouTube URL and generate blog"""
     start_time = time.time()
     blog_model = None
-    request_id = getattr(g, "request_id", "unknown")
 
     try:
         current_user = AuthService.get_current_user()
@@ -110,7 +109,7 @@ def generate_blog():
         logger.info(f"Video ID extracted successfully: {video_id}")
 
         # Track blog generation start
-        generation_start = time.time()
+        # generation_start = time.time()
 
         # Generate blog content
         try:
@@ -155,7 +154,7 @@ def generate_blog():
             return jsonify({"success": False, "message": error_msg}), 500
 
         # Track successful generation
-        generation_duration = time.time() - generation_start
+        # generation_duration = time.time() - generation_start
 
         # Extract title from content
         title_match = re.search(r"^#\s+(.+)$", blog_content, re.MULTILINE)
