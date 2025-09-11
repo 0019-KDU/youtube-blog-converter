@@ -61,12 +61,11 @@ class TestBlogPost:
             mock_insert_result.inserted_id = post_id
             mock_coll.insert_one.return_value = mock_insert_result
             
-            # Mock find_one to return a document with ObjectId converted user_id
+            # Mock find_one to return a document - simulate what happens in real code
             def find_one_side_effect(query):
-                # Simulate what the actual database would do - convert string to ObjectId and back
                 return {
                     '_id': post_id,
-                    'user_id': ObjectId(user_id),  # Store as ObjectId (as DB would)
+                    'user_id': ObjectId(user_id),  # This simulates DB storage as ObjectId
                     'title': 'Test Blog Post',
                     'content': 'Test content',
                     'youtube_url': 'https://www.youtube.com/watch?v=test123',
@@ -91,22 +90,22 @@ class TestBlogPost:
             assert '_id' in result
             assert 'user_id' in result
             
-            # Instead of strict equality, verify it's a valid ObjectId string
+            # The key fix: Just verify it's a valid ObjectId string and represents the same ObjectId
             assert isinstance(result['user_id'], str)
             assert len(result['user_id']) == 24  # MongoDB ObjectId strings are 24 chars
             
-            # Verify the ObjectIds are equivalent when converted back
+            # Verify ObjectId equivalence (this is the correct way to test)
             try:
                 original_oid = ObjectId(user_id)
                 returned_oid = ObjectId(result['user_id'])
-                # This is the proper way to compare - ObjectId equality, not string equality
-                assert original_oid == returned_oid or result['user_id'] == user_id
-            except:
-                assert False, f"user_id {result['user_id']} is not a valid ObjectId string"
+                assert original_oid == returned_oid
+            except Exception as e:
+                assert False, f"user_id conversion failed: {e}"
             
             # Verify other fields
             assert result['title'] == 'Test Blog Post'
             assert result['content'] == 'Test content'
+
 
     def test_create_post_insert_failure(self):
         """Test blog post creation when insert fails"""
