@@ -1,7 +1,8 @@
-import pytest
-from unittest.mock import Mock, patch
-from bson import ObjectId
 import datetime
+from unittest.mock import Mock, patch
+
+import pytest
+from bson import ObjectId
 
 
 class TestAuthService:
@@ -10,6 +11,7 @@ class TestAuthService:
     def test_get_current_user_from_session(self, flask_contexts):
         """Test getting current user from session token"""
         from flask import session
+
         from app.services.auth_service import AuthService
         
         with patch('app.services.auth_service.User') as mock_user_class, \
@@ -40,6 +42,7 @@ class TestAuthService:
     def test_get_current_user_from_session_user_id(self, flask_contexts):
         """Test getting current user from session user_id"""
         from flask import session
+
         from app.services.auth_service import AuthService
         
         user_id = str(ObjectId())
@@ -65,6 +68,7 @@ class TestAuthService:
     def test_get_current_user_invalid_token(self, flask_contexts):
         """Test getting current user with invalid token"""
         from flask import request, session
+
         from app.services.auth_service import AuthService
         
         with patch('app.services.auth_service.decode_token') as mock_decode:
@@ -154,8 +158,9 @@ class TestAuthService:
     def test_clear_session(self, flask_contexts):
         """Test clearing user session"""
         from flask import session
+
         from app.services.auth_service import AuthService
-        
+
         # Set some session data
         session['test_key'] = 'test_value'
         session['user_id'] = 'test_user_id'
@@ -201,6 +206,7 @@ class TestAuthService:
     def test_get_current_user_session_fallback_with_invalid_user_id(self, flask_contexts):
         """Test session user_id fallback with invalid ObjectId format"""
         from flask import session
+
         from app.services.auth_service import AuthService
         
         with patch('app.services.auth_service.User') as mock_user_class:
@@ -218,6 +224,7 @@ class TestAuthService:
     def test_get_current_user_sets_g_user_id(self, flask_contexts):
         """Test that g.user_id is set when user is found"""
         from flask import g
+
         from app.services.auth_service import AuthService
         
         with patch('app.services.auth_service.decode_token') as mock_decode, \

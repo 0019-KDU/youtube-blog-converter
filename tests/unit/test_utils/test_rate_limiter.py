@@ -1,6 +1,8 @@
-import pytest
 import time
 from unittest.mock import Mock, patch
+
+import pytest
+
 
 class TestRateLimiter:
     """Test cases for RateLimiter"""
@@ -25,8 +27,9 @@ class TestRateLimiter:
     
     def test_is_allowed_first_request(self, request_context):
         """Test that first request is allowed"""
-        from app.utils.rate_limiter import RateLimiter
         from flask import request
+
+        from app.utils.rate_limiter import RateLimiter
         
         limiter = RateLimiter()
         
@@ -99,14 +102,16 @@ class TestRateLimiter:
         
     def test_rate_limit_exceeded(self, request_context):
         """Test rate limit exceeded scenario"""
-        from app.utils.rate_limiter import RateLimiter
         from flask import request
+
+        from app.utils.rate_limiter import RateLimiter
         
         limiter = RateLimiter(requests_per_minute=2) 
     def test_get_remaining_requests(self, request_context):
         """Test getting remaining request counts"""
-        from app.utils.rate_limiter import RateLimiter
         from flask import request
+
+        from app.utils.rate_limiter import RateLimiter
         
         limiter = RateLimiter(requests_per_minute=10)
         

@@ -1,9 +1,11 @@
-import pytest
 import gc
+import os
 import sys
 from unittest.mock import Mock, patch
+
 import psutil
-import os
+import pytest
+
 
 class TestMemoryUsage:
     """Performance tests for memory usage"""
@@ -107,7 +109,7 @@ class TestMemoryUsage:
             mock_app.temp_storage = {}
             
             from app.utils.security import store_large_data
-            
+
             # Store many large items
             for i in range(10):
                 large_data = {
@@ -123,10 +125,10 @@ class TestMemoryUsage:
             assert storage_size == 10
             
             # Test cleanup
-            from app.utils.security import cleanup_old_storage
-            
             # Mock old timestamps to trigger cleanup
             import time
+
+            from app.utils.security import cleanup_old_storage
             old_timestamp = time.time() - 7200  # 2 hours ago
             for key in mock_app.temp_storage:
                 mock_app.temp_storage[key]['timestamp'] = old_timestamp
@@ -148,7 +150,7 @@ class TestMemoryUsage:
         initial_memory = process.memory_info().rss / 1024 / 1024
         
         # Test multiple database operations
-        from app.models.user import User, BlogPost
+        from app.models.user import BlogPost, User
         
         with patch('app.models.user.mongo_manager') as mock_manager:
             mock_manager.get_collection.return_value = Mock()

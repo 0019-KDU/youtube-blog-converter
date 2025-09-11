@@ -1,8 +1,10 @@
-import pytest
 import json
 from unittest.mock import Mock, patch
+
+import pytest
 from bson import ObjectId
 from flask import url_for
+
 
 class TestAuthRoutes:
     """Test cases for authentication routes"""

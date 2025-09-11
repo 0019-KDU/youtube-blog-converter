@@ -1,8 +1,11 @@
-import pytest
 import gc
 import re
-from unittest.mock import Mock, patch, MagicMock, call
+from unittest.mock import MagicMock, Mock, call, patch
+
+import pytest
+
 from app.crew.tools import PDFGeneratorTool
+
 
 class TestPDFGeneratorTool:
     """Comprehensive test cases for PDFGeneratorTool"""

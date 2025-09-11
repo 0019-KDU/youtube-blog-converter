@@ -1,11 +1,12 @@
-from flask import Flask, request, redirect, url_for, render_template
-from flask_jwt_extended import JWTManager
-import os
-import time
 import datetime
 import logging
+import os
+import time
 from pathlib import Path
+
 from dotenv import load_dotenv
+from flask import Flask, redirect, render_template, request, url_for
+from flask_jwt_extended import JWTManager
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +72,8 @@ def create_app():
     app.register_blueprint(health_bp)
 
     # Setup monitoring
-    from app.monitoring.metrics import setup_metrics
     from app.monitoring.logging import setup_logging
+    from app.monitoring.metrics import setup_metrics
     from app.monitoring.tracing import setup_tracing
 
     setup_metrics(app)

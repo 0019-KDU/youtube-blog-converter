@@ -1,7 +1,8 @@
-import pytest
 import datetime
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 from bson import ObjectId
-from unittest.mock import Mock, patch, MagicMock
 
 
 class TestBlogPost:

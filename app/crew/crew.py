@@ -1,8 +1,11 @@
-from crewai import Crew
-from .agents import create_agents
-from .tasks import create_tasks
 import logging
 from typing import Union
+
+from crewai import Crew
+
+from .agents import create_agents
+from .tasks import create_tasks
+
 logger = logging.getLogger(__name__)
 
 

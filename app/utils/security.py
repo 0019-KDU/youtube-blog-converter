@@ -1,6 +1,7 @@
-from flask import request, session, g, current_app
-from flask_jwt_extended import decode_token
 import logging
+
+from flask import current_app, g, request, session
+from flask_jwt_extended import decode_token
 
 logger = logging.getLogger(__name__)
 

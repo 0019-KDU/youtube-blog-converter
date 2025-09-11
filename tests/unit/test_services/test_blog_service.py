@@ -1,7 +1,8 @@
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-import re
 import os
+import re
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 
 class TestBlogGeneratorTool:

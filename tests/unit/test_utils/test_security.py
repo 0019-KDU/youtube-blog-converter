@@ -1,6 +1,7 @@
-import pytest
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 from bson import ObjectId
 
 
@@ -130,8 +131,9 @@ class TestSecurity:
     
     def test_store_large_data(self, app_context):
         """Test storing large data in temp storage"""
-        from app.utils.security import store_large_data
         from flask import current_app
+
+        from app.utils.security import store_large_data
         
         test_data = {'key': 'value', 'large_content': 'x' * 1000}
         
@@ -143,7 +145,7 @@ class TestSecurity:
     
     def test_retrieve_large_data_success(self, app_context):
         """Test successful retrieval of large data"""
-        from app.utils.security import store_large_data, retrieve_large_data
+        from app.utils.security import retrieve_large_data, store_large_data
         
         test_data = {'key': 'value'}
         store_large_data('test_key', test_data, 'user_123')
@@ -154,9 +156,10 @@ class TestSecurity:
     
     def test_retrieve_large_data_expired(self, app_context):
         """Test retrieval of expired data"""
-        from app.utils.security import retrieve_large_data
         from flask import current_app
-        
+
+        from app.utils.security import retrieve_large_data
+
         # Manually add expired data
         expired_time = time.time() - 7200  # 2 hours ago
         current_app.temp_storage['user_123_test_key'] = {
@@ -179,9 +182,10 @@ class TestSecurity:
     
     def test_cleanup_old_storage(self, app_context):
         """Test cleanup of old storage data"""
-        from app.utils.security import cleanup_old_storage
         from flask import current_app
-        
+
+        from app.utils.security import cleanup_old_storage
+
         # Add mix of new and old data
         current_time = time.time()
         current_app.temp_storage.update({
@@ -196,8 +200,9 @@ class TestSecurity:
 
     def test_inject_config(self, app_context):
         """Test config injection for templates"""
-        from app.utils.security import inject_config
         from flask import current_app
+
+        from app.utils.security import inject_config
         
         result = inject_config()
         
@@ -347,8 +352,9 @@ class TestSecurity:
 
     def test_store_large_data_without_user_id(self, app_context):
         """Test storing data without user ID"""
-        from app.utils.security import store_large_data
         from flask import current_app
+
+        from app.utils.security import store_large_data
         
         test_data = {'key': 'value'}
         
@@ -360,7 +366,7 @@ class TestSecurity:
 
     def test_retrieve_large_data_without_user_id(self, app_context):
         """Test retrieving data without user ID"""
-        from app.utils.security import store_large_data, retrieve_large_data
+        from app.utils.security import retrieve_large_data, store_large_data
         
         test_data = {'key': 'value'}
         store_large_data('test_key', test_data)
@@ -371,9 +377,10 @@ class TestSecurity:
 
     def test_cleanup_old_storage_empty(self, app_context):
         """Test cleanup with no data to clean"""
-        from app.utils.security import cleanup_old_storage
         from flask import current_app
-        
+
+        from app.utils.security import cleanup_old_storage
+
         # Ensure temp storage is empty
         current_app.temp_storage.clear()
         
@@ -384,9 +391,10 @@ class TestSecurity:
 
     def test_store_large_data_triggers_cleanup(self, app_context):
         """Test that storing data triggers cleanup of old data"""
-        from app.utils.security import store_large_data
         from flask import current_app
-        
+
+        from app.utils.security import store_large_data
+
         # Add old data
         old_time = time.time() - 7200  # 2 hours ago
         current_app.temp_storage['old_key'] = {

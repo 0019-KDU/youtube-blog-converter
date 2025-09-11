@@ -1,5 +1,7 @@
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+
 
 class TestTasks:
     """Test task creation and configuration"""
@@ -9,7 +11,7 @@ class TestTasks:
     def test_create_tasks_success(self, mock_logger, mock_task_class):
         """Test successful task creation"""
         from app.crew.tasks import create_tasks
-        
+
         # Mock agents
         mock_transcriber = Mock()
         mock_writer = Mock()
@@ -202,7 +204,7 @@ class TestTasksIntegration:
             # mock the Task creation but test the function logic
             with patch('app.crew.tasks.Task') as mock_task_class:
                 from app.crew.tasks import create_tasks
-                
+
                 # Create properly structured mock agents
                 mock_transcriber = Mock()
                 mock_transcriber.role = "Transcriber"

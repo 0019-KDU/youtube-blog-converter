@@ -1,7 +1,9 @@
-import pytest
-from unittest.mock import Mock, patch
-from bson import ObjectId
 import json
+from unittest.mock import Mock, patch
+
+import pytest
+from bson import ObjectId
+
 
 class TestBlogGenerationFlow:
     """Integration tests for blog generation flow"""

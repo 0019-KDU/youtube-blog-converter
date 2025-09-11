@@ -1,7 +1,9 @@
-import pytest
-from unittest.mock import Mock, patch
 import json
+from unittest.mock import Mock, patch
+
+import pytest
 from bson import ObjectId
+
 
 class TestCompleteWorkflow:
     """Test complete application workflows"""

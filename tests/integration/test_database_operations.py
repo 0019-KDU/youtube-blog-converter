@@ -1,7 +1,8 @@
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from bson import ObjectId
 import datetime
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
+from bson import ObjectId
 
 
 class TestDatabaseOperations:

@@ -1,7 +1,9 @@
-import pytest
 import json
 from unittest.mock import Mock, patch
+
+import pytest
 from bson import ObjectId
+
 
 class TestAuthFlow:
     """Integration tests for authentication flow"""

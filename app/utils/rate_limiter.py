@@ -1,7 +1,8 @@
+import logging
 import time
 from collections import defaultdict, deque
+
 from flask import request
-import logging
 
 logger = logging.getLogger(__name__)
 

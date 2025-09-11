@@ -1,17 +1,12 @@
-from prometheus_client import (
-    Counter,
-    Histogram,
-    Gauge,
-    generate_latest,
-    CollectorRegistry,
-    CONTENT_TYPE_LATEST,
-)
-from flask import Response, request, g, has_app_context
-import psutil
+import logging
 import threading
 import time
-import logging
 from functools import wraps
+
+import psutil
+from flask import Response, g, has_app_context, request
+from prometheus_client import (CONTENT_TYPE_LATEST, CollectorRegistry, Counter,
+                               Gauge, Histogram, generate_latest)
 
 logger = logging.getLogger(__name__)
 

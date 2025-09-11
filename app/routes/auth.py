@@ -1,17 +1,12 @@
-from flask import (
-    Blueprint,
-    request,
-    jsonify,
-    render_template,
-    redirect,
-    url_for,
-    session,
-)
-from flask_jwt_extended import create_access_token, decode_token
-from app.models.user import User
-import re
 import datetime
 import logging
+import re
+
+from flask import (Blueprint, jsonify, redirect, render_template, request,
+                   session, url_for)
+from flask_jwt_extended import create_access_token, decode_token
+
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 

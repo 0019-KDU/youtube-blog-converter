@@ -1,5 +1,6 @@
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 
 
 class TestBlogGenerationCrew:
@@ -27,7 +28,7 @@ class TestBlogGenerationCrew:
     def test_generate_blog_success(self, mock_crew_class, mock_create_agents, mock_create_tasks, mock_logger):
         """Test successful blog generation"""
         from app.crew.crew import BlogGenerationCrew
-        
+
         # Setup mocks
         mock_transcriber = Mock()
         mock_writer = Mock()

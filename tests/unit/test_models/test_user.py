@@ -1,8 +1,9 @@
-import pytest
 import datetime
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 from bson import ObjectId
-from unittest.mock import Mock, patch, MagicMock
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 @pytest.fixture

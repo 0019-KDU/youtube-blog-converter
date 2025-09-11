@@ -43,7 +43,6 @@ RUN python -m pytest tests/unit/ \
     --cov=app \
     --cov-report=term-missing \
     -v \
-    -m "not slow" \
     --tb=short \
     --timeout=300 || exit 1
 

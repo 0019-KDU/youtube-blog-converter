@@ -1,7 +1,8 @@
-import os
-import re
 import gc
 import logging
+import os
+import re
+
 from fpdf import FPDF
 
 logger = logging.getLogger(__name__)

@@ -1,8 +1,9 @@
-import os
 import json
 import logging
-import requests
+import os
 from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)

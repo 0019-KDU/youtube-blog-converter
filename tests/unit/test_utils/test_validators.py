@@ -1,6 +1,7 @@
-import pytest
 import re
 from unittest.mock import Mock, patch
+
+import pytest
 
 
 class TestValidators:
@@ -212,7 +213,7 @@ class TestValidators:
     def test_sanitize_filename_edge_cases(self):
         """Test sanitize_filename with edge cases"""
         from app.utils.validators import sanitize_filename
-        
+
         # Test empty string
         assert sanitize_filename("") == "untitled"
         
@@ -227,7 +228,7 @@ class TestValidators:
     def test_sanitize_filename_dots_handling(self):
         """Test that dots are handled correctly in filenames"""
         from app.utils.validators import sanitize_filename
-        
+
         # Based on the actual regex pattern in your validators.py, dots are removed
         # because the pattern is r"[^\w\s-]" which excludes dots
         test_cases = [

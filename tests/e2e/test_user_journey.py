@@ -1,8 +1,10 @@
-import pytest
 import json
-from unittest.mock import Mock, patch
-from bson import ObjectId
 import time
+from unittest.mock import Mock, patch
+
+import pytest
+from bson import ObjectId
+
 
 class TestUserJourney:
     """End-to-end tests for complete user journeys"""

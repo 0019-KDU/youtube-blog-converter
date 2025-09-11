@@ -1,9 +1,11 @@
-import pytest
-import time
+import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import Mock, patch
-import json
+
+import pytest
+
 
 class TestLoadPerformance:
     """Performance tests for load handling"""

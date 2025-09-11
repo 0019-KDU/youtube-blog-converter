@@ -1,5 +1,6 @@
-from crewai import Task
 import logging
+
+from crewai import Task
 
 logger = logging.getLogger(__name__)
 

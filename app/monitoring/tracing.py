@@ -1,7 +1,8 @@
-import uuid
-from flask import g, request
-import time
 import logging
+import time
+import uuid
+
+from flask import g, request
 
 logger = logging.getLogger(__name__)
 

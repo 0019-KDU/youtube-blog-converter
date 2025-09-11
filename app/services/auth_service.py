@@ -1,7 +1,9 @@
-from flask import request, session, g
-from flask_jwt_extended import decode_token
-from app.models.user import User
 import logging
+
+from flask import g, request, session
+from flask_jwt_extended import decode_token
+
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,8 @@
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 import logging
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
+
 
 class TestAgents:
     """Test agent creation and configuration"""
@@ -12,7 +14,7 @@ class TestAgents:
     def test_create_agents_success(self, mock_logger, mock_blog, mock_yt, mock_agent):
         """Test successful agent creation"""
         from app.crew.agents import create_agents
-        
+
         # Mock tool instances
         mock_yt.return_value = Mock()
         mock_blog.return_value = Mock()
@@ -36,7 +38,7 @@ class TestAgents:
     def test_agent_configuration_parameters(self, mock_logger, mock_blog, mock_yt, mock_agent):
         """Test that agents are configured with correct parameters"""
         from app.crew.agents import create_agents
-        
+
         # Mock tool instances
         mock_yt.return_value = Mock()
         mock_blog.return_value = Mock()
@@ -181,10 +183,10 @@ class TestAgentsIntegration:
     def test_actual_agent_creation(self, mock_blog_tool, mock_youtube_tool):
         """Test actual agent creation with real CrewAI (if available)"""
         try:
-            from app.crew.agents import create_agents
-            
             # Create proper mock tool instances that might satisfy pydantic validation
             from crewai_tools import BaseTool
+
+            from app.crew.agents import create_agents
             mock_youtube_instance = Mock(spec=BaseTool)
             mock_blog_instance = Mock(spec=BaseTool)
             mock_youtube_tool.return_value = mock_youtube_instance

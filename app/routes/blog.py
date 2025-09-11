@@ -1,28 +1,18 @@
-from flask import (
-    Blueprint,
-    request,
-    jsonify,
-    render_template,
-    redirect,
-    url_for,
-    session,
-    send_file,
-    g,
-)
-from app.services.blog_service import generate_blog_from_youtube
-from app.services.auth_service import AuthService
-from app.crew.tools import PDFGeneratorTool
-from app.models.user import User, BlogPost
-from app.utils.validators import (
-    validate_youtube_url,
-    extract_video_id,
-    sanitize_filename,
-)
-from app.utils.security import store_large_data, retrieve_large_data
-import time
-import re
 import io
 import logging
+import re
+import time
+
+from flask import (Blueprint, g, jsonify, redirect, render_template, request,
+                   send_file, session, url_for)
+
+from app.crew.tools import PDFGeneratorTool
+from app.models.user import BlogPost, User
+from app.services.auth_service import AuthService
+from app.services.blog_service import generate_blog_from_youtube
+from app.utils.security import retrieve_large_data, store_large_data
+from app.utils.validators import (extract_video_id, sanitize_filename,
+                                  validate_youtube_url)
 
 logger = logging.getLogger(__name__)
 

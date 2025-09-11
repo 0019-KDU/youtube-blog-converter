@@ -1,7 +1,9 @@
-import pytest
 import json
 from unittest.mock import Mock, patch
+
+import pytest
 import requests
+
 
 class TestYouTubeTranscriptTool:
     """Test cases for YouTubeTranscriptTool"""
@@ -18,7 +20,7 @@ class TestYouTubeTranscriptTool:
     def test_init_missing_api_key(self):
         """Test initialization with missing API key"""
         from app.services.youtube_service import YouTubeTranscriptTool
-        
+
         # Fix: Properly patch the SUPADATA_API_KEY at module level
         with patch('app.services.youtube_service.SUPADATA_API_KEY', None):
             with pytest.raises(RuntimeError, match="Supadata API key not configured"):
@@ -28,7 +30,7 @@ class TestYouTubeTranscriptTool:
     def test_run_success(self, mock_requests_session):
         """Test successful transcript extraction"""
         from app.services.youtube_service import YouTubeTranscriptTool
-        
+
         # Mock successful API response
         mock_response = Mock()
         mock_response.status_code = 200

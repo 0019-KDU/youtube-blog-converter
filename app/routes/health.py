@@ -1,10 +1,12 @@
-from flask import Blueprint, jsonify, Response, current_app
-from app.models.user import mongo_manager
 import datetime
-import time
-import os
-import psutil
 import logging
+import os
+import time
+
+import psutil
+from flask import Blueprint, Response, current_app, jsonify
+
+from app.models.user import mongo_manager
 
 logger = logging.getLogger(__name__)
 

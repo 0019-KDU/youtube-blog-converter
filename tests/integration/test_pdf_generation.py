@@ -1,8 +1,10 @@
+import io
+from unittest.mock import Mock, patch
+
+import pytest
 from flask import json
 from mongomock import ObjectId
-import pytest
-from unittest.mock import Mock, patch
-import io
+
 
 class TestPDFGeneration:
     """Integration tests for PDF generation"""

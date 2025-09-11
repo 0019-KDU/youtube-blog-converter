@@ -1,7 +1,8 @@
-import pytest
-import json
 import io
+import json
 from unittest.mock import Mock, patch
+
+import pytest
 from bson import ObjectId
 
 

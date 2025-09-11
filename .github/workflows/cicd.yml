@@ -163,7 +163,6 @@ jobs:
 
       - name: Run Safety check (dependency vulnerabilities)
         run: |
-          pip install -r requirements.txt
           safety check --json --output safety-report.json
         continue-on-error: true
 
@@ -231,7 +230,7 @@ jobs:
     needs: [lint-and-format, security-scan, dependency-check]
     strategy:
       matrix:
-        python-version: [3.9, 3.10.0, 3.11]
+        python-version: [3.9, "3.10", 3.11]
     
     services:
       mongodb:
@@ -268,11 +267,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-mock pytest-timeout
 
       - name: Wait for MongoDB
         run: |
-          timeout 30 bash -c 'until mongo --eval "db.adminCommand({ismaster: 1})" > /dev/null 2>&1; do sleep 1; done'
+          timeout 30 bash -c 'until nc -z localhost 27017; do sleep 1; done'
 
       - name: Run unit tests
         run: |
@@ -282,16 +280,21 @@ jobs:
             --cov-report=html:htmlcov-unit-${{ matrix.python-version }} \
             --cov-report=term-missing \
             -v -x --tb=short --timeout=300
+        env:
+          FLASK_ENV: testing
+          TESTING: true
 
       - name: Run integration tests
-        if: github.event_name == 'pull_request'
         run: |
           pytest tests/integration/ \
             --cov=app \
             --cov-report=xml:coverage-integration-${{ matrix.python-version }}.xml \
             --cov-report=html:htmlcov-integration-${{ matrix.python-version }} \
-            -v -x --tb=short --timeout=600 \
-            --run-integration
+            -v -x --tb=short --timeout=600
+        env:
+          MONGODB_URI: mongodb://localhost:27017/test_db
+          FLASK_ENV: testing
+          TESTING: true
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -525,7 +528,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          target: unit-test
+          target: test
           tags: ${{ env.CONTAINER_IMAGE }}:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
