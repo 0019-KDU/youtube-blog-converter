@@ -117,8 +117,7 @@ def generate_blog():
             blog_content = generate_blog_from_youtube(youtube_url, language)
 
             logger.info(
-                f"Blog content generated successfully: {
-                    len(blog_content)} characters")
+                f"Blog content generated successfully: {len(blog_content)} characters")
 
         except Exception as gen_error:
             logger.error(

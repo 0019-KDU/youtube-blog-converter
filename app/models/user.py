@@ -211,9 +211,7 @@ class BaseModel:
             return mongo_manager.get_collection(self.collection_name)
         except Exception as e:
             logger.error(
-                f"Failed to get collection {
-                    self.collection_name}: {
-                    str(e)}")
+                f"Failed to get collection {self.collection_name}: {str(e)}")
             raise
 
     def __del__(self):

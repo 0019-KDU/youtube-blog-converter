@@ -246,9 +246,7 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
     except Exception as e:
         duration = time.time() - start_time
         logger.error(
-            f"❌ Blog generation failed after {
-                duration:.2f}s: {
-                str(e)}")
+            f"❌ Blog generation failed after {duration:.2f}s: {str(e)}")
         return _create_error_response(
             youtube_url, f"Unexpected error: {str(e)}")
 

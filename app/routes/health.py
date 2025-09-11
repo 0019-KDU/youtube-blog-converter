@@ -140,6 +140,5 @@ def health_metrics():
     except Exception as e:
         logger.error(f"Health metrics error: {e}", exc_info=True)
         # Return error metric
-        error_response = f'app_health_status 0\napp_error {{error="{
-            str(e)}"}} 1\n'
+        error_response = f'app_health_status 0\napp_error {{error="{str(e)}"}} 1\n'
         return Response(error_response, mimetype="text/plain"), 503

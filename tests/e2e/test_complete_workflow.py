@@ -67,11 +67,7 @@ class TestCompleteWorkflow:
                 post_id = str(ObjectId())
                 post_ids.append(post_id)
 
-                mock_generate.return_value = f'# Blog Post {
-                    i +
-                    1}\n\nThis is content for blog post {
-                    i +
-                    1} with sufficient length to pass validation checks and meet the minimum 100 character requirement for blog generation.'
+                mock_generate.return_value = f'# Blog Post {i + 1}\n\nThis is content for blog post {i + 1} with sufficient length to pass validation checks and meet the minimum 100 character requirement for blog generation.'
 
                 mock_blog = Mock()
                 mock_blog.create_post.return_value = {
