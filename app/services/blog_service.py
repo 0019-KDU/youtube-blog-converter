@@ -235,9 +235,7 @@ def generate_blog_from_youtube(youtube_url: str, language: str = "en") -> str:
             cleaned_output = _clean_final_output(result_text)
             duration = time.time() - start_time
             logger.info(
-                f"✅ Blog generated successfully in {
-                    duration:.2f}s (cleaned length: {
-                    len(cleaned_output)})")
+                f"✅ Blog generated successfully in {duration:.2f}s (cleaned length: {len(cleaned_output)})")
             return cleaned_output
 
         duration = time.time() - start_time

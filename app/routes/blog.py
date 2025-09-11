@@ -77,8 +77,7 @@ def generate_blog():
             language = request.form.get("language", "en")
 
         logger.info(
-            f"Blog generation started for user: {
-                current_user['username']}, URL: {youtube_url}")
+            f"Blog generation started for user: {current_user['username']}, URL: {youtube_url}")
 
         if not youtube_url:
             logger.warning("Blog generation failed: Empty YouTube URL")

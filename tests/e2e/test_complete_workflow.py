@@ -39,8 +39,7 @@ class TestCompleteWorkflow:
                 response = client.post(
                     '/generate',
                     data={
-                        'youtube_url': f'https://www.youtube.com/watch?v={
-                            video_ids[lang]}',
+                        'youtube_url': f'https://www.youtube.com/watch?v={video_ids[lang]}',
                         'language': lang})
 
                 assert response.status_code == 200

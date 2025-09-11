@@ -116,8 +116,7 @@ class MongoDBConnectionManager:
             # Test ping
             self.client.admin.command("ping")
             logger.info(
-                f"MongoDB connected successfully to database: {
-                    self._mongodb_db_name}")
+                f"MongoDB connected successfully to database: {self._mongodb_db_name}")
 
         except Exception as e:
             # Handle Windows encoding issues in error messages

@@ -130,12 +130,7 @@ def health_metrics():
         metrics.append(
             f"app_temp_storage_items {len(current_app.temp_storage)}")
         metrics.append(
-            f'app_uptime_seconds {
-                int(
-                    time.time() -
-                    current_app.start_time) if hasattr(
-                    current_app,
-                    "start_time") else 0}')
+            f'app_uptime_seconds {int(time.time() - current_app.start_time) if hasattr(current_app, "start_time") else 0}')
 
         # Join all metrics
         response_text = "\n".join(metrics) + "\n"
