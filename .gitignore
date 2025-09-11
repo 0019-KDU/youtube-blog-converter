@@ -272,3 +272,6 @@ uploads/
 deploy.zip
 *.war
 *.jar
+
+# Ignore logs folder
+logs/

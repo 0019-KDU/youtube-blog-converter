@@ -391,27 +391,18 @@ def _clean_final_output(content: str) -> str:
 def _create_error_response(youtube_url: str, error_msg: str) -> str:
     """Create informative error response"""
     import time
-
-    return """# YouTube Video Analysis - Technical Issue
-
+    return f"""# YouTube Video Analysis - Technical Issue
 ## Video Information
-
 **URL**: {youtube_url}
 **Processing Date**: {time.strftime('%Y-%m-%d %H:%M:%S')}
-
 ## Technical Issue Encountered
-
 {error_msg}
-
 ## Troubleshooting Steps
-
 1. **Verify Video Accessibility**: Ensure the video is public and has captions/transcripts available
 2. **Check API Limits**: Supadata API may have rate limits
 3. **Network Connectivity**: Verify internet connection and API accessibility
 4. **Video Format**: Some videos may not have extractable transcripts
-
 ## Alternative Approaches
-
 - Try again in a few minutes
 - Verify the video has closed captions enabled
 - Check if the video is region-restricted
