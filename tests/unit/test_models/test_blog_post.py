@@ -52,21 +52,21 @@ class TestBlogPost:
     def test_create_post_string_user_id(self):
         """Test blog post creation with string user_id"""
         from app.models.user import BlogPost
-
         user_id = str(ObjectId())
         post_id = ObjectId()
-
+        
         with patch.object(BlogPost, 'get_collection') as mock_get_collection:
             mock_coll = Mock()
             mock_insert_result = Mock()
             mock_insert_result.inserted_id = post_id
             mock_coll.insert_one.return_value = mock_insert_result
             
-            # Mock find_one to return a document - let it return with the same user_id
+            # Mock find_one to return a document with ObjectId converted user_id
             def find_one_side_effect(query):
+                # Simulate what the actual database would do - convert string to ObjectId and back
                 return {
                     '_id': post_id,
-                    'user_id': user_id,  # Return the same user_id that was inserted
+                    'user_id': ObjectId(user_id),  # Store as ObjectId (as DB would)
                     'title': 'Test Blog Post',
                     'content': 'Test content',
                     'youtube_url': 'https://www.youtube.com/watch?v=test123',
@@ -77,7 +77,7 @@ class TestBlogPost:
             
             mock_coll.find_one.side_effect = find_one_side_effect
             mock_get_collection.return_value = mock_coll
-
+            
             blog_post = BlogPost()
             result = blog_post.create_post(
                 user_id=user_id,
@@ -86,7 +86,7 @@ class TestBlogPost:
                 content='Test content',
                 video_id='test123'
             )
-
+            
             assert result is not None
             assert '_id' in result
             assert 'user_id' in result
@@ -95,15 +95,19 @@ class TestBlogPost:
             assert isinstance(result['user_id'], str)
             assert len(result['user_id']) == 24  # MongoDB ObjectId strings are 24 chars
             
-            # Optionally, verify it can be converted to ObjectId
+            # Verify the ObjectIds are equivalent when converted back
             try:
-                ObjectId(result['user_id'])
+                original_oid = ObjectId(user_id)
+                returned_oid = ObjectId(result['user_id'])
+                # This is the proper way to compare - ObjectId equality, not string equality
+                assert original_oid == returned_oid or result['user_id'] == user_id
             except:
                 assert False, f"user_id {result['user_id']} is not a valid ObjectId string"
             
             # Verify other fields
             assert result['title'] == 'Test Blog Post'
             assert result['content'] == 'Test content'
+
     def test_create_post_insert_failure(self):
         """Test blog post creation when insert fails"""
         from app.models.user import BlogPost
