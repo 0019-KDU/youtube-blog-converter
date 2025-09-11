@@ -62,14 +62,16 @@ class TestBlogPost:
             mock_insert_result.inserted_id = post_id
             mock_coll.insert_one.return_value = mock_insert_result
             
-            # Mock find_one to return the document that would have been inserted
+            # Mock the find_one method to return the expected document
             mock_coll.find_one.return_value = {
                 '_id': post_id,
-                'user_id': user_id,  # Return the same user_id string
+                'user_id': user_id,  # This ensures the same user_id is returned
                 'title': 'Test Blog Post',
                 'content': 'Test content',
                 'youtube_url': 'https://www.youtube.com/watch?v=test123',
-                'video_id': 'test123'
+                'video_id': 'test123',
+                'created_at': datetime.datetime.utcnow(),
+                'updated_at': datetime.datetime.utcnow()
             }
             
             mock_get_collection.return_value = mock_coll
