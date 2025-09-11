@@ -55,12 +55,15 @@ def is_valid_password(password: str) -> bool:
 
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename for safe file operations"""
-    if not filename:
+    if not filename or not filename.strip():
         return "untitled"
+
+    filename = filename.strip()
 
     # Remove or replace invalid characters
     sanitized = re.sub(r"[^\w\s-]", "", filename)
     sanitized = re.sub(r"[-\s]+", "-", sanitized)
 
-    # Limit length
-    return sanitized[:50].strip("-")
+    # Limit length and clean up
+    result = sanitized[:50].strip("-")
+    return result if result else "untitled"

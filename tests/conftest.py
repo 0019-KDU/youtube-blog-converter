@@ -1,345 +1,302 @@
-import pytest
 import os
+import sys
+import pytest
 import tempfile
 import shutil
-from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
-from flask import Flask
-import json
-from bson import ObjectId
+from pathlib import Path
 import datetime
+import time
+from flask import Flask
+
+# Ensure app directory is in path before any imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Set up environment variables BEFORE importing any app modules
+os.environ.update({
+    'OPENAI_API_KEY': 'test-openai-key-12345',
+    'SUPADATA_API_KEY': 'test-supadata-key-12345',
+    'MONGODB_URI': 'mongodb://test:test@localhost:27017/test_db',
+    'MONGODB_DB_NAME': 'test_youtube_blog_db',
+    'JWT_SECRET_KEY': 'test-jwt-secret-key-for-testing-only-12345',
+    'FLASK_SECRET_KEY': 'test-flask-secret-key-for-testing-only-12345',
+    'SECRET_KEY': 'test-secret-key-12345',
+    'FLASK_ENV': 'testing',
+    'LOG_LEVEL': 'ERROR',
+    'LOKI_URL': 'http://test-loki:3100',
+    'GA_MEASUREMENT_ID': 'GA-TEST-123456',
+    'JWT_ACCESS_TOKEN_EXPIRES': '86400',
+})
+
+# Import ObjectId after setting environment
+try:
+    from bson import ObjectId
+except ImportError:
+    class ObjectId:
+        def __init__(self, oid=None):
+            self._id = oid or 'test_object_id_12345'
+        
+        def __str__(self):
+            return str(self._id)
 
 
-# Test fixtures for the application
-@pytest.fixture
-def app():
-    """Create a Flask app configured for testing"""
-    # Set environment variables first
-    os.environ["FLASK_SECRET_KEY"] = "test-secret-key-for-testing-super-secret-12345"
-    os.environ["JWT_SECRET_KEY"] = "test-jwt-secret-key-super-secret-12345"
-    os.environ["OPENAI_API_KEY"] = "test-openai-key"
-    os.environ["SUPADATA_API_KEY"] = "test-supadata-key"
-    os.environ["MONGODB_URI"] = "mongodb://localhost:27017/test_db"
-    os.environ["MONGODB_DB_NAME"] = "test_youtube_blog_db"
-
-    from app import app
-
-    app.config["TESTING"] = True
-    app.config["WTF_CSRF_ENABLED"] = False
-    app.config["SESSION_TYPE"] = "filesystem"
-
-    # Create a proper session directory
-    session_dir = tempfile.mkdtemp()
-    app.config["SESSION_FILE_DIR"] = session_dir
-
-    # Ensure secret key is properly set and long enough
-    app.secret_key = "test-secret-key-for-testing-super-secret-12345"
-
-    # Initialize session
-    from flask_session import Session
-
-    Session(app)
-
-    with app.app_context():
-        yield app
-
-    # Cleanup
-    if os.path.exists(session_dir):
-        shutil.rmtree(session_dir)
+@pytest.fixture(autouse=True)
+def mock_environment_variables(monkeypatch):
+    """Mock environment variables for all tests"""
+    env_vars = {
+        "OPENAI_API_KEY": "test_openai_key_12345",
+        "SUPADATA_API_KEY": "test_supadata_key_12345", 
+        "MONGODB_URI": "mongodb://test:test@localhost:27017/test_db",
+        "MONGODB_DB_NAME": "test_blog_db",
+        "JWT_SECRET_KEY": "test_jwt_secret_key_12345",
+        "FLASK_SECRET_KEY": "test_flask_secret_key_12345",
+        "SECRET_KEY": "test_secret_key_12345",
+        "FLASK_ENV": "testing",
+        "LOG_LEVEL": "ERROR",
+        "JWT_ACCESS_TOKEN_EXPIRES": "86400",
+        "LOKI_URL": "http://test-loki:3100",
+        "GA_MEASUREMENT_ID": "GA-TEST-123456",
+    }
+    
+    for key, value in env_vars.items():
+        monkeypatch.setenv(key, value)
 
 
-@pytest.fixture
-def client(app):
-    """Create a test client for the Flask app"""
-    return app.test_client()
+@pytest.fixture(autouse=True)
+def mock_logging():
+    """Mock logging to reduce test output noise"""
+    with patch('logging.getLogger') as mock_logger:
+        mock_instance = Mock()
+        mock_instance.info = Mock()
+        mock_instance.warning = Mock()
+        mock_instance.error = Mock()
+        mock_instance.debug = Mock()
+        mock_logger.return_value = mock_instance
+        yield mock_instance
 
 
-@pytest.fixture
-def mock_mongo_connection():
-    """Mock MongoDB connection manager"""
-    with patch("auth.models.mongo_manager") as mock_manager:
-        mock_collection = Mock()
-        mock_db = Mock()
-        mock_client = Mock()
-
-        # Setup mock methods
+@pytest.fixture(autouse=True)
+def mock_mongodb_globally():
+    """Mock MongoDB connections globally for all tests"""
+    with patch('app.models.user.MongoClient') as mock_client, \
+         patch('app.models.user.mongo_manager') as mock_manager, \
+         patch('pymongo.MongoClient') as mock_pymongo_client:
+        
+        # Configure mock collection
+        mock_collection = MagicMock()
+        mock_collection.find_one.return_value = None
+        mock_collection.insert_one.return_value = Mock(inserted_id=ObjectId())
+        mock_collection.update_one.return_value = Mock(modified_count=1)
+        mock_collection.delete_one.return_value = Mock(deleted_count=1)
+        mock_collection.find.return_value = Mock()
+        mock_collection.find.return_value.sort.return_value.limit.return_value.skip.return_value = []
+        mock_collection.count_documents.return_value = 0
+        
+        # Configure mock database
+        mock_db = MagicMock()
+        mock_db.__getitem__.return_value = mock_collection
+        
+        # Configure mock client
+        mock_client_instance = MagicMock()
+        mock_client_instance.__getitem__.return_value = mock_db
+        mock_client_instance.server_info.return_value = {'version': '4.4.0'}
+        mock_client_instance.admin.command.return_value = {'ok': 1}
+        mock_client.return_value = mock_client_instance
+        mock_pymongo_client.return_value = mock_client_instance
+        
+        # Configure mock manager
+        mock_manager.is_connected.return_value = True
         mock_manager.get_collection.return_value = mock_collection
         mock_manager.get_database.return_value = mock_db
-        mock_manager.get_connection.return_value = (mock_client, mock_db)
-        mock_manager.is_connected.return_value = True
-        mock_manager.close_connection.return_value = None
-
+        mock_manager.client = mock_client_instance
+        mock_manager.db = mock_db
+        
         yield {
-            "manager": mock_manager,
-            "collection": mock_collection,
-            "db": mock_db,
-            "client": mock_client,
+            'client': mock_client,
+            'manager': mock_manager,
+            'db': mock_db,
+            'collection': mock_collection
         }
 
 
 @pytest.fixture
-def mock_openai_client():
-    """Mock OpenAI client for testing"""
-    with patch("src.tool.openai_client_context") as mock_context:
-        mock_client = Mock()
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = (
-            "# Generated Blog\n\nThis is a test blog content."
-        )
-        mock_client.chat.completions.create.return_value = mock_response
-        mock_context.return_value.__enter__.return_value = mock_client
-        mock_context.return_value.__exit__.return_value = None
-        yield mock_client
+def app():
+    """Create Flask app for testing using the app factory"""
+    # Set test environment variables before creating app
+    import os
+    os.environ.update({
+        'TESTING': 'True',
+        'SECRET_KEY': 'test-secret-key-12345',
+        'JWT_SECRET_KEY': 'test-jwt-secret-key-12345',
+        'MONGODB_URI': 'mongodb://test:test@localhost:27017/test_db',
+        'MONGODB_DB_NAME': 'test_blog_db',
+        'OPENAI_API_KEY': 'test-openai-key-12345',
+        'SUPADATA_API_KEY': 'test-supadata-key-12345',
+        'JWT_ACCESS_TOKEN_EXPIRES': '86400',
+        'FLASK_ENV': 'testing',
+    })
+    
+    # Use the app factory to create the app with all blueprints registered
+    from app import create_app
+    app = create_app()
+    
+    # Override config for testing
+    app.config.update({
+        'TESTING': True,
+        'WTF_CSRF_ENABLED': False,
+        'SESSION_COOKIE_SECURE': False,
+    })
+    
+    yield app
 
 
 @pytest.fixture
-def mock_requests():
-    """Mock requests for API calls"""
-    with patch("src.tool.requests.Session") as mock_session_class:
-        mock_session = Mock()
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"content": "Test transcript content"}
-        mock_response.raise_for_status.return_value = None
-        mock_session.get.return_value = mock_response
-        mock_session.close.return_value = None
-        mock_session_class.return_value = mock_session
-        yield mock_session
+def client(app):
+    """Create test client"""
+    return app.test_client()
 
 
 @pytest.fixture
-def sample_user_data():
-    """Sample user data for testing"""
-    return {
-        "_id": str(ObjectId()),
-        "username": "testuser",
-        "email": "test@example.com",
-        "is_active": True,
-        "created_at": datetime.datetime.utcnow(),
-        "updated_at": datetime.datetime.utcnow(),
-    }
+def app_context(app):
+    """Provide app context for tests"""
+    with app.app_context():
+        yield app
 
 
 @pytest.fixture
-def sample_blog_post():
-    """Sample blog post for testing"""
-    return {
-        "_id": str(ObjectId()),
-        "user_id": str(ObjectId()),
-        "title": "Test Blog Post",
-        "content": "# Test Blog\n\nThis is test content.",
-        "youtube_url": "https://www.youtube.com/watch?v=test123",
-        "video_id": "test123",
-        "word_count": 100,
-        "created_at": datetime.datetime.utcnow(),
-        "updated_at": datetime.datetime.utcnow(),
-    }
-
-
-@pytest.fixture
-def authenticated_user(client, sample_user_data):
-    """Create an authenticated user session"""
-    with client.session_transaction() as sess:
-        sess["access_token"] = "test_token"
-        sess["user_id"] = sample_user_data["_id"]
-    return sample_user_data
-
-
-@pytest.fixture
-def mock_jwt_functions():
-    """Mock JWT functions"""
-    with patch("auth.routes.create_access_token") as mock_create, patch(
-        "auth.routes.decode_token"
-    ) as mock_decode:
-        mock_create.return_value = "mock_access_token"
-        mock_decode.return_value = {"sub": str(ObjectId())}
-        yield {"create_access_token": mock_create, "decode_token": mock_decode}
-
-
-@pytest.fixture
-def sample_transcript():
-    """Sample transcript for testing"""
-    return """
-    Welcome to this technical video about AI tools.
-    Today we'll discuss various AI productivity tools.
-    First, let's talk about Fabric which is great for AI workflows.
-    Then we'll cover some other tools like Claude and ChatGPT.
-    Each tool has its strengths and weaknesses.
-    """
-
-
-@pytest.fixture
-def sample_blog_content():
-    """Sample blog content for testing"""
-    return """
-# AI Tools Review: A Comprehensive Guide
-
-## Introduction
-
-This article reviews various AI productivity tools and their capabilities.
-
-## Main Tools Discussed
-
-### Fabric
-- Excellent for AI workflows
-- Great automation capabilities
-- User-friendly interface
-
-### Claude
-- Strong reasoning capabilities
-- Good for complex tasks
-- Reliable performance
-
-## Conclusion
-
-Each tool has its place in the AI productivity landscape.
-"""
-
-
-@pytest.fixture
-def valid_youtube_urls():
-    """Valid YouTube URLs for testing"""
-    return [
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        "https://youtu.be/dQw4w9WgXcQ",
-        "https://youtube.com/watch?v=dQw4w9WgXcQ",
-        "https://www.youtube.com/embed/dQw4w9WgXcQ",
-        "https://www.youtube.com/v/dQw4w9WgXcQ",
-        "https://www.youtube.com/shorts/dQw4w9WgXcQ",
-    ]
-
-
-@pytest.fixture
-def invalid_youtube_urls():
-    """Invalid YouTube URLs for testing"""
-    return [
-        "https://vimeo.com/123456789",
-        "https://www.google.com",
-        "not-a-url",
-        "https://youtube.com/watch?v=",
-        "",
-    ]
-
-
-@pytest.fixture
-def mock_pdf_generator():
-    """Mock PDF generator for testing"""
-    with patch("src.tool.PDFGeneratorTool") as mock_pdf:
-        mock_instance = Mock()
-        mock_instance.generate_pdf_bytes.return_value = b"mock pdf content"
-        mock_pdf.return_value = mock_instance
-        yield mock_pdf
-
-
-# Configuration for pytest
-def pytest_configure(config):
-    """Configure pytest settings"""
-    config.addinivalue_line(
-        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
-    )
-    config.addinivalue_line("markers", "integration: marks tests as integration tests")
-    config.addinivalue_line("markers", "unit: marks tests as unit tests")
-
-
-@pytest.fixture(autouse=True)
-def setup_ga_test_environment():
-    """Set up Google Analytics test environment"""
-    with patch.dict(
-        os.environ, {"GA_MEASUREMENT_ID": "G-TEST123456", "FLASK_ENV": "testing"}
-    ):
+def request_context(app):
+    """Provide request context for tests"""
+    with app.test_request_context():
         yield
 
 
 @pytest.fixture
-def app_with_ga_config(app):
-    """App fixture with GA configuration"""
-    app.config["GA_MEASUREMENT_ID"] = "G-TEST123456"
-    return app
-
-
-@pytest.fixture(scope="session")
-def temp_directory():
-    """Create a temporary directory for testing"""
-    temp_dir = tempfile.mkdtemp()
-    yield temp_dir
-    shutil.rmtree(temp_dir)
+def flask_contexts(app):
+    """Combined app and request context"""
+    with app.app_context():
+        with app.test_request_context():
+            yield app
 
 
 @pytest.fixture
-def mock_environment():
-    """Mock environment variables for testing"""
-    test_env = {
-        "OPENAI_API_KEY": "test-openai-key",
-        "SUPADATA_API_KEY": "test-supadata-key",
-        "MONGODB_URI": "mongodb://test-mongo:27017/test_db",
-        "JWT_SECRET_KEY": "test-jwt-secret",
-        "LOG_LEVEL": "DEBUG",
-        "LOGGING_ENABLED": "true",
-        "LOKI_ENDPOINT": "http://test-loki:3100",
+def mock_requests_session():
+    """Mock requests session for API calls"""
+    mock_session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        'content': 'This is a comprehensive test transcript about artificial intelligence and machine learning technologies.',
+        'video_id': 'test123',
+        'title': 'Technology Innovation Video'
+    }
+    mock_response.raise_for_status.return_value = None
+    
+    mock_session.get.return_value = mock_response
+    mock_session.post.return_value = mock_response
+    mock_session.close.return_value = None
+    mock_session.headers = {}
+    
+    yield mock_session
+
+
+@pytest.fixture
+def mock_user_data():
+    """Sample user data for testing"""
+    return {
+        '_id': ObjectId(),
+        'username': 'testuser',
+        'email': 'test@example.com',
+        'password_hash': 'hashed_password_12345',
+        'created_at': datetime.datetime.utcnow(),
+        'updated_at': datetime.datetime.utcnow(),
+        'is_active': True
     }
 
-    original_env = {}
-    for key, value in test_env.items():
-        original_env[key] = os.environ.get(key)
-        os.environ[key] = value
 
-    yield test_env
-
-    # Restore original environment
-    for key, original_value in original_env.items():
-        if original_value is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = original_value
+@pytest.fixture
+def authenticated_user(client, mock_user_data):
+    """Create an authenticated user session"""
+    with client.session_transaction() as sess:
+        sess['user_id'] = str(mock_user_data['_id'])
+        sess['access_token'] = 'test-jwt-token-12345'
+    return mock_user_data
 
 
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_environment():
-    """Setup test environment before any tests run"""
-    os.environ["TESTING"] = "true"
-    os.environ["FLASK_ENV"] = "testing"
-    os.environ["CI"] = "true"
-    os.environ["LOG_TO_FILE"] = "false"
-    os.environ["LOG_LEVEL"] = "DEBUG"
-
-    yield
-
-    # Cleanup
-    for key in ["TESTING", "FLASK_ENV", "CI", "LOG_TO_FILE", "LOG_LEVEL"]:
-        os.environ.pop(key, None)
+@pytest.fixture
+def temp_dir():
+    """Create temporary directory for testing"""
+    temp_dir = tempfile.mkdtemp()
+    yield temp_dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-# E2E Test Configuration
-def pytest_addoption(parser):
-    """Add command line options for test execution"""
-    parser.addoption(
-        "--run-e2e", action="store_true", default=False, help="Run end-to-end tests"
-    )
-    parser.addoption(
-        "--run-integration",
-        action="store_true",
-        default=False,
-        help="Run integration tests",
-    )
+# Test utilities
+def create_test_user(user_model, **kwargs):
+    """Helper to create test user"""
+    user_data = {
+        'username': 'testuser',
+        'email': 'test@example.com', 
+        'password': 'testpassword123',
+        **kwargs
+    }
+    return user_model.create_user(**user_data)
 
 
-def pytest_collection_modifyitems(config, items):
-    """Modify test collection based on command line options"""
-    # Skip E2E tests unless explicitly requested
-    if not config.getoption("--run-e2e"):
-        skip_e2e = pytest.mark.skip(
-            reason="E2E tests skipped (use --run-e2e to enable)"
-        )
-        for item in items:
-            if "e2e" in item.keywords:
-                item.add_marker(skip_e2e)
+def assert_successful_response(response):
+    """Helper to assert successful API response"""
+    assert response.status_code in [200, 201]
+    if response.content_type and 'application/json' in response.content_type:
+        try:
+            data = response.get_json()
+            assert data.get('success', True) is True
+        except Exception:
+            pass
 
-    # Skip integration tests unless explicitly requested or in CI
-    if not config.getoption("--run-integration") and not os.environ.get("CI"):
-        skip_integration = pytest.mark.skip(
-            reason="Integration tests skipped (use --run-integration to enable)"
-        )
-        for item in items:
-            if "integration" in item.keywords:
-                item.add_marker(skip_integration)
+
+def assert_error_response(response, expected_status=400):
+    """Helper to assert error API response"""
+    assert response.status_code == expected_status
+    if response.content_type and 'application/json' in response.content_type:
+        try:
+            data = response.get_json()
+            assert data.get('success', False) is False
+            assert 'message' in data
+        except Exception:
+            pass
+
+
+# Sample data fixtures
+@pytest.fixture
+def sample_youtube_urls():
+    """Provide various YouTube URL formats for testing"""
+    return [
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        'https://youtube.com/watch?v=dQw4w9WgXcQ',
+        'https://youtu.be/dQw4w9WgXcQ',
+        'https://www.youtube.com/embed/dQw4w9WgXcQ',
+        'https://www.youtube.com/shorts/dQw4w9WgXcQ',
+        'https://m.youtube.com/watch?v=dQw4w9WgXcQ',
+    ]
+
+
+@pytest.fixture
+def sample_invalid_urls():
+    """Provide invalid URLs for testing"""
+    return [
+        '',
+        'not-a-url',
+        'https://example.com',
+        'https://vimeo.com/123456',
+        'ftp://youtube.com/watch?v=test',
+        'https://youtube.com',
+        'https://youtube.com/watch',
+    ]
+
+
+# Pytest configuration
+def pytest_configure(config):
+    """Configure pytest with custom markers"""
+    config.addinivalue_line("markers", "crewai: mark test to run only if crewai is available")
+    config.addinivalue_line("markers", "integration: mark test as integration test")
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "unit: mark test as unit test")

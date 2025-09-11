@@ -58,8 +58,6 @@ env:
   ZAP_SPIDER_DURATION: ${{ vars.ZAP_SPIDER_DURATION || '3' }}
 
 
-
-  
 permissions:
   issues: write
   contents: read
@@ -795,12 +793,7 @@ jobs:
             CONTAINER_SECURITY_STATUS="${{ needs.container-security-scan.result }}"
             DOCKERHUB_STATUS="${{ needs.deploy-to-dockerhub.result }}"
             SIGNING_STATUS="${{ needs.sign-container.result }}"
-            GREEN_DEPLOY_STATUS="${{ needs.deploy-green-environment.result }}"
-            ZAP_STATUS="${{ needs.owasp-zap-baseline-scan.result }}"
-            LOAD_TEST_STATUS="${{ needs.jmeter-load-test.result }}"
-            TRAFFIC_SWITCH_STATUS="${{ needs.blue-green-traffic-switch.result }}"
-            ROLLBACK_STATUS="${{ needs.rollback-on-failure.result }}"
-            
+
             echo "Job Status Summary:"
             echo "- Lint & Format: $LINT_STATUS"
             echo "- Security Scan: $SECURITY_STATUS"
@@ -812,11 +805,6 @@ jobs:
             echo "- Container Security: $CONTAINER_SECURITY_STATUS"
             echo "- DockerHub Deploy: $DOCKERHUB_STATUS"
             echo "- Container Signing: $SIGNING_STATUS"
-            echo "- Green Environment: $GREEN_DEPLOY_STATUS"
-            echo "- OWASP ZAP Scan: $ZAP_STATUS"
-            echo "- Load Testing: $LOAD_TEST_STATUS"
-            echo "- Traffic Switch: $TRAFFIC_SWITCH_STATUS"
-            echo "- Rollback: $ROLLBACK_STATUS"
             
             # Determine overall status
             FAILED_JOBS=""

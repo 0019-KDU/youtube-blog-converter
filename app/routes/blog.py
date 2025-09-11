@@ -77,8 +77,14 @@ def generate_blog():
                 401,
             )
 
-        youtube_url = request.form.get("youtube_url", "").strip()
-        language = request.form.get("language", "en")
+        # Handle both JSON and form data
+        if request.is_json:
+            data = request.get_json()
+            youtube_url = data.get("youtube_url", "").strip()
+            language = data.get("language", "en")
+        else:
+            youtube_url = request.form.get("youtube_url", "").strip()
+            language = request.form.get("language", "en")
 
         logger.info(
             f"Blog generation started for user: {current_user['username']}, URL: {youtube_url}"

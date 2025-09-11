@@ -1,0 +1,12 @@
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+pytest-flask>=1.2.0
+pytest-asyncio>=0.21.1
+pytest-xdist>=3.3.1
+mongomock>=4.1.2
+responses>=0.23.3
+factory-boy>=3.3.0
+faker>=19.3.0
+freezegun>=1.2.2
+testcontainers>=3.7.1
