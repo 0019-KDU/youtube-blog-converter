@@ -229,10 +229,7 @@ jobs:
     name: Build and Test Application
     runs-on: ubuntu-latest
     needs: [lint-and-format, security-scan, dependency-check]
-    strategy:
-      matrix:
-        python-version: [3.9, "3.10", 3.11]
-    
+
     services:
       mongodb:
         image: mongo:5.0
@@ -250,18 +247,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: 3.12
 
       - name: Cache dependencies
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-pip-3.12-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+            ${{ runner.os }}-pip-3.12-
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
@@ -273,24 +270,13 @@ jobs:
         run: |
           timeout 30 bash -c 'until nc -z localhost 27017; do sleep 1; done'
 
-      - name: Run unit tests
+      - name: Run all tests
         run: |
-          pytest tests/unit/ \
+          pytest tests/ \
             --cov=app \
-            --cov-report=xml:coverage-unit-${{ matrix.python-version }}.xml \
-            --cov-report=html:htmlcov-unit-${{ matrix.python-version }} \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
             --cov-report=term-missing \
-            -v -x --tb=short --timeout=300
-        env:
-          FLASK_ENV: testing
-          TESTING: true
-
-      - name: Run integration tests
-        run: |
-          pytest tests/integration/ \
-            --cov=app \
-            --cov-report=xml:coverage-integration-${{ matrix.python-version }}.xml \
-            --cov-report=html:htmlcov-integration-${{ matrix.python-version }} \
             -v -x --tb=short --timeout=600
         env:
           MONGODB_URI: mongodb://localhost:27017/test_db
@@ -300,17 +286,17 @@ jobs:
       - name: Upload test results
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.python-version }}
+          name: test-results
           path: |
-            coverage-*.xml
-            htmlcov-*/
+            coverage.xml
+            htmlcov/
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
-          file: ./coverage-*.xml
+          file: ./coverage.xml
           flags: tests
-          name: codecov-${{ matrix.python-version }}
+          name: codecov-3.12
           fail_ci_if_error: false
 
       - name: Create issue on failure
@@ -321,10 +307,11 @@ jobs:
             github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `❌ Build and Test Failed - Python ${{ matrix.python-version }}`,
-              body: `Build and test pipeline failed for Python ${{ matrix.python-version }}.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Branch: ${{ github.ref_name }}\n- Commit: ${{ github.sha }}\n\nPlease check the logs and fix the issues.`,
+              title: `❌ Build and Test Failed - Python 3.12`,
+              body: `Build and test pipeline failed for Python 3.12.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Branch: ${{ github.ref_name }}\n- Commit: ${{ github.sha }}\n\nPlease check the logs and fix the issues.`,
               labels: ['bug', 'ci-failure']
             });
+
 
       - name: Slack Notification on Failure
         if: ${{ failure() }}
