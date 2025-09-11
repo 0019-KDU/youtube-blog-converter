@@ -3,6 +3,7 @@ import os
 from unittest.mock import Mock, patch
 
 import psutil
+from bson import ObjectId
 
 
 class TestMemoryUsage:
@@ -31,7 +32,7 @@ class TestMemoryUsage:
 
                 mock_blog = Mock()
                 mock_blog.create_post.return_value = {
-                    '_id': f'post_{i}',
+                    '_id': str(ObjectId()),
                     'title': f'Large Blog Post {i}',
                     'content': large_content,
                     'user_id': str(authenticated_user['_id'])

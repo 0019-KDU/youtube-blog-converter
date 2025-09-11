@@ -2,6 +2,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import Mock, patch
 
+from bson import ObjectId
+
 
 class TestLoadPerformance:
     """Performance tests for load handling"""
@@ -78,7 +80,7 @@ class TestLoadPerformance:
 
                 mock_blog = Mock()
                 mock_blog.create_post.return_value = {
-                    '_id': f'post_{index}',
+                    '_id': str(ObjectId()),
                     'title': f'Blog Post {index}',
                     'content': f'# Blog Post {index}\n\nContent...',
                     'user_id': f'user_{index}'
@@ -134,7 +136,7 @@ class TestLoadPerformance:
         num_posts = 100
         mock_posts = [
             {
-                '_id': f'post_{i}',
+                '_id': str(ObjectId()),
                 'title': f'Blog Post {i}',
                 'created_at': f'2024-01-{(i % 30) + 1:02d}T00:00:00',
                 'word_count': 500 + i * 10,
