@@ -16,17 +16,17 @@ class TestLoadPerformance:
                 mock_user.create_user.return_value = {
                     'success': True,
                     'user': {
-                        '_id': f'user_{index}',
-                        'username': f'testuser_{index}',
-                        'email': f'test{index}@example.com'
+                        '_id': str(ObjectId()),
+                        'username': f'perftest_user_{index}',
+                        'email': f'perftest{index}@example.com'
                     }
                 }
                 mock_user_class.return_value = mock_user
 
                 start_time = time.time()
                 response = client.post('/auth/register', data={
-                    'username': f'testuser_{index}',
-                    'email': f'test{index}@example.com',
+                    'username': f'perftest_user_{index}',
+                    'email': f'perftest{index}@example.com',
                     'password': 'password123'
                 })
                 end_time = time.time()
@@ -69,9 +69,9 @@ class TestLoadPerformance:
                     patch('app.utils.security.store_large_data') as mock_store:
 
                 mock_auth.return_value = {
-                    '_id': f'user_{index}',
-                    'username': f'testuser_{index}',
-                    'email': f'test{index}@example.com'
+                    '_id': str(ObjectId()),
+                    'username': f'perftest_user_{index}',
+                    'email': f'perftest{index}@example.com'
                 }
 
                 # Simulate variable generation time
