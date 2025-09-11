@@ -83,7 +83,7 @@ class TestLoadPerformance:
                     '_id': str(ObjectId()),
                     'title': f'Blog Post {index}',
                     'content': f'# Blog Post {index}\n\nContent...',
-                    'user_id': f'user_{index}'
+                    'user_id': str(ObjectId())
                 }
                 mock_blog_class.return_value = mock_blog
 
