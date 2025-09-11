@@ -71,7 +71,7 @@ jobs:
   # STAGE 1: CODE QUALITY (Parallel - Fail Fast)
   # ===========================
   
-    lint-and-format:
+  lint-and-format:
       name: Lint and Format Check
       runs-on: ubuntu-latest
 
