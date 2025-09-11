@@ -8,7 +8,6 @@ from flask_jwt_extended import create_access_token
 
 from app.models.user import User
 
-
 logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint("auth", __name__, template_folder="../../templates")
