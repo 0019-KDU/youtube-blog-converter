@@ -67,8 +67,9 @@ class TestUser:
         patch.stopall()
         
         from app.models.user import User
-
-        with patch.object(User, 'get_collection') as mock_get_collection:
+        
+        # Mock at the mongo_manager level to ensure it works in all environments
+        with patch('app.models.user.mongo_manager') as mock_mongo_manager:
             mock_coll = Mock()
             # Mock find_one to return existing user on duplicate check
             mock_coll.find_one.return_value = {
@@ -78,14 +79,21 @@ class TestUser:
             }
             # Ensure insert_one is never called since duplicate should be caught
             mock_coll.insert_one.return_value = Mock(inserted_id=None)
-            mock_get_collection.return_value = mock_coll
+            
+            # Setup mongo_manager mock
+            mock_mongo_manager.is_connected.return_value = True
+            mock_mongo_manager.get_collection.return_value = mock_coll
 
             user = User()
             result = user.create_user(
                 'testuser', 'test@example.com', 'password123')
 
-            assert result['success'] is False
-            assert 'already exists' in result['message']
+            assert result is not None, "Result should not be None"
+            assert 'success' in result, f"Result should contain 'success' key. Got: {result}"
+            assert result['success'] is False, f"Expected success=False, got success={result.get('success')} in result: {result}"
+            assert 'message' in result, f"Result should contain 'message' key. Got: {result}"
+            assert 'already exists' in result['message'], f"Expected 'already exists' in message. Got: {result.get('message')}"
+            
             # Verify find_one was called for duplicate check
             mock_coll.find_one.assert_called_once()
             # Verify insert_one was never called
@@ -97,8 +105,9 @@ class TestUser:
         patch.stopall()
         
         from app.models.user import User
-
-        with patch.object(User, 'get_collection') as mock_get_collection:
+        
+        # Mock at the mongo_manager level to ensure it works in all environments
+        with patch('app.models.user.mongo_manager') as mock_mongo_manager:
             mock_coll = Mock()
             # Mock find_one to return existing user on duplicate check
             mock_coll.find_one.return_value = {
@@ -108,14 +117,21 @@ class TestUser:
             }
             # Ensure insert_one is never called since duplicate should be caught
             mock_coll.insert_one.return_value = Mock(inserted_id=None)
-            mock_get_collection.return_value = mock_coll
+            
+            # Setup mongo_manager mock
+            mock_mongo_manager.is_connected.return_value = True
+            mock_mongo_manager.get_collection.return_value = mock_coll
 
             user = User()
             result = user.create_user(
                 'testuser', 'test@example.com', 'password123')
 
-            assert result['success'] is False
-            assert 'already exists' in result['message']
+            assert result is not None, "Result should not be None"
+            assert 'success' in result, f"Result should contain 'success' key. Got: {result}"
+            assert result['success'] is False, f"Expected success=False, got success={result.get('success')} in result: {result}"
+            assert 'message' in result, f"Result should contain 'message' key. Got: {result}"
+            assert 'already exists' in result['message'], f"Expected 'already exists' in message. Got: {result.get('message')}"
+            
             # Verify find_one was called for duplicate check
             mock_coll.find_one.assert_called_once()
             # Verify insert_one was never called
