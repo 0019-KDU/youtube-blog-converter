@@ -36,7 +36,7 @@ class TestUser:
                     'username': 'testuser',
                     'email': 'test@example.com',
                     'password_hash': 'hashed_password',
-                    'created_at': datetime.datetime.utcnow(),
+                    'created_at': datetime.datetime.now(datetime.UTC),
                     'updated_at': datetime.datetime.utcnow(),
                     'is_active': True
                 }
@@ -63,14 +63,21 @@ class TestUser:
 
     def test_create_user_duplicate_email(self):
         """Test user creation with duplicate email"""
+        # Ensure clean test state
+        patch.stopall()
+        
         from app.models.user import User
 
         with patch.object(User, 'get_collection') as mock_get_collection:
             mock_coll = Mock()
+            # Mock find_one to return existing user on duplicate check
             mock_coll.find_one.return_value = {
                 '_id': ObjectId(),
-                'email': 'test@example.com'
+                'email': 'test@example.com',
+                'username': 'existing_user'
             }
+            # Ensure insert_one is never called since duplicate should be caught
+            mock_coll.insert_one.return_value = Mock(inserted_id=None)
             mock_get_collection.return_value = mock_coll
 
             user = User()
@@ -79,17 +86,28 @@ class TestUser:
 
             assert result['success'] is False
             assert 'already exists' in result['message']
+            # Verify find_one was called for duplicate check
+            mock_coll.find_one.assert_called_once()
+            # Verify insert_one was never called
+            mock_coll.insert_one.assert_not_called()
 
     def test_create_user_duplicate_username(self):
         """Test user creation with duplicate username"""
+        # Ensure clean test state
+        patch.stopall()
+        
         from app.models.user import User
 
         with patch.object(User, 'get_collection') as mock_get_collection:
             mock_coll = Mock()
+            # Mock find_one to return existing user on duplicate check
             mock_coll.find_one.return_value = {
                 '_id': ObjectId(),
-                'username': 'testuser'
+                'username': 'testuser',
+                'email': 'existing@example.com'
             }
+            # Ensure insert_one is never called since duplicate should be caught
+            mock_coll.insert_one.return_value = Mock(inserted_id=None)
             mock_get_collection.return_value = mock_coll
 
             user = User()
@@ -98,6 +116,10 @@ class TestUser:
 
             assert result['success'] is False
             assert 'already exists' in result['message']
+            # Verify find_one was called for duplicate check
+            mock_coll.find_one.assert_called_once()
+            # Verify insert_one was never called
+            mock_coll.insert_one.assert_not_called()
 
     def test_create_user_insert_failure(self):
         """Test user creation when insert fails"""
