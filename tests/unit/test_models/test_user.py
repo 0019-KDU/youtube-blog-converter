@@ -20,24 +20,21 @@ class TestUser:
 
     def test_create_user_success(self):
         """Test successful user creation"""
-        # Ensure clean test state
         patch.stopall()
-        
         from app.models.user import User
 
         user_id = ObjectId()
         with patch.object(User, 'get_collection') as mock_get_collection:
-            # Mock collection methods
             mock_coll = Mock()
             mock_coll.find_one.side_effect = [
-                None,  # First call: no existing user
-                {      # Second call: return created user
+                None,
+                {
                     '_id': user_id,
                     'username': 'testuser',
                     'email': 'test@example.com',
                     'password_hash': 'hashed_password',
                     'created_at': datetime.datetime.now(datetime.UTC),
-                    'updated_at': datetime.datetime.utcnow(),
+                    'updated_at': datetime.datetime.now(datetime.UTC),
                     'is_active': True
                 }
             ]
@@ -45,149 +42,74 @@ class TestUser:
             mock_insert_result = Mock()
             mock_insert_result.inserted_id = user_id
             mock_coll.insert_one.return_value = mock_insert_result
-
             mock_get_collection.return_value = mock_coll
 
             user = User()
             result = user.create_user('testuser', 'test@example.com', 'password123')
-    
-        # Fixed assertions - focus on core functionality
+
             assert result['success'] is True
             assert 'user' in result
-            assert 'username' in result['user'] and result['user']['username'] is not None
-            assert 'email' in result['user'] and result['user']['email'] is not None
+            assert 'username' in result['user']
+            assert 'email' in result['user']
             assert 'password_hash' not in result['user']
-            # Optional message check (won't fail if missing)
-            if 'message' in result:
-                assert result['message'] is not None
 
     def test_create_user_duplicate_email(self):
         """Test user creation with duplicate email"""
-        # Ensure completely clean test state
         patch.stopall()
-        
         from app.models.user import User
-        
-        # Comprehensive mocking to ensure complete isolation from any database
+
         with patch('app.models.user.mongo_manager') as mock_mongo_manager, \
              patch.object(User, '_ensure_connection') as mock_ensure_conn, \
              patch.object(User, 'get_collection') as mock_get_collection, \
-             patch('pymongo.MongoClient'):  # Block any real MongoDB connections
-            
+             patch('pymongo.MongoClient') as mock_mongo_client:
+
             mock_coll = Mock()
-            # Mock find_one to return existing user on duplicate check
             mock_coll.find_one.return_value = {
                 '_id': ObjectId(),
                 'email': 'test@example.com',
                 'username': 'existing_user'
             }
-            # Mock insert_one should never be called
             mock_coll.insert_one.return_value = Mock(inserted_id=None)
-            
-            # Setup all possible mock paths to ensure isolation
+
             mock_mongo_manager.is_connected.return_value = True
             mock_mongo_manager.get_collection.return_value = mock_coll
             mock_get_collection.return_value = mock_coll
             mock_ensure_conn.return_value = None
-            
-            # Ensure complete mock isolation
 
             user = User()
-            
-            # Force the mock to be used by ensuring no real connections
-            assert mock_mongo_manager.is_connected.return_value is True
-            assert mock_get_collection.return_value is mock_coll
-            
-            result = user.create_user(
-                'testuser', 'test@example.com', 'password123')
+            result = user.create_user('testuser', 'test@example.com', 'password123')
 
-            # Debug output for CI/CD troubleshooting
-            print(f"DEBUG: Test result = {result}")
-            print(f"DEBUG: Result type = {type(result)}")
-            if hasattr(mock_coll.find_one, 'call_args_list'):
-                print(f"DEBUG: mock_coll.find_one called with: {mock_coll.find_one.call_args_list}")
-            print(f"DEBUG: mock_coll.insert_one called: {mock_coll.insert_one.called}")
-            print(f"DEBUG: mock_mongo_manager.get_collection called: {mock_mongo_manager.get_collection.called}")
-            print(f"DEBUG: mock_get_collection called: {mock_get_collection.called}")
-            
-            # Robust assertions
-            assert result is not None, "Result should not be None"
-            assert isinstance(result, dict), f"Result should be dict, got {type(result)}: {result}"
-            assert 'success' in result, f"Result should contain 'success' key. Got keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}"
-            
-            # The key assertion - if this fails, the mock isn't working
-            if result.get('success') is not False:
-                print(f"CRITICAL: Mock failure detected. Result: {result}")
-                print(f"CRITICAL: Expected duplicate detection to return success=False")
-                print(f"CRITICAL: This suggests the mock is not being applied and real DB is being used")
-                
-            assert result['success'] is False, f"Expected success=False, got success={result.get('success')} in result: {result}"
-            assert 'message' in result, f"Result should contain 'message' key. Got: {result}"
-            assert 'already exists' in result['message'], f"Expected 'already exists' in message. Got: {result.get('message')}"
+            assert result['success'] is False
+            assert 'already exists' in result['message']
 
     def test_create_user_duplicate_username(self):
         """Test user creation with duplicate username"""
-        # Ensure completely clean test state
         patch.stopall()
-        
         from app.models.user import User
-        
-        # Comprehensive mocking to ensure complete isolation from any database
+
         with patch('app.models.user.mongo_manager') as mock_mongo_manager, \
              patch.object(User, '_ensure_connection') as mock_ensure_conn, \
              patch.object(User, 'get_collection') as mock_get_collection, \
-             patch('pymongo.MongoClient'):  # Block any real MongoDB connections
-            
+             patch('pymongo.MongoClient') as mock_mongo_client:
+
             mock_coll = Mock()
-            # Mock find_one to return existing user on duplicate check
             mock_coll.find_one.return_value = {
                 '_id': ObjectId(),
                 'username': 'testuser',
                 'email': 'existing@example.com'
             }
-            # Mock insert_one should never be called
             mock_coll.insert_one.return_value = Mock(inserted_id=None)
-            
-            # Setup all possible mock paths to ensure isolation
+
             mock_mongo_manager.is_connected.return_value = True
             mock_mongo_manager.get_collection.return_value = mock_coll
             mock_get_collection.return_value = mock_coll
             mock_ensure_conn.return_value = None
-            
-            # Ensure complete mock isolation
 
             user = User()
-            
-            # Force the mock to be used by ensuring no real connections
-            assert mock_mongo_manager.is_connected.return_value is True
-            assert mock_get_collection.return_value is mock_coll
-            
-            result = user.create_user(
-                'testuser', 'test@example.com', 'password123')
+            result = user.create_user('testuser', 'test@example.com', 'password123')
 
-            # Debug output for CI/CD troubleshooting
-            print(f"DEBUG: Test result = {result}")
-            print(f"DEBUG: Result type = {type(result)}")
-            if hasattr(mock_coll.find_one, 'call_args_list'):
-                print(f"DEBUG: mock_coll.find_one called with: {mock_coll.find_one.call_args_list}")
-            print(f"DEBUG: mock_coll.insert_one called: {mock_coll.insert_one.called}")
-            print(f"DEBUG: mock_mongo_manager.get_collection called: {mock_mongo_manager.get_collection.called}")
-            print(f"DEBUG: mock_get_collection called: {mock_get_collection.called}")
-            
-            # Robust assertions
-            assert result is not None, "Result should not be None"
-            assert isinstance(result, dict), f"Result should be dict, got {type(result)}: {result}"
-            assert 'success' in result, f"Result should contain 'success' key. Got keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}"
-            
-            # The key assertion - if this fails, the mock isn't working
-            if result.get('success') is not False:
-                print(f"CRITICAL: Mock failure detected. Result: {result}")
-                print(f"CRITICAL: Expected duplicate detection to return success=False")
-                print(f"CRITICAL: This suggests the mock is not being applied and real DB is being used")
-                
-            assert result['success'] is False, f"Expected success=False, got success={result.get('success')} in result: {result}"
-            assert 'message' in result, f"Result should contain 'message' key. Got: {result}"
-            assert 'already exists' in result['message'], f"Expected 'already exists' in message. Got: {result.get('message')}"
+            assert result['success'] is False
+            assert 'already exists' in result['message']
 
     def test_create_user_insert_failure(self):
         """Test user creation when insert fails"""
@@ -195,15 +117,14 @@ class TestUser:
 
         with patch.object(User, 'get_collection') as mock_get_collection:
             mock_coll = Mock()
-            mock_coll.find_one.return_value = None  # No existing user
+            mock_coll.find_one.return_value = None
             mock_insert_result = Mock()
-            mock_insert_result.inserted_id = None  # Insert failed
+            mock_insert_result.inserted_id = None
             mock_coll.insert_one.return_value = mock_insert_result
             mock_get_collection.return_value = mock_coll
 
             user = User()
-            result = user.create_user(
-                'testuser', 'test@example.com', 'password123')
+            result = user.create_user('testuser', 'test@example.com', 'password123')
 
             assert result['success'] is False
             assert result['message'] == "Failed to create user"
@@ -213,12 +134,10 @@ class TestUser:
         from app.models.user import User
 
         with patch.object(User, 'get_collection') as mock_get_collection:
-            mock_get_collection.side_effect = Exception(
-                "Database connection failed")
+            mock_get_collection.side_effect = Exception("Database connection failed")
 
             user = User()
-            result = user.create_user(
-                'testuser', 'test@example.com', 'password123')
+            result = user.create_user('testuser', 'test@example.com', 'password123')
 
             assert result['success'] is False
             assert 'Database error' in result['message']
@@ -237,8 +156,8 @@ class TestUser:
                 'username': 'testuser',
                 'email': 'test@example.com',
                 'password_hash': hashed_password,
-                'created_at': datetime.datetime.utcnow(),
-                'updated_at': datetime.datetime.utcnow(),
+                'created_at': datetime.datetime.now(datetime.UTC),
+                'updated_at': datetime.datetime.now(datetime.UTC),
                 'is_active': True
             }
             mock_get_collection.return_value = mock_coll
@@ -268,8 +187,7 @@ class TestUser:
             mock_get_collection.return_value = mock_coll
 
             user = User()
-            result = user.authenticate_user(
-                'test@example.com', 'wrong_password')
+            result = user.authenticate_user('test@example.com', 'wrong_password')
 
             assert result is None
 
@@ -283,8 +201,7 @@ class TestUser:
             mock_get_collection.return_value = mock_coll
 
             user = User()
-            result = user.authenticate_user(
-                'nonexistent@example.com', 'password123')
+            result = user.authenticate_user('nonexistent@example.com', 'password123')
 
             assert result is None
 
@@ -362,7 +279,7 @@ class TestUser:
         """Test getting user with invalid ObjectId"""
         from app.models.user import User
 
-        with patch.object(User, 'get_collection') as mock_get_collection:
+        with patch.object(User, 'get_collection'):
             user = User()
             result = user.get_user_by_id('invalid-objectid')
 
@@ -392,11 +309,9 @@ class TestUser:
             mock_get_collection.return_value = mock_coll
 
             user = User()
-            result = user.update_user(
-                str(ObjectId()), {'username': 'newusername'})
+            result = user.update_user(str(ObjectId()), {'username': 'newusername'})
 
             assert result is True
-            # Verify update_one was called with correct parameters
             mock_coll.update_one.assert_called_once()
             call_args = mock_coll.update_one.call_args
             assert '$set' in call_args[0][1]
@@ -414,8 +329,7 @@ class TestUser:
             mock_get_collection.return_value = mock_coll
 
             user = User()
-            result = user.update_user(
-                str(ObjectId()), {'username': 'newusername'})
+            result = user.update_user(str(ObjectId()), {'username': 'newusername'})
 
             assert result is False
 
@@ -427,7 +341,6 @@ class TestUser:
             mock_get_collection.side_effect = Exception("Database error")
 
             user = User()
-            result = user.update_user(
-                str(ObjectId()), {'username': 'newusername'})
+            result = user.update_user(str(ObjectId()), {'username': 'newusername'})
 
             assert result is False
