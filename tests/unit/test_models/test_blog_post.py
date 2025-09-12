@@ -1,623 +1,722 @@
 import datetime
-from unittest.mock import Mock, patch
+import os
+import pytest
+from unittest.mock import MagicMock, Mock, patch
 
 from bson import ObjectId
 
+# Ensure app directory is in path before any imports
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.models.user import BlogPost
+
 
 class TestBlogPost:
-    """Test cases for BlogPost model"""
+    """Comprehensive test suite for BlogPost model"""
 
-    def test_create_post_success(self):
+    @pytest.fixture
+    def blog_post_model(self):
+        """Create BlogPost model instance for testing"""
+        return BlogPost()
+
+    @pytest.fixture
+    def sample_blog_post_data(self):
+        """Sample blog post data for testing"""
+        return {
+            'user_id': ObjectId(),
+            'youtube_url': 'https://youtube.com/watch?v=dQw4w9WgXcQ',
+            'title': 'Test Blog Post Title',
+            'content': 'This is a comprehensive test blog post content that demonstrates various features and functionality of our blogging system.',
+            'video_id': 'dQw4w9WgXcQ'
+        }
+
+    @pytest.fixture
+    def sample_user_id(self):
+        """Sample user ID for testing"""
+        return ObjectId()
+
+    @pytest.fixture
+    def sample_post_id(self):
+        """Sample post ID for testing"""
+        return ObjectId()
+
+    def test_blog_post_initialization(self, blog_post_model):
+        """Test BlogPost model initialization"""
+        assert blog_post_model.collection_name == "blog_posts"
+        assert hasattr(blog_post_model, 'get_collection')
+
+    @pytest.mark.unit
+    def test_create_post_success(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
         """Test successful blog post creation"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.inserted_id = ObjectId()
+        mock_collection.insert_one.return_value = mock_result
 
-        user_id = ObjectId()
-        post_id = ObjectId()
+        # Test creation
+        result = blog_post_model.create_post(
+            user_id=sample_blog_post_data['user_id'],
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content=sample_blog_post_data['content'],
+            video_id=sample_blog_post_data['video_id']
+        )
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_insert_result = Mock()
-            mock_insert_result.inserted_id = post_id
-            mock_coll.insert_one.return_value = mock_insert_result
-            mock_get_collection.return_value = mock_coll
+        # Assertions
+        assert result is not None
+        assert result['title'] == sample_blog_post_data['title']
+        assert result['content'] == sample_blog_post_data['content']
+        assert result['youtube_url'] == sample_blog_post_data['youtube_url']
+        assert result['video_id'] == sample_blog_post_data['video_id']
+        assert 'word_count' in result
+        assert result['word_count'] == len(sample_blog_post_data['content'].split())
+        assert 'created_at' in result
+        assert 'updated_at' in result
+        assert '_id' in result
+        assert 'user_id' in result
 
-            blog_post = BlogPost()
-            result = blog_post.create_post(
-                user_id=user_id,
-                youtube_url='https://www.youtube.com/watch?v=test123',
-                title='Test Blog Post',
-                content='# Test Blog\n\nThis is test content.',
-                video_id='test123'
-            )
+        # Verify collection was called with correct data
+        mock_collection.insert_one.assert_called_once()
+        call_args = mock_collection.insert_one.call_args[0][0]
+        assert call_args['title'] == sample_blog_post_data['title']
+        assert call_args['content'] == sample_blog_post_data['content']
 
-            # Test passes if we get any reasonable result - focus on the core functionality
-            assert result is not None
-            assert isinstance(result, dict)
-            
-            # Verify essential fields exist (regardless of their exact values)
-            assert '_id' in result and result['_id'] is not None
-            assert 'user_id' in result and result['user_id'] is not None
-            
-            # If the mock system was properly set up, verify the calls
-            # But don't fail if performance tests interfered with mocking
-            if hasattr(mock_coll.insert_one, 'call_count') and mock_coll.insert_one.call_count > 0:
-                call_args = mock_coll.insert_one.call_args[0][0]
-                assert call_args['title'] == 'Test Blog Post'
-                assert call_args['youtube_url'] == 'https://www.youtube.com/watch?v=test123'
-                assert call_args['video_id'] == 'test123'
+    @pytest.mark.unit
+    def test_create_post_with_string_user_id(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
+        """Test blog post creation with string user ID"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.inserted_id = ObjectId()
+        mock_collection.insert_one.return_value = mock_result
 
-    def test_create_post_string_user_id(self):
-        """Test blog post creation with string user_id"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Test with string user_id
+        string_user_id = str(sample_blog_post_data['user_id'])
+        result = blog_post_model.create_post(
+            user_id=string_user_id,
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content=sample_blog_post_data['content'],
+            video_id=sample_blog_post_data['video_id']
+        )
 
-        user_id = str(ObjectId())
-        post_id = ObjectId()
+        assert result is not None
+        assert result['user_id'] == string_user_id
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_insert_result = Mock()
-            mock_insert_result.inserted_id = post_id
-            mock_coll.insert_one.return_value = mock_insert_result
-            mock_get_collection.return_value = mock_coll
-
-            blog_post = BlogPost()
-            result = blog_post.create_post(
-                user_id=user_id,
-                youtube_url='https://www.youtube.com/watch?v=test123',
-                title='Test Blog Post',
-                content='Test content',
-                video_id='test123'
-            )
-
-            assert result is not None
-            assert isinstance(result, dict)
-            assert '_id' in result and result['_id'] is not None
-            assert 'user_id' in result and result['user_id'] is not None
-
-    def test_create_post_insert_failure(self):
-        """Test blog post creation when insert fails"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
-
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_insert_result = Mock()
-            mock_insert_result.inserted_id = None  # Insert failed
-            mock_coll.insert_one.return_value = mock_insert_result
-            mock_get_collection.return_value = mock_coll
-
-            blog_post = BlogPost()
-            result = blog_post.create_post(
-                user_id=ObjectId(),
-                youtube_url='https://www.youtube.com/watch?v=test123',
-                title='Test Blog Post',
-                content='Test content',
-                video_id='test123'
-            )
-
-            assert result is None
-
-    def test_create_post_database_error(self):
+    @pytest.mark.unit
+    def test_create_post_database_error(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
         """Test blog post creation with database error"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Configure mock to raise exception
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.insert_one.side_effect = Exception("Database connection error")
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_get_collection.side_effect = Exception("Database error")
+        # Test creation with error
+        result = blog_post_model.create_post(
+            user_id=sample_blog_post_data['user_id'],
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content=sample_blog_post_data['content'],
+            video_id=sample_blog_post_data['video_id']
+        )
 
-            blog_post = BlogPost()
-            result = blog_post.create_post(
-                user_id=ObjectId(),
-                youtube_url='https://www.youtube.com/watch?v=test123',
-                title='Test Blog Post',
-                content='Test content',
-                video_id='test123'
-            )
+        # Should return None on error
+        assert result is None
 
-            assert result is None
+    @pytest.mark.unit
+    def test_create_post_insert_failure(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
+        """Test blog post creation when insert fails"""
+        # Configure mock to return None inserted_id
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.inserted_id = None
+        mock_collection.insert_one.return_value = mock_result
 
-    def test_get_user_posts_success(self):
-        """Test getting user posts"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Test creation
+        result = blog_post_model.create_post(
+            user_id=sample_blog_post_data['user_id'],
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content=sample_blog_post_data['content'],
+            video_id=sample_blog_post_data['video_id']
+        )
 
-        user_id = ObjectId()
-        post1_id = ObjectId()
-        post2_id = ObjectId()
+        # Should return None when insert fails
+        assert result is None
 
-        posts_data = [
+    @pytest.mark.unit
+    def test_get_user_posts_success(self, blog_post_model, sample_user_id, mock_mongodb_globally):
+        """Test successful retrieval of user posts"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        sample_posts = [
             {
-                '_id': post1_id,
-                'user_id': user_id,
-                'title': 'Post 1',
-                'content': 'Content 1',
-                'youtube_url': 'https://www.youtube.com/watch?v=test1',
-                'video_id': 'test1',
-                'word_count': 2,
+                '_id': ObjectId(),
+                'user_id': sample_user_id,
+                'title': 'First Post',
+                'content': 'First post content',
                 'created_at': datetime.datetime.utcnow()
             },
             {
-                '_id': post2_id,
-                'user_id': user_id,
-                'title': 'Post 2',
-                'content': 'Content 2',
-                'youtube_url': 'https://www.youtube.com/watch?v=test2',
-                'video_id': 'test2',
-                'word_count': 2,
+                '_id': ObjectId(),
+                'user_id': sample_user_id,
+                'title': 'Second Post',
+                'content': 'Second post content',
                 'created_at': datetime.datetime.utcnow()
             }
         ]
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
+        # Configure the mock chain
+        mock_find = Mock()
+        mock_sort = Mock()
+        mock_limit = Mock()
+        mock_skip = Mock()
 
-            # Create a proper chained mock
-            mock_skip_result = Mock()
-            mock_skip_result.__iter__ = lambda x: iter(posts_data)
+        mock_collection.find.return_value = mock_find
+        mock_find.sort.return_value = mock_sort
+        mock_sort.limit.return_value = mock_limit
+        mock_limit.skip.return_value = sample_posts
 
-            mock_limit_result = Mock()
-            mock_limit_result.skip = Mock(return_value=mock_skip_result)
+        # Test retrieval
+        result = blog_post_model.get_user_posts(sample_user_id)
 
-            mock_sort_result = Mock()
-            mock_sort_result.limit = Mock(return_value=mock_limit_result)
+        # Assertions
+        assert len(result) == 2
+        assert all(isinstance(str(post['_id']), str) for post in result)
+        assert all(isinstance(str(post['user_id']), str) for post in result)
+        assert result[0]['title'] == 'First Post'
+        assert result[1]['title'] == 'Second Post'
 
-            mock_find_result = Mock()
-            mock_find_result.sort = Mock(return_value=mock_sort_result)
+        # Verify correct method calls
+        mock_collection.find.assert_called_once_with({'user_id': sample_user_id})
+        mock_find.sort.assert_called_once_with('created_at', -1)
+        mock_sort.limit.assert_called_once_with(50)
+        mock_limit.skip.assert_called_once_with(0)
 
-            mock_coll.find = Mock(return_value=mock_find_result)
-            mock_get_collection.return_value = mock_coll
+    @pytest.mark.unit
+    def test_get_user_posts_with_pagination(self, blog_post_model, sample_user_id, mock_mongodb_globally):
+        """Test retrieval of user posts with pagination parameters"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_find = Mock()
+        mock_sort = Mock()
+        mock_limit = Mock()
+        mock_skip = Mock()
 
-            blog_post = BlogPost()
-            result = blog_post.get_user_posts(user_id)
+        mock_collection.find.return_value = mock_find
+        mock_find.sort.return_value = mock_sort
+        mock_sort.limit.return_value = mock_limit
+        mock_limit.skip.return_value = []
 
-            # Flexible assertions
-            assert isinstance(result, list)
-            assert len(result) >= 0  # May be empty due to mock pollution
-            
-            # If we got data, validate the structure
-            if len(result) > 0:
-                for post in result:
-                    assert isinstance(post, dict)
-                    assert '_id' in post
-                    assert 'user_id' in post
+        # Test with custom pagination
+        result = blog_post_model.get_user_posts(sample_user_id, limit=10, skip=5)
 
-    def test_get_user_posts_string_user_id(self):
-        """Test getting user posts with string user_id"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Verify pagination parameters
+        mock_sort.limit.assert_called_once_with(10)
+        mock_limit.skip.assert_called_once_with(5)
 
-        user_id = str(ObjectId())
+    @pytest.mark.unit
+    def test_get_user_posts_with_string_id(self, blog_post_model, sample_user_id, mock_mongodb_globally):
+        """Test retrieval of user posts with string user ID"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_find = Mock()
+        mock_sort = Mock()
+        mock_limit = Mock()
+        mock_skip = Mock()
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
+        mock_collection.find.return_value = mock_find
+        mock_find.sort.return_value = mock_sort
+        mock_sort.limit.return_value = mock_limit
+        mock_limit.skip.return_value = []
 
-            # Create a proper chained mock that returns empty list
-            mock_skip_result = Mock()
-            mock_skip_result.__iter__ = lambda x: iter([])
+        # Test with string user_id
+        string_user_id = str(sample_user_id)
+        result = blog_post_model.get_user_posts(string_user_id)
 
-            mock_limit_result = Mock()
-            mock_limit_result.skip = Mock(return_value=mock_skip_result)
+        # Verify ObjectId conversion
+        mock_collection.find.assert_called_once_with({'user_id': sample_user_id})
 
-            mock_sort_result = Mock()
-            mock_sort_result.limit = Mock(return_value=mock_limit_result)
+    @pytest.mark.unit
+    def test_get_user_posts_database_error(self, blog_post_model, sample_user_id, mock_mongodb_globally):
+        """Test get_user_posts with database error"""
+        # Configure mock to raise exception
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.find.side_effect = Exception("Database error")
 
-            mock_find_result = Mock()
-            mock_find_result.sort = Mock(return_value=mock_sort_result)
+        # Test retrieval with error
+        result = blog_post_model.get_user_posts(sample_user_id)
 
-            mock_coll.find = Mock(return_value=mock_find_result)
-            mock_get_collection.return_value = mock_coll
+        # Should return empty list on error
+        assert result == []
 
-            blog_post = BlogPost()
-            result = blog_post.get_user_posts(user_id)
+    @pytest.mark.unit
+    def test_get_post_by_id_success(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
+        """Test successful retrieval of post by ID"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        sample_post = {
+            '_id': sample_post_id,
+            'user_id': sample_user_id,
+            'title': 'Test Post',
+            'content': 'Test content',
+            'created_at': datetime.datetime.utcnow()
+        }
+        mock_collection.find_one.return_value = sample_post
 
-            assert isinstance(result, list)
+        # Test retrieval
+        result = blog_post_model.get_post_by_id(sample_post_id)
 
-    def test_get_user_posts_with_pagination(self):
-        """Test getting user posts with pagination"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Assertions
+        assert result is not None
+        assert isinstance(result['_id'], str)
+        assert isinstance(result['user_id'], str)
+        assert result['title'] == 'Test Post'
+        mock_collection.find_one.assert_called_once_with({'_id': sample_post_id})
 
-        user_id = ObjectId()
+    @pytest.mark.unit
+    def test_get_post_by_id_with_user_id(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
+        """Test retrieval of post by ID with user ID filter"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        sample_post = {
+            '_id': sample_post_id,
+            'user_id': sample_user_id,
+            'title': 'Test Post',
+            'content': 'Test content'
+        }
+        mock_collection.find_one.return_value = sample_post
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
+        # Test retrieval with user_id
+        result = blog_post_model.get_post_by_id(sample_post_id, sample_user_id)
 
-            # Create a proper chained mock
-            mock_skip_result = Mock()
-            mock_skip_result.__iter__ = lambda x: iter([])
+        # Verify query includes user_id
+        expected_query = {'_id': sample_post_id, 'user_id': sample_user_id}
+        mock_collection.find_one.assert_called_once_with(expected_query)
 
-            mock_limit_result = Mock()
-            mock_limit_result.skip = Mock(return_value=mock_skip_result)
+    @pytest.mark.unit
+    def test_get_post_by_id_with_string_ids(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
+        """Test retrieval of post by ID with string IDs"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.find_one.return_value = None
 
-            mock_sort_result = Mock()
-            mock_sort_result.limit = Mock(return_value=mock_limit_result)
+        # Test with string IDs
+        string_post_id = str(sample_post_id)
+        string_user_id = str(sample_user_id)
+        result = blog_post_model.get_post_by_id(string_post_id, string_user_id)
 
-            mock_find_result = Mock()
-            mock_find_result.sort = Mock(return_value=mock_sort_result)
+        # Verify ObjectId conversion
+        expected_query = {'_id': sample_post_id, 'user_id': sample_user_id}
+        mock_collection.find_one.assert_called_once_with(expected_query)
 
-            mock_coll.find = Mock(return_value=mock_find_result)
-            mock_get_collection.return_value = mock_coll
+    @pytest.mark.unit
+    def test_get_post_by_id_not_found(self, blog_post_model, sample_post_id, mock_mongodb_globally):
+        """Test retrieval of non-existent post"""
+        # Configure mock to return None
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.find_one.return_value = None
 
-            blog_post = BlogPost()
-            result = blog_post.get_user_posts(user_id, limit=10, skip=20)
+        # Test retrieval
+        result = blog_post_model.get_post_by_id(sample_post_id)
 
-            # Verify method was called and returned something reasonable
-            assert isinstance(result, list)
-            
-            # If mock system worked properly, verify pagination parameters
-            if hasattr(mock_sort_result, 'limit') and mock_sort_result.limit.call_count > 0:
-                mock_sort_result.limit.assert_called_with(10)
-            if hasattr(mock_limit_result, 'skip') and mock_limit_result.skip.call_count > 0:
-                mock_limit_result.skip.assert_called_with(20)
+        # Should return None
+        assert result is None
 
-    def test_get_user_posts_database_error(self):
-        """Test getting user posts with database error"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+    @pytest.mark.unit
+    def test_get_post_by_id_database_error(self, blog_post_model, sample_post_id, mock_mongodb_globally):
+        """Test get_post_by_id with database error"""
+        # Configure mock to raise exception
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.find_one.side_effect = Exception("Database error")
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_get_collection.side_effect = Exception("Database error")
+        # Test retrieval with error
+        result = blog_post_model.get_post_by_id(sample_post_id)
 
-            blog_post = BlogPost()
-            result = blog_post.get_user_posts(ObjectId())
+        # Should return None on error
+        assert result is None
 
-            assert result == []
-
-    def test_get_post_by_id_success(self):
-        """Test getting post by ID"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
-
-        post_id = ObjectId()
-        user_id = ObjectId()
-
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_coll.find_one.return_value = {
-                '_id': post_id,
-                'user_id': user_id,
-                'title': 'Test Post',
-                'content': 'Test content',
-                'youtube_url': 'https://www.youtube.com/watch?v=test',
-                'video_id': 'test',
-                'word_count': 2
-            }
-            mock_get_collection.return_value = mock_coll
-
-            blog_post = BlogPost()
-            result = blog_post.get_post_by_id(post_id, user_id)
-
-            # Flexible assertions
-            if result is not None:
-                assert isinstance(result, dict)
-                assert '_id' in result
-                assert 'user_id' in result
-
-    def test_get_post_by_id_string_ids(self):
-        """Test getting post by string IDs"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
-
-        post_id = str(ObjectId())
-        user_id = str(ObjectId())
-
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_coll.find_one.return_value = {
-                '_id': ObjectId(post_id),
-                'user_id': ObjectId(user_id),
-                'title': 'Test Post',
-                'content': 'Test content'
-            }
-            mock_get_collection.return_value = mock_coll
-
-            blog_post = BlogPost()
-            result = blog_post.get_post_by_id(post_id, user_id)
-
-            # Flexible assertions
-            if result is not None:
-                assert isinstance(result, dict)
-                assert '_id' in result
-                assert 'user_id' in result
-
-    def test_get_post_by_id_no_user_filter(self):
-        """Test getting post by ID without user filter"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
-
-        post_id = ObjectId()
-
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_coll.find_one.return_value = {
-                '_id': post_id,
-                'user_id': ObjectId(),
-                'title': 'Test Post',
-                'content': 'Test content'
-            }
-            mock_get_collection.return_value = mock_coll
-
-            blog_post = BlogPost()
-            result = blog_post.get_post_by_id(post_id)
-
-            # Flexible assertions
-            if result is not None:
-                assert isinstance(result, dict)
-
-    def test_get_post_by_id_not_found(self):
-        """Test getting non-existent post"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
-
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_coll.find_one.return_value = None
-            mock_get_collection.return_value = mock_coll
-
-            blog_post = BlogPost()
-            result = blog_post.get_post_by_id(ObjectId())
-
-            # Result may be None or empty due to mock behavior
-            assert result is None or result == {}
-
-    def test_get_post_by_id_database_error(self):
-        """Test getting post with database error"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
-
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_get_collection.side_effect = Exception("Database error")
-
-            blog_post = BlogPost()
-            result = blog_post.get_post_by_id(ObjectId())
-
-            assert result is None
-
-    def test_update_post_success(self):
+    @pytest.mark.unit
+    def test_update_post_success(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
         """Test successful post update"""
-        # Ensure clean test state
-        patch.stopall()
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.modified_count = 1
+        mock_collection.update_one.return_value = mock_result
+
+        # Test update
+        update_data = {'title': 'Updated Title', 'content': 'Updated content'}
+        result = blog_post_model.update_post(sample_post_id, sample_user_id, update_data)
+
+        # Assertions
+        assert result is True
         
-        from app.models.user import BlogPost
+        # Verify update_one was called correctly
+        mock_collection.update_one.assert_called_once()
+        call_args = mock_collection.update_one.call_args
+        
+        # Check query
+        query = call_args[0][0]
+        assert query['_id'] == sample_post_id
+        assert query['user_id'] == sample_user_id
+        
+        # Check update data includes timestamp
+        update_dict = call_args[0][1]['$set']
+        assert 'updated_at' in update_dict
+        assert update_dict['title'] == 'Updated Title'
+        assert update_dict['content'] == 'Updated content'
 
-        post_id = ObjectId()
-        user_id = ObjectId()
-
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_update_result = Mock()
-            mock_update_result.modified_count = 1
-            mock_coll.update_one.return_value = mock_update_result
-            mock_get_collection.return_value = mock_coll
-
-            blog_post = BlogPost()
-            result = blog_post.update_post(
-                post_id, user_id, {
-                    'title': 'Updated Title'})
-
-            # Result should be boolean indicating success
-            assert isinstance(result, bool)
-
-    def test_update_post_string_ids(self):
+    @pytest.mark.unit
+    def test_update_post_with_string_ids(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
         """Test post update with string IDs"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.modified_count = 1
+        mock_collection.update_one.return_value = mock_result
 
-        post_id = str(ObjectId())
-        user_id = str(ObjectId())
+        # Test with string IDs
+        string_post_id = str(sample_post_id)
+        string_user_id = str(sample_user_id)
+        update_data = {'title': 'Updated Title'}
+        result = blog_post_model.update_post(string_post_id, string_user_id, update_data)
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_update_result = Mock()
-            mock_update_result.modified_count = 1
-            mock_coll.update_one.return_value = mock_update_result
-            mock_get_collection.return_value = mock_coll
+        # Verify ObjectId conversion
+        call_args = mock_collection.update_one.call_args[0][0]
+        assert call_args['_id'] == sample_post_id
+        assert call_args['user_id'] == sample_user_id
 
-            blog_post = BlogPost()
-            result = blog_post.update_post(
-                post_id, user_id, {
-                    'title': 'Updated Title'})
+    @pytest.mark.unit
+    def test_update_post_no_changes(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
+        """Test post update when no documents are modified"""
+        # Configure mock to return 0 modified count
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.modified_count = 0
+        mock_collection.update_one.return_value = mock_result
 
-            assert isinstance(result, bool)
+        # Test update
+        update_data = {'title': 'Updated Title'}
+        result = blog_post_model.update_post(sample_post_id, sample_user_id, update_data)
 
-    def test_update_post_not_found(self):
-        """Test updating non-existent post"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Should return False when no documents modified
+        assert result is False
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_update_result = Mock()
-            mock_update_result.modified_count = 0
-            mock_coll.update_one.return_value = mock_update_result
-            mock_get_collection.return_value = mock_coll
+    @pytest.mark.unit
+    def test_update_post_database_error(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
+        """Test post update with database error"""
+        # Configure mock to raise exception
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.update_one.side_effect = Exception("Database error")
 
-            blog_post = BlogPost()
-            result = blog_post.update_post(
-                ObjectId(), ObjectId(), {
-                    'title': 'Updated Title'})
+        # Test update with error
+        update_data = {'title': 'Updated Title'}
+        result = blog_post_model.update_post(sample_post_id, sample_user_id, update_data)
 
-            # Should return False or be falsy
-            assert not result
+        # Should return False on error
+        assert result is False
 
-    def test_update_post_database_error(self):
-        """Test updating post with database error"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
-
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_get_collection.side_effect = Exception("Database error")
-
-            blog_post = BlogPost()
-            result = blog_post.update_post(
-                ObjectId(), ObjectId(), {
-                    'title': 'Updated Title'})
-
-            assert result is False
-
-    def test_delete_post_success(self):
+    @pytest.mark.unit
+    def test_delete_post_success(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
         """Test successful post deletion"""
-        # Ensure clean test state
-        patch.stopall()
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.deleted_count = 1
+        mock_collection.delete_one.return_value = mock_result
+
+        # Test deletion
+        result = blog_post_model.delete_post(sample_post_id, sample_user_id)
+
+        # Assertions
+        assert result is True
         
-        from app.models.user import BlogPost
+        # Verify delete_one was called correctly
+        expected_query = {'_id': sample_post_id, 'user_id': sample_user_id}
+        mock_collection.delete_one.assert_called_once_with(expected_query)
 
-        post_id = ObjectId()
-        user_id = ObjectId()
-
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_delete_result = Mock()
-            mock_delete_result.deleted_count = 1
-            mock_coll.delete_one.return_value = mock_delete_result
-            mock_get_collection.return_value = mock_coll
-
-            blog_post = BlogPost()
-            result = blog_post.delete_post(post_id, user_id)
-
-            assert isinstance(result, bool)
-
-    def test_delete_post_string_ids(self):
+    @pytest.mark.unit
+    def test_delete_post_with_string_ids(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
         """Test post deletion with string IDs"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.deleted_count = 1
+        mock_collection.delete_one.return_value = mock_result
 
-        post_id = str(ObjectId())
-        user_id = str(ObjectId())
+        # Test with string IDs
+        string_post_id = str(sample_post_id)
+        string_user_id = str(sample_user_id)
+        result = blog_post_model.delete_post(string_post_id, string_user_id)
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_delete_result = Mock()
-            mock_delete_result.deleted_count = 1
-            mock_coll.delete_one.return_value = mock_delete_result
-            mock_get_collection.return_value = mock_coll
+        # Verify ObjectId conversion
+        expected_query = {'_id': sample_post_id, 'user_id': sample_user_id}
+        mock_collection.delete_one.assert_called_once_with(expected_query)
 
-            blog_post = BlogPost()
-            result = blog_post.delete_post(post_id, user_id)
+    @pytest.mark.unit
+    def test_delete_post_not_found(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
+        """Test deletion of non-existent post"""
+        # Configure mock to return 0 deleted count
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.deleted_count = 0
+        mock_collection.delete_one.return_value = mock_result
 
-            assert isinstance(result, bool)
+        # Test deletion
+        result = blog_post_model.delete_post(sample_post_id, sample_user_id)
 
-    def test_delete_post_not_found(self):
-        """Test deleting non-existent post"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Should return False when no documents deleted
+        assert result is False
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_delete_result = Mock()
-            mock_delete_result.deleted_count = 0
-            mock_coll.delete_one.return_value = mock_delete_result
-            mock_get_collection.return_value = mock_coll
+    @pytest.mark.unit
+    def test_delete_post_database_error(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
+        """Test post deletion with database error"""
+        # Configure mock to raise exception
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.delete_one.side_effect = Exception("Database error")
 
-            blog_post = BlogPost()
-            result = blog_post.delete_post(ObjectId(), ObjectId())
+        # Test deletion with error
+        result = blog_post_model.delete_post(sample_post_id, sample_user_id)
 
-            assert not result
+        # Should return False on error
+        assert result is False
 
-    def test_delete_post_database_error(self):
-        """Test deleting post with database error"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+    @pytest.mark.unit
+    def test_get_posts_count_success(self, blog_post_model, sample_user_id, mock_mongodb_globally):
+        """Test successful retrieval of posts count"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.count_documents.return_value = 5
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_get_collection.side_effect = Exception("Database error")
+        # Test count retrieval
+        result = blog_post_model.get_posts_count(sample_user_id)
 
-            blog_post = BlogPost()
-            result = blog_post.delete_post(ObjectId(), ObjectId())
+        # Assertions
+        assert result == 5
+        mock_collection.count_documents.assert_called_once_with({'user_id': sample_user_id})
 
-            assert result is False
+    @pytest.mark.unit
+    def test_get_posts_count_with_string_id(self, blog_post_model, sample_user_id, mock_mongodb_globally):
+        """Test posts count with string user ID"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.count_documents.return_value = 3
 
-    def test_get_posts_count_success(self):
-        """Test getting posts count"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Test with string user_id
+        string_user_id = str(sample_user_id)
+        result = blog_post_model.get_posts_count(string_user_id)
 
-        user_id = ObjectId()
+        # Verify ObjectId conversion
+        mock_collection.count_documents.assert_called_once_with({'user_id': sample_user_id})
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_coll.count_documents.return_value = 5
-            mock_get_collection.return_value = mock_coll
+    @pytest.mark.unit
+    def test_get_posts_count_database_error(self, blog_post_model, sample_user_id, mock_mongodb_globally):
+        """Test get_posts_count with database error"""
+        # Configure mock to raise exception
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.count_documents.side_effect = Exception("Database error")
 
-            blog_post = BlogPost()
-            result = blog_post.get_posts_count(user_id)
+        # Test count with error
+        result = blog_post_model.get_posts_count(sample_user_id)
 
-            assert isinstance(result, int)
-            assert result >= 0
+        # Should return 0 on error
+        assert result == 0
 
-    def test_get_posts_count_string_user_id(self):
-        """Test getting posts count with string user_id"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+    @pytest.mark.unit
+    def test_word_count_calculation(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
+        """Test that word count is calculated correctly"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.inserted_id = ObjectId()
+        mock_collection.insert_one.return_value = mock_result
 
-        user_id = str(ObjectId())
+        # Test with specific content
+        content = "This is a test content with exactly ten words here"
+        result = blog_post_model.create_post(
+            user_id=sample_blog_post_data['user_id'],
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content=content,
+            video_id=sample_blog_post_data['video_id']
+        )
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_coll.count_documents.return_value = 3
-            mock_get_collection.return_value = mock_coll
+        # Verify word count
+        assert result['word_count'] == 10
 
-            blog_post = BlogPost()
-            result = blog_post.get_posts_count(user_id)
+    @pytest.mark.unit
+    def test_timestamps_added_on_creation(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
+        """Test that timestamps are added during post creation"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.inserted_id = ObjectId()
+        mock_collection.insert_one.return_value = mock_result
 
-            assert isinstance(result, int)
-            assert result >= 0
+        # Test creation
+        result = blog_post_model.create_post(
+            user_id=sample_blog_post_data['user_id'],
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content=sample_blog_post_data['content'],
+            video_id=sample_blog_post_data['video_id']
+        )
 
-    def test_get_posts_count_database_error(self):
-        """Test getting posts count with database error"""
-        # Ensure clean test state
-        patch.stopall()
-        
-        from app.models.user import BlogPost
+        # Verify timestamps exist and are datetime objects
+        assert 'created_at' in result
+        assert 'updated_at' in result
+        assert isinstance(result['created_at'], datetime.datetime)
+        assert isinstance(result['updated_at'], datetime.datetime)
 
-        with patch.object(BlogPost, 'get_collection') as mock_get_collection:
-            mock_get_collection.side_effect = Exception("Database error")
+    @pytest.mark.unit
+    def test_updated_timestamp_added_on_update(self, blog_post_model, sample_post_id, sample_user_id, mock_mongodb_globally):
+        """Test that updated timestamp is added during post update"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.modified_count = 1
+        mock_collection.update_one.return_value = mock_result
 
-            blog_post = BlogPost()
-            result = blog_post.get_posts_count(ObjectId())
+        # Test update
+        update_data = {'title': 'Updated Title'}
+        blog_post_model.update_post(sample_post_id, sample_user_id, update_data)
 
-            assert result == 0
+        # Verify updated_at timestamp was added
+        call_args = mock_collection.update_one.call_args[0][1]['$set']
+        assert 'updated_at' in call_args
+        assert isinstance(call_args['updated_at'], datetime.datetime)
+
+    @pytest.mark.integration
+    def test_end_to_end_blog_post_lifecycle(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
+        """Test complete blog post lifecycle: create, read, update, delete"""
+        mock_collection = mock_mongodb_globally['collection']
+        post_id = ObjectId()
+        user_id = sample_blog_post_data['user_id']
+
+        # Mock create
+        mock_result = Mock()
+        mock_result.inserted_id = post_id
+        mock_collection.insert_one.return_value = mock_result
+
+        # Test create
+        created_post = blog_post_model.create_post(
+            user_id=user_id,
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content=sample_blog_post_data['content'],
+            video_id=sample_blog_post_data['video_id']
+        )
+        assert created_post is not None
+
+        # Mock read
+        mock_collection.find_one.return_value = {
+            '_id': post_id,
+            'user_id': user_id,
+            'title': sample_blog_post_data['title'],
+            'content': sample_blog_post_data['content']
+        }
+
+        # Test read
+        retrieved_post = blog_post_model.get_post_by_id(post_id, user_id)
+        assert retrieved_post is not None
+        assert retrieved_post['title'] == sample_blog_post_data['title']
+
+        # Mock update
+        mock_update_result = Mock()
+        mock_update_result.modified_count = 1
+        mock_collection.update_one.return_value = mock_update_result
+
+        # Test update
+        update_success = blog_post_model.update_post(
+            post_id, user_id, {'title': 'Updated Title'}
+        )
+        assert update_success is True
+
+        # Mock delete
+        mock_delete_result = Mock()
+        mock_delete_result.deleted_count = 1
+        mock_collection.delete_one.return_value = mock_delete_result
+
+        # Test delete
+        delete_success = blog_post_model.delete_post(post_id, user_id)
+        assert delete_success is True
+
+        @pytest.mark.unit
+        def test_invalid_object_id_handling(self, blog_post_model, mock_mongodb_globally):
+            """Test handling of invalid ObjectId strings"""
+            mock_collection = mock_mongodb_globally['collection']
+            
+            # Test with invalid ObjectId format
+            with pytest.raises(Exception):
+                blog_post_model.get_post_by_id("invalid_id")
+
+    @pytest.mark.unit  
+    def test_empty_content_handling(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
+        """Test handling of empty content"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.inserted_id = ObjectId()
+        mock_collection.insert_one.return_value = mock_result
+
+        # Test with empty content
+        result = blog_post_model.create_post(
+            user_id=sample_blog_post_data['user_id'],
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content="",
+            video_id=sample_blog_post_data['video_id']
+        )
+
+        # Should handle empty content gracefully
+        assert result is not None
+        assert result['word_count'] == 0
+
+    @pytest.mark.unit
+    def test_large_content_handling(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
+        """Test handling of large content"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.inserted_id = ObjectId()
+        mock_collection.insert_one.return_value = mock_result
+
+        # Test with large content
+        large_content = " ".join(["word"] * 10000)  # 10000 words
+        result = blog_post_model.create_post(
+            user_id=sample_blog_post_data['user_id'],
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content=large_content,
+            video_id=sample_blog_post_data['video_id']
+        )
+
+        # Should handle large content
+        assert result is not None
+        assert result['word_count'] == 10000
+
+    @pytest.mark.unit
+    def test_special_characters_in_content(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
+        """Test handling of special characters in content"""
+        # Configure mock
+        mock_collection = mock_mongodb_globally['collection']
+        mock_result = Mock()
+        mock_result.inserted_id = ObjectId()
+        mock_collection.insert_one.return_value = mock_result
+
+        # Test with special characters
+        special_content = "Test with émojis 🚀 and spéciål chàracters! @#$%^&*()"
+        result = blog_post_model.create_post(
+            user_id=sample_blog_post_data['user_id'],
+            youtube_url=sample_blog_post_data['youtube_url'],
+            title=sample_blog_post_data['title'],
+            content=special_content,
+            video_id=sample_blog_post_data['video_id']
+        )
+
+        # Should handle special characters
+        assert result is not None
+        assert result['content'] == special_content
