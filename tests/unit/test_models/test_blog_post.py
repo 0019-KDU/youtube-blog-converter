@@ -644,14 +644,20 @@ class TestBlogPost:
         delete_success = blog_post_model.delete_post(post_id, user_id)
         assert delete_success is True
 
-        @pytest.mark.unit
-        def test_invalid_object_id_handling(self, blog_post_model, mock_mongodb_globally):
-            """Test handling of invalid ObjectId strings"""
-            mock_collection = mock_mongodb_globally['collection']
-            
-            # Test with invalid ObjectId format
-            with pytest.raises(Exception):
-                blog_post_model.get_post_by_id("invalid_id")
+    @pytest.mark.unit
+    def test_invalid_object_id_handling(self, blog_post_model, mock_mongodb_globally):
+        """Test handling of invalid ObjectId strings"""
+        mock_collection = mock_mongodb_globally['collection']
+        
+        # Test with invalid ObjectId format - should return None, not raise exception
+        result = blog_post_model.get_post_by_id("invalid_id")
+        
+        # Should return None when ObjectId is invalid
+        assert result is None
+        
+        # Verify that find_one was not called due to ObjectId validation failure
+        mock_collection.find_one.assert_not_called()
+
 
     @pytest.mark.unit  
     def test_empty_content_handling(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
