@@ -86,14 +86,16 @@ class TestBlogRoutes:
 
     def test_generate_blog_unauthenticated(self, client):
         """Test blog generation without authentication"""
-        response = client.post('/generate', data={
-            'youtube_url': 'https://www.youtube.com/watch?v=test123',
-            'language': 'en'
-        })
+        with patch('app.routes.blog.AuthService.get_current_user') as mock_auth:
+            mock_auth.return_value = None
+            response = client.post('/generate', data={
+                'youtube_url': 'https://www.youtube.com/watch?v=test123',
+                'language': 'en'
+            })
 
-        assert response.status_code == 401
-        data = json.loads(response.data)
-        assert data['success'] is False
+            assert response.status_code == 401
+            data = json.loads(response.data)
+            assert data['success'] is False
 
     def test_dashboard_authenticated(self, client, authenticated_user):
         """Test dashboard access for authenticated user"""
