@@ -57,8 +57,13 @@ class TestUser:
         """Test user creation with duplicate email"""
         from app.models.user import User
         
-        with patch('app.models.user.mongo_manager') as mock_manager:
-            # Create a fresh mock for this test
+        # Use multiple patches to completely override any global fixtures
+        with patch('app.models.user.mongo_manager') as mock_manager, \
+             patch('app.models.user.MongoClient') as mock_client, \
+             patch.object(User, '_ensure_connection') as mock_ensure_conn, \
+             patch.object(User, 'get_collection') as mock_get_collection:
+            
+            # Create a completely isolated mock collection
             mock_collection = Mock()
             mock_collection.find_one.return_value = {
                 '_id': ObjectId(),
@@ -67,8 +72,11 @@ class TestUser:
             }
             mock_collection.insert_one.return_value = Mock(inserted_id=None)
             
+            # Configure all mock pathways
             mock_manager.is_connected.return_value = True
             mock_manager.get_collection.return_value = mock_collection
+            mock_get_collection.return_value = mock_collection
+            mock_ensure_conn.return_value = None
 
             user = User()
             result = user.create_user('testuser', 'test@example.com', 'password123')
@@ -80,8 +88,13 @@ class TestUser:
         """Test user creation with duplicate username"""
         from app.models.user import User
         
-        with patch('app.models.user.mongo_manager') as mock_manager:
-            # Create a fresh mock for this test
+        # Use multiple patches to completely override any global fixtures
+        with patch('app.models.user.mongo_manager') as mock_manager, \
+             patch('app.models.user.MongoClient') as mock_client, \
+             patch.object(User, '_ensure_connection') as mock_ensure_conn, \
+             patch.object(User, 'get_collection') as mock_get_collection:
+            
+            # Create a completely isolated mock collection
             mock_collection = Mock()
             mock_collection.find_one.return_value = {
                 '_id': ObjectId(),
@@ -90,8 +103,11 @@ class TestUser:
             }
             mock_collection.insert_one.return_value = Mock(inserted_id=None)
             
+            # Configure all mock pathways
             mock_manager.is_connected.return_value = True
             mock_manager.get_collection.return_value = mock_collection
+            mock_get_collection.return_value = mock_collection
+            mock_ensure_conn.return_value = None
 
             user = User()
             result = user.create_user('testuser', 'test@example.com', 'password123')

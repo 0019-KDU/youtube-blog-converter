@@ -3,6 +3,7 @@ import logging
 import re
 
 from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class PDFGeneratorTool:
 
         # Add page number in footer
         pdf.set_y(-20)
-        pdf.set_font("Arial", "I", 8)
+        pdf.set_font("helvetica", "I", 8)
         pdf.set_text_color(128, 128, 128)
         pdf.cell(0, 10, f"Page {pdf.page_no()}", 0, 0, "C")
 
@@ -94,7 +95,7 @@ class PDFGeneratorTool:
             title = self._clean_unicode_text(title)
 
             # Title formatting
-            pdf.set_font("Arial", "B", 18)
+            pdf.set_font("helvetica", "B", 18)
             pdf.set_text_color(44, 62, 80)
 
             # Check if title is too long and break it if necessary
@@ -122,11 +123,11 @@ class PDFGeneratorTool:
 
                 # Output multi-line title
                 for i, line in enumerate(lines):
-                    pdf.cell(0, 12, line, ln=True, align="C")
+                    pdf.cell(0, 12, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
                     if i < len(lines) - 1:
                         pdf.ln(2)
             else:
-                pdf.cell(0, 15, title, ln=True, align="C")
+                pdf.cell(0, 15, title, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
 
             pdf.ln(10)
 
@@ -153,34 +154,34 @@ class PDFGeneratorTool:
                 # Handle main headings (##)
                 if line.startswith("## "):
                     pdf.ln(6)
-                    pdf.set_font("Arial", "B", 14)
+                    pdf.set_font("helvetica", "B", 14)
                     pdf.set_text_color(44, 62, 80)
                     heading_text = self._clean_unicode_text(line[3:])
 
                     if pdf.get_string_width(heading_text) > effective_width:
                         pdf.multi_cell(0, 8, heading_text)
                     else:
-                        pdf.cell(0, 10, heading_text, ln=True)
+                        pdf.cell(0, 10, heading_text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                     pdf.ln(4)
                     continue
 
                 # Handle sub-headings (###)
                 elif line.startswith("### "):
                     pdf.ln(4)
-                    pdf.set_font("Arial", "B", 12)
+                    pdf.set_font("helvetica", "B", 12)
                     pdf.set_text_color(52, 73, 94)
                     heading_text = self._clean_unicode_text(line[4:])
 
                     if pdf.get_string_width(heading_text) > effective_width:
                         pdf.multi_cell(0, 7, heading_text)
                     else:
-                        pdf.cell(0, 8, heading_text, ln=True)
+                        pdf.cell(0, 8, heading_text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                     pdf.ln(3)
                     continue
 
                 # Handle bullet lists
                 elif line.startswith("- "):
-                    pdf.set_font("Arial", "", 11)
+                    pdf.set_font("helvetica", "", 11)
                     pdf.set_text_color(0, 0, 0)
                     list_text = self._clean_unicode_text(line[2:])
 
@@ -195,7 +196,7 @@ class PDFGeneratorTool:
 
                 # Handle numbered lists
                 elif re.match(r"^\d+\.\s+", line):
-                    pdf.set_font("Arial", "", 11)
+                    pdf.set_font("helvetica", "", 11)
                     pdf.set_text_color(0, 0, 0)
 
                     match = re.match(r"^(\d+\.\s+)(.+)", line)
@@ -215,7 +216,7 @@ class PDFGeneratorTool:
 
                 # Handle regular paragraphs
                 else:
-                    pdf.set_font("Arial", "", 11)
+                    pdf.set_font("helvetica", "", 11)
                     pdf.set_text_color(0, 0, 0)
                     paragraph_text = self._clean_unicode_text(line)
 
@@ -229,7 +230,7 @@ class PDFGeneratorTool:
 
             # Generate PDF bytes
             try:
-                pdf_output = pdf.output(dest="S")
+                pdf_output = pdf.output()
             except Exception:
                 pdf_output = pdf.output()
 
