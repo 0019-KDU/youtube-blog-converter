@@ -15,6 +15,29 @@ def mock_mongodb():
         yield mock_manager
 
 
+@pytest.fixture
+def isolated_mock_for_duplicate_tests():
+    """Completely isolated mock for duplicate user tests"""
+    # Stop all existing patches to ensure complete isolation
+    patch.stopall()
+    
+    with patch('app.models.user.mongo_manager') as mock_manager, \
+         patch('app.models.user.MongoClient'), \
+         patch('pymongo.MongoClient'), \
+         patch('app.models.user.BaseModel._ensure_connection'), \
+         patch('app.models.user.BaseModel.get_collection') as mock_get_collection:
+        
+        # Create a mock collection for duplicate tests
+        mock_collection = Mock()
+        
+        # Configure all pathways to return our mock collection
+        mock_manager.is_connected.return_value = True
+        mock_manager.get_collection.return_value = mock_collection
+        mock_get_collection.return_value = mock_collection
+        
+        yield mock_collection
+
+
 class TestUser:
     """Test cases for User model"""
 
@@ -53,67 +76,51 @@ class TestUser:
         assert 'email' in result['user']
         assert 'password_hash' not in result['user']
 
-    def test_create_user_duplicate_email(self):
+    def test_create_user_duplicate_email(self, isolated_mock_for_duplicate_tests):
         """Test user creation with duplicate email"""
         from app.models.user import User
         
-        # Use multiple patches to completely override any global fixtures
-        with patch('app.models.user.mongo_manager') as mock_manager, \
-             patch('app.models.user.MongoClient') as mock_client, \
-             patch.object(User, '_ensure_connection') as mock_ensure_conn, \
-             patch.object(User, 'get_collection') as mock_get_collection:
-            
-            # Create a completely isolated mock collection
-            mock_collection = Mock()
-            mock_collection.find_one.return_value = {
-                '_id': ObjectId(),
-                'email': 'test@example.com',
-                'username': 'existing_user'
-            }
-            mock_collection.insert_one.return_value = Mock(inserted_id=None)
-            
-            # Configure all mock pathways
-            mock_manager.is_connected.return_value = True
-            mock_manager.get_collection.return_value = mock_collection
-            mock_get_collection.return_value = mock_collection
-            mock_ensure_conn.return_value = None
+        # Configure the isolated mock collection to simulate existing user
+        mock_collection = isolated_mock_for_duplicate_tests
+        mock_collection.find_one.return_value = {
+            '_id': ObjectId(),
+            'email': 'test@example.com', 
+            'username': 'existing_user'
+        }
 
-            user = User()
-            result = user.create_user('testuser', 'test@example.com', 'password123')
+        user = User()
+        result = user.create_user('testuser', 'test@example.com', 'password123')
 
-            assert result['success'] is False
-            assert 'already exists' in result['message']
+        assert result['success'] is False, f"Expected success=False but got {result}"
+        assert 'already exists' in result['message']
+        
+        # Verify the mock was called correctly
+        mock_collection.find_one.assert_called_once_with(
+            {'$or': [{'email': 'test@example.com'}, {'username': 'testuser'}]}
+        )
 
-    def test_create_user_duplicate_username(self):
+    def test_create_user_duplicate_username(self, isolated_mock_for_duplicate_tests):
         """Test user creation with duplicate username"""
         from app.models.user import User
         
-        # Use multiple patches to completely override any global fixtures
-        with patch('app.models.user.mongo_manager') as mock_manager, \
-             patch('app.models.user.MongoClient') as mock_client, \
-             patch.object(User, '_ensure_connection') as mock_ensure_conn, \
-             patch.object(User, 'get_collection') as mock_get_collection:
-            
-            # Create a completely isolated mock collection
-            mock_collection = Mock()
-            mock_collection.find_one.return_value = {
-                '_id': ObjectId(),
-                'username': 'testuser',
-                'email': 'existing@example.com'
-            }
-            mock_collection.insert_one.return_value = Mock(inserted_id=None)
-            
-            # Configure all mock pathways
-            mock_manager.is_connected.return_value = True
-            mock_manager.get_collection.return_value = mock_collection
-            mock_get_collection.return_value = mock_collection
-            mock_ensure_conn.return_value = None
+        # Configure the isolated mock collection to simulate existing user
+        mock_collection = isolated_mock_for_duplicate_tests
+        mock_collection.find_one.return_value = {
+            '_id': ObjectId(),
+            'username': 'testuser',
+            'email': 'existing@example.com'
+        }
 
-            user = User()
-            result = user.create_user('testuser', 'test@example.com', 'password123')
+        user = User()
+        result = user.create_user('testuser', 'test@example.com', 'password123')
 
-            assert result['success'] is False
-            assert 'already exists' in result['message']
+        assert result['success'] is False, f"Expected success=False but got {result}"
+        assert 'already exists' in result['message']
+        
+        # Verify the mock was called correctly
+        mock_collection.find_one.assert_called_once_with(
+            {'$or': [{'email': 'test@example.com'}, {'username': 'testuser'}]}
+        )
 
     def test_create_user_insert_failure(self, mock_mongodb_globally):
         """Test user creation when insert fails"""
