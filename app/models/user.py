@@ -250,8 +250,8 @@ class User(BaseModel):
                 "username": username,
                 "email": email,
                 "password_hash": hashed_password,
-                "created_at": datetime.datetime.utcnow(),
-                "updated_at": datetime.datetime.utcnow(),
+                "created_at": datetime.datetime.now(datetime.UTC),
+                "updated_at": datetime.datetime.now(datetime.UTC),
                 "is_active": True,
             }
 
@@ -348,7 +348,7 @@ class User(BaseModel):
                 user_id = ObjectId(user_id)
 
             # Add updated timestamp
-            update_data["updated_at"] = datetime.datetime.utcnow()
+            update_data["updated_at"] = datetime.datetime.now(datetime.UTC)
 
             result = collection.update_one(
                 {"_id": user_id}, {"$set": update_data})
@@ -386,8 +386,8 @@ class BlogPost(BaseModel):
                 "content": content,
                 "video_id": video_id,
                 "word_count": len(content.split()),
-                "created_at": datetime.datetime.utcnow(),
-                "updated_at": datetime.datetime.utcnow(),
+                "created_at": datetime.datetime.now(datetime.UTC),
+                "updated_at": datetime.datetime.now(datetime.UTC),
             }
 
             result = collection.insert_one(post_data)
@@ -482,7 +482,7 @@ class BlogPost(BaseModel):
                 user_id = ObjectId(user_id)
 
             # Add updated timestamp
-            update_data["updated_at"] = datetime.datetime.utcnow()
+            update_data["updated_at"] = datetime.datetime.now(datetime.UTC)
 
             result = collection.update_one(
                 {"_id": post_id, "user_id": user_id}, {"$set": update_data}

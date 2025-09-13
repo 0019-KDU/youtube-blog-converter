@@ -18,63 +18,57 @@ def mock_mongodb():
 class TestUser:
     """Test cases for User model"""
 
-    def test_create_user_success(self):
+    def test_create_user_success(self, mock_mongodb_globally):
         """Test successful user creation"""
-        patch.stopall()
         from app.models.user import User
 
         user_id = ObjectId()
-        with patch.object(User, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_coll.find_one.side_effect = [
-                None,
-                {
-                    '_id': user_id,
-                    'username': 'testuser',
-                    'email': 'test@example.com',
-                    'password_hash': 'hashed_password',
-                    'created_at': datetime.datetime.now(datetime.UTC),
-                    'updated_at': datetime.datetime.now(datetime.UTC),
-                    'is_active': True
-                }
-            ]
+        mock_collection = mock_mongodb_globally['collection']
+        
+        # Reset and configure mock for successful user creation
+        mock_collection.reset_mock()
+        mock_collection.find_one.side_effect = [
+            None,  # First call: no existing user
+            {      # Second call: return created user
+                '_id': user_id,
+                'username': 'testuser',
+                'email': 'test@example.com',
+                'password_hash': 'hashed_password',
+                'created_at': datetime.datetime.now(datetime.UTC),
+                'updated_at': datetime.datetime.now(datetime.UTC),
+                'is_active': True
+            }
+        ]
 
-            mock_insert_result = Mock()
-            mock_insert_result.inserted_id = user_id
-            mock_coll.insert_one.return_value = mock_insert_result
-            mock_get_collection.return_value = mock_coll
+        mock_insert_result = Mock()
+        mock_insert_result.inserted_id = user_id
+        mock_collection.insert_one.return_value = mock_insert_result
 
-            user = User()
-            result = user.create_user('testuser', 'test@example.com', 'password123')
+        user = User()
+        result = user.create_user('testuser', 'test@example.com', 'password123')
 
-            assert result['success'] is True
-            assert 'user' in result
-            assert 'username' in result['user']
-            assert 'email' in result['user']
-            assert 'password_hash' not in result['user']
+        assert result['success'] is True
+        assert 'user' in result
+        assert 'username' in result['user']
+        assert 'email' in result['user']
+        assert 'password_hash' not in result['user']
 
     def test_create_user_duplicate_email(self):
         """Test user creation with duplicate email"""
-        patch.stopall()
         from app.models.user import User
-
-        with patch('app.models.user.mongo_manager') as mock_mongo_manager, \
-             patch.object(User, '_ensure_connection') as mock_ensure_conn, \
-             patch.object(User, 'get_collection') as mock_get_collection, \
-             patch('pymongo.MongoClient') as mock_mongo_client:
-
-            mock_coll = Mock()
-            mock_coll.find_one.return_value = {
+        
+        with patch('app.models.user.mongo_manager') as mock_manager:
+            # Create a fresh mock for this test
+            mock_collection = Mock()
+            mock_collection.find_one.return_value = {
                 '_id': ObjectId(),
                 'email': 'test@example.com',
                 'username': 'existing_user'
             }
-            mock_coll.insert_one.return_value = Mock(inserted_id=None)
-
-            mock_mongo_manager.is_connected.return_value = True
-            mock_mongo_manager.get_collection.return_value = mock_coll
-            mock_get_collection.return_value = mock_coll
-            mock_ensure_conn.return_value = None
+            mock_collection.insert_one.return_value = Mock(inserted_id=None)
+            
+            mock_manager.is_connected.return_value = True
+            mock_manager.get_collection.return_value = mock_collection
 
             user = User()
             result = user.create_user('testuser', 'test@example.com', 'password123')
@@ -84,26 +78,20 @@ class TestUser:
 
     def test_create_user_duplicate_username(self):
         """Test user creation with duplicate username"""
-        patch.stopall()
         from app.models.user import User
-
-        with patch('app.models.user.mongo_manager') as mock_mongo_manager, \
-             patch.object(User, '_ensure_connection') as mock_ensure_conn, \
-             patch.object(User, 'get_collection') as mock_get_collection, \
-             patch('pymongo.MongoClient') as mock_mongo_client:
-
-            mock_coll = Mock()
-            mock_coll.find_one.return_value = {
+        
+        with patch('app.models.user.mongo_manager') as mock_manager:
+            # Create a fresh mock for this test
+            mock_collection = Mock()
+            mock_collection.find_one.return_value = {
                 '_id': ObjectId(),
                 'username': 'testuser',
                 'email': 'existing@example.com'
             }
-            mock_coll.insert_one.return_value = Mock(inserted_id=None)
-
-            mock_mongo_manager.is_connected.return_value = True
-            mock_mongo_manager.get_collection.return_value = mock_coll
-            mock_get_collection.return_value = mock_coll
-            mock_ensure_conn.return_value = None
+            mock_collection.insert_one.return_value = Mock(inserted_id=None)
+            
+            mock_manager.is_connected.return_value = True
+            mock_manager.get_collection.return_value = mock_collection
 
             user = User()
             result = user.create_user('testuser', 'test@example.com', 'password123')
@@ -111,36 +99,36 @@ class TestUser:
             assert result['success'] is False
             assert 'already exists' in result['message']
 
-    def test_create_user_insert_failure(self):
+    def test_create_user_insert_failure(self, mock_mongodb_globally):
         """Test user creation when insert fails"""
         from app.models.user import User
 
-        with patch.object(User, 'get_collection') as mock_get_collection:
-            mock_coll = Mock()
-            mock_coll.find_one.return_value = None
-            mock_insert_result = Mock()
-            mock_insert_result.inserted_id = None
-            mock_coll.insert_one.return_value = mock_insert_result
-            mock_get_collection.return_value = mock_coll
+        # Reset and configure mock for insert failure
+        mock_collection = mock_mongodb_globally['collection']
+        mock_collection.reset_mock()
+        mock_collection.find_one.return_value = None
+        mock_insert_result = Mock()
+        mock_insert_result.inserted_id = None
+        mock_collection.insert_one.return_value = mock_insert_result
 
-            user = User()
-            result = user.create_user('testuser', 'test@example.com', 'password123')
+        user = User()
+        result = user.create_user('testuser', 'test@example.com', 'password123')
 
-            assert result['success'] is False
-            assert result['message'] == "Failed to create user"
+        assert result['success'] is False
+        assert result['message'] == "Failed to create user"
 
-    def test_create_user_database_error(self):
+    def test_create_user_database_error(self, mock_mongodb_globally):
         """Test user creation with database error"""
         from app.models.user import User
 
-        with patch.object(User, 'get_collection') as mock_get_collection:
-            mock_get_collection.side_effect = Exception("Database connection failed")
+        # Configure mock for database error
+        mock_mongodb_globally['manager'].get_collection.side_effect = Exception("Database connection failed")
 
-            user = User()
-            result = user.create_user('testuser', 'test@example.com', 'password123')
+        user = User()
+        result = user.create_user('testuser', 'test@example.com', 'password123')
 
-            assert result['success'] is False
-            assert 'Database error' in result['message']
+        assert result['success'] is False
+        assert 'Database error' in result['message']
 
     def test_authenticate_user_success(self):
         """Test successful user authentication"""

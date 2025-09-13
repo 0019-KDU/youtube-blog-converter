@@ -92,7 +92,7 @@ def create_app():
         import datetime
 
         if date_obj is None:
-            date_obj = datetime.datetime.utcnow()
+            date_obj = datetime.datetime.now(datetime.UTC)
 
         if isinstance(date_obj, str):
             try:

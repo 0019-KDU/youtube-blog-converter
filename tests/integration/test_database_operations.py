@@ -24,8 +24,8 @@ class TestDatabaseOperations:
                 'username': 'testuser',
                 'email': 'test@example.com',
                 'password_hash': 'hashed',
-                'created_at': datetime.datetime.utcnow(),
-                'updated_at': datetime.datetime.utcnow(),
+                'created_at': datetime.datetime.now(datetime.UTC),
+                'updated_at': datetime.datetime.now(datetime.UTC),
                 'is_active': True
             }
             # First call: no existing user, second call: return created user

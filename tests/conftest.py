@@ -205,8 +205,8 @@ def mock_user_data():
         'username': 'testuser',
         'email': 'test@example.com',
         'password_hash': 'hashed_password_12345',
-        'created_at': datetime.datetime.utcnow(),
-        'updated_at': datetime.datetime.utcnow(),
+        'created_at': datetime.datetime.now(datetime.UTC),
+        'updated_at': datetime.datetime.now(datetime.UTC),
         'is_active': True
     }
 

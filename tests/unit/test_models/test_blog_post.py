@@ -157,14 +157,14 @@ class TestBlogPost:
                 'user_id': sample_user_id,
                 'title': 'First Post',
                 'content': 'First post content',
-                'created_at': datetime.datetime.utcnow()
+                'created_at': datetime.datetime.now(datetime.UTC)
             },
             {
                 '_id': ObjectId(),
                 'user_id': sample_user_id,
                 'title': 'Second Post',
                 'content': 'Second post content',
-                'created_at': datetime.datetime.utcnow()
+                'created_at': datetime.datetime.now(datetime.UTC)
             }
         ]
 
@@ -262,7 +262,7 @@ class TestBlogPost:
             'user_id': sample_user_id,
             'title': 'Test Post',
             'content': 'Test content',
-            'created_at': datetime.datetime.utcnow()
+            'created_at': datetime.datetime.now(datetime.UTC)
         }
         mock_collection.find_one.return_value = sample_post
 
