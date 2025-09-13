@@ -22,8 +22,10 @@ class TestBlogRoutes:
 
     def test_generate_page_unauthenticated(self, client):
         """Test generate page redirect for unauthenticated user"""
-        response = client.get('/generate-page')
-        assert response.status_code == 302  # Redirect to login
+        with patch('app.routes.blog.AuthService.get_current_user') as mock_auth:
+            mock_auth.return_value = None
+            response = client.get('/generate-page')
+            assert response.status_code == 302  # Redirect to login
 
     def test_generate_blog_success(self, client, authenticated_user):
         """Test successful blog generation"""
@@ -108,8 +110,10 @@ class TestBlogRoutes:
 
     def test_dashboard_unauthenticated(self, client):
         """Test dashboard redirect for unauthenticated user"""
-        response = client.get('/dashboard')
-        assert response.status_code == 302  # Redirect to login
+        with patch('app.routes.blog.AuthService.get_current_user') as mock_auth:
+            mock_auth.return_value = None
+            response = client.get('/dashboard')
+            assert response.status_code == 302  # Redirect to login
 
     def test_download_pdf_success(self, client, authenticated_user):
         """Test PDF download"""
@@ -164,8 +168,10 @@ class TestBlogRoutes:
 
     def test_download_pdf_unauthenticated(self, client):
         """Test PDF download without authentication"""
-        response = client.get('/download')
-        assert response.status_code == 302  # Redirect to login
+        with patch('app.routes.blog.AuthService.get_current_user') as mock_auth:
+            mock_auth.return_value = None
+            response = client.get('/download')
+            assert response.status_code == 302  # Redirect to login
 
     def test_get_post_success(self, client, authenticated_user):
         """Test getting specific blog post"""
