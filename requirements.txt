@@ -19,7 +19,7 @@ prometheus_client
 psutil
 pytest-timeout
 mongomock
-
+flask-login
 # Testing dependencies
 pytest-cov>=4.1.0
 pytest-html>=3.2.0
