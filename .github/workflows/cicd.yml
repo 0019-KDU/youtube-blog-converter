@@ -267,10 +267,11 @@ jobs:
               python -m pip install --upgrade pip
               pip install -r requirements.txt
 
-          - name: Wait for MongoDB
+          - name: Wait for MongoDB to be ready
             run: |
-              sudo apt-get update && sudo apt-get install -y netcat
+              sudo apt-get update && sudo apt-get install -y netcat-openbsd
               timeout 30 bash -c 'until nc -z localhost 27017; do sleep 1; done'
+
 
           - name: Run all tests
             run: |
