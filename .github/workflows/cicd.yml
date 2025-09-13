@@ -351,11 +351,11 @@ jobs:
 
       - name: Generate SBOM
         run: |
-          # Generate JSON format SBOM
-          cyclonedx-py requirements -o sbom.json --format json
+          # Generate JSON format SBOM (default format)
+          cyclonedx-py -o sbom.json -F json
           
-          # Generate XML format SBOM
-          cyclonedx-py requirements -o sbom.xml --format xml
+          # Generate XML format SBOM  
+          cyclonedx-py -o sbom.xml -F xml
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
