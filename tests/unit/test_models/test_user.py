@@ -15,32 +15,6 @@ def mock_mongodb():
         yield mock_manager
 
 
-@pytest.fixture
-def isolated_mock_for_duplicate_tests():
-    """Completely isolated mock for duplicate user tests"""
-    # Stop all existing patches to ensure complete isolation
-    patch.stopall()
-
-    with patch('app.models.user.mongo_manager') as mock_manager, \
-         patch('app.models.user.MongoClient'), \
-         patch('pymongo.MongoClient'), \
-         patch('app.models.user.BaseModel._ensure_connection'), \
-         patch('app.models.user.BaseModel.get_collection') as mock_get_collection, \
-         patch.object(__import__('app.models.user', fromlist=['User']).User, 'get_collection') as mock_user_get_collection:
-
-        # Create a fresh mock collection for duplicate tests
-        mock_collection = Mock()
-
-        # Configure all pathways to return our mock collection
-        mock_manager.is_connected.return_value = True
-        mock_manager.get_collection.return_value = mock_collection
-        mock_get_collection.return_value = mock_collection
-        mock_user_get_collection.return_value = mock_collection
-
-        # Ensure the mock collection has clean state
-        mock_collection.reset_mock()
-
-        yield mock_collection
 
 
 class TestUser:
@@ -81,85 +55,101 @@ class TestUser:
         assert 'email' in result['user']
         assert 'password_hash' not in result['user']
 
-    def test_create_user_duplicate_email(self, isolated_mock_for_duplicate_tests):
-        """Test user creation with duplicate email"""
+    @pytest.mark.unit
+    def test_create_user_duplicate_email(self):
+        """Test user creation with duplicate email using direct method patching"""
         from app.models.user import User
 
-        # Configure the isolated mock collection to simulate existing user
-        mock_collection = isolated_mock_for_duplicate_tests
+        # Stop all patches to ensure complete isolation in CI/CD
+        patch.stopall()
 
-        # Reset mock completely to ensure clean state
-        mock_collection.reset_mock()
+        # Use comprehensive patching to ensure complete isolation
+        with patch('app.models.user.mongo_manager'), \
+             patch('app.models.user.MongoClient'), \
+             patch('pymongo.MongoClient'), \
+             patch.object(User, 'get_collection') as mock_get_collection:
 
-        # Configure find_one to return existing user (this simulates duplicate detection)
-        existing_user = {
-            '_id': ObjectId(),
-            'email': 'test@example.com',
-            'username': 'existing_user'
-        }
-        mock_collection.find_one.return_value = existing_user
+            # Create a fresh mock collection
+            mock_collection = Mock()
+            mock_get_collection.return_value = mock_collection
 
-        # Ensure insert_one is not called since we expect early return
-        mock_collection.insert_one.side_effect = Exception("insert_one should not be called for duplicates")
+            # Configure find_one to return existing user (simulates duplicate detection)
+            existing_user = {
+                '_id': ObjectId(),
+                'email': 'test@example.com',
+                'username': 'existing_user'
+            }
+            mock_collection.find_one.return_value = existing_user
 
-        user = User()
-        result = user.create_user('testuser', 'test@example.com', 'password123')
+            # Ensure insert_one is not called since we expect early return
+            mock_collection.insert_one.side_effect = Exception("insert_one should not be called for duplicates")
 
-        # More robust assertion with detailed error message
-        assert result is not None, "Result should not be None"
-        assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
-        assert 'success' in result, f"Result missing 'success' key: {result}"
-        assert result['success'] is False, f"Expected success=False but got {result}"
-        assert 'message' in result, f"Result missing 'message' key: {result}"
-        assert 'already exists' in result['message'], f"Expected 'already exists' in message: {result['message']}"
+            user = User()
+            result = user.create_user('testuser', 'test@example.com', 'password123')
 
-        # Verify the mock was called correctly
-        mock_collection.find_one.assert_called_once_with(
-            {'$or': [{'email': 'test@example.com'}, {'username': 'testuser'}]}
-        )
+            # More robust assertion with detailed error message
+            assert result is not None, "Result should not be None"
+            assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
+            assert 'success' in result, f"Result missing 'success' key: {result}"
+            assert result['success'] is False, f"Expected success=False but got {result}"
+            assert 'message' in result, f"Result missing 'message' key: {result}"
+            assert 'already exists' in result['message'], f"Expected 'already exists' in message: {result['message']}"
 
-        # Verify insert_one was not called (duplicate should be detected before insert)
-        mock_collection.insert_one.assert_not_called()
+            # Verify the mock was called correctly
+            mock_collection.find_one.assert_called_once_with(
+                {'$or': [{'email': 'test@example.com'}, {'username': 'testuser'}]}
+            )
 
-    def test_create_user_duplicate_username(self, isolated_mock_for_duplicate_tests):
-        """Test user creation with duplicate username"""
+            # Verify insert_one was not called (duplicate should be detected before insert)
+            mock_collection.insert_one.assert_not_called()
+
+    @pytest.mark.unit
+    def test_create_user_duplicate_username(self):
+        """Test user creation with duplicate username using direct method patching"""
         from app.models.user import User
 
-        # Configure the isolated mock collection to simulate existing user
-        mock_collection = isolated_mock_for_duplicate_tests
+        # Stop all patches to ensure complete isolation in CI/CD
+        patch.stopall()
 
-        # Reset mock completely to ensure clean state
-        mock_collection.reset_mock()
+        # Use comprehensive patching to ensure complete isolation
+        with patch('app.models.user.mongo_manager'), \
+             patch('app.models.user.MongoClient'), \
+             patch('pymongo.MongoClient'), \
+             patch.object(User, 'get_collection') as mock_get_collection:
 
-        # Configure find_one to return existing user (this simulates duplicate detection)
-        existing_user = {
-            '_id': ObjectId(),
-            'username': 'testuser',
-            'email': 'existing@example.com'
-        }
-        mock_collection.find_one.return_value = existing_user
+            # Create a fresh mock collection
+            mock_collection = Mock()
+            mock_get_collection.return_value = mock_collection
 
-        # Ensure insert_one is not called since we expect early return
-        mock_collection.insert_one.side_effect = Exception("insert_one should not be called for duplicates")
+            # Configure find_one to return existing user (simulates duplicate detection)
+            existing_user = {
+                '_id': ObjectId(),
+                'username': 'testuser',
+                'email': 'existing@example.com'
+            }
+            mock_collection.find_one.return_value = existing_user
 
-        user = User()
-        result = user.create_user('testuser', 'test@example.com', 'password123')
+            # Ensure insert_one is not called since we expect early return
+            mock_collection.insert_one.side_effect = Exception("insert_one should not be called for duplicates")
 
-        # More robust assertion with detailed error message
-        assert result is not None, "Result should not be None"
-        assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
-        assert 'success' in result, f"Result missing 'success' key: {result}"
-        assert result['success'] is False, f"Expected success=False but got {result}"
-        assert 'message' in result, f"Result missing 'message' key: {result}"
-        assert 'already exists' in result['message'], f"Expected 'already exists' in message: {result['message']}"
+            user = User()
+            result = user.create_user('testuser', 'test@example.com', 'password123')
 
-        # Verify the mock was called correctly
-        mock_collection.find_one.assert_called_once_with(
-            {'$or': [{'email': 'test@example.com'}, {'username': 'testuser'}]}
-        )
+            # More robust assertion with detailed error message
+            assert result is not None, "Result should not be None"
+            assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
+            assert 'success' in result, f"Result missing 'success' key: {result}"
+            assert result['success'] is False, f"Expected success=False but got {result}"
+            assert 'message' in result, f"Result missing 'message' key: {result}"
+            assert 'already exists' in result['message'], f"Expected 'already exists' in message: {result['message']}"
 
-        # Verify insert_one was not called (duplicate should be detected before insert)
-        mock_collection.insert_one.assert_not_called()
+            # Verify the mock was called correctly
+            mock_collection.find_one.assert_called_once_with(
+                {'$or': [{'email': 'test@example.com'}, {'username': 'testuser'}]}
+            )
+
+            # Verify insert_one was not called (duplicate should be detected before insert)
+            mock_collection.insert_one.assert_not_called()
 
     def test_create_user_insert_failure(self, mock_mongodb_globally):
         """Test user creation when insert fails"""
