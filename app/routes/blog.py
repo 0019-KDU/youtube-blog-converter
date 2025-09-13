@@ -2,7 +2,6 @@ import io
 import logging
 import re
 import time
-from flask_login import login_required, current_user
 from flask import (Blueprint, jsonify, redirect, render_template, request,
                    send_file, session, url_for)
 
@@ -31,11 +30,15 @@ def index():
 
 
 @blog_bp.route("/generate-page")
-@login_required
 def generate_page():
     """Render the generate blog page"""
     try:
-        logger.info(f"Generate page accessed by user: {current_user.username}")
+        current_user = AuthService.get_current_user()
+        if not current_user:
+            logger.warning("Unauthorized generate page access")
+            return redirect(url_for("auth.login"))
+        
+        logger.info(f"Generate page accessed by user: {current_user['username']}")
         return render_template("generate.html")
     except Exception as e:
         logger.error(f"Error loading generate page: {str(e)}", exc_info=True)
