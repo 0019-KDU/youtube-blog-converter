@@ -56,14 +56,22 @@ class TestUser:
         assert 'password_hash' not in result['user']
 
     def test_create_user_duplicate_email(self):
-        """Test user creation with duplicate email - final approach"""
+        """Test user creation with duplicate email - fixture bypassed approach"""
+        # This test is bypassed from the autouse fixture, so we create our own User class
         from app.models.user import User
+        from unittest.mock import Mock
+        from bson import ObjectId
 
-        # Since all our mocking approaches are being bypassed in CI/CD,
-        # let's test the actual logic by calling the method with controlled conditions
+        # Create a test-specific User class that completely bypasses database connections
+        class IsolatedTestUser(User):
+            def __init__(self):
+                # Don't call super().__init__ to avoid database connection
+                self.collection_name = "users"
 
-        # Create a test-specific User class that we can control completely
-        class TestUser(User):
+            def _ensure_connection(self):
+                # Override to prevent connection attempts
+                pass
+
             def get_collection(self):
                 # Return a mock collection that simulates duplicate user
                 mock_collection = Mock()
@@ -74,28 +82,37 @@ class TestUser:
                 }
                 return mock_collection
 
-        # Test the duplicate detection logic
-        test_user = TestUser()
-        result = test_user.create_user('testuser', 'test@example.com', 'password123')
+        # Test with our isolated user class
+        user_instance = IsolatedTestUser()
+        result = user_instance.create_user('testuser', 'test@example.com', 'password123')
 
-        # Debug output for CI/CD troubleshooting
-        print(f"CI/CD FINAL DEBUG - Result: {result}")
-        print(f"CI/CD FINAL DEBUG - Result type: {type(result)}")
+        # Debug output
+        print(f"CI/CD BYPASS DEBUG - Result: {result}")
+        print(f"CI/CD BYPASS DEBUG - Result type: {type(result)}")
 
-        # The assertions that should work regardless of environment
+        # Verify the expected behavior
         assert result is not None, "Result should not be None"
-        assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
-        assert 'success' in result, f"Result missing 'success' key: {result}"
-        assert result['success'] is False, f"Expected success=False but got {result}"
-        assert 'message' in result, f"Result missing 'message' key: {result}"
-        assert 'already exists' in result['message'], f"Expected 'already exists' in message: {result['message']}"
+        assert isinstance(result, dict), f"Expected dict, got {type(result)}: {result}"
+        assert result.get('success') is False, f"Expected success=False, got: {result}"
+        assert 'already exists' in result.get('message', ''), f"Expected 'already exists' in message: {result}"
 
     def test_create_user_duplicate_username(self):
-        """Test user creation with duplicate username - final approach"""
+        """Test user creation with duplicate username - fixture bypassed approach"""
+        # This test is bypassed from the autouse fixture, so we create our own User class
         from app.models.user import User
+        from unittest.mock import Mock
+        from bson import ObjectId
 
-        # Create a test-specific User class that we can control completely
-        class TestUser(User):
+        # Create a test-specific User class that completely bypasses database connections
+        class IsolatedTestUser(User):
+            def __init__(self):
+                # Don't call super().__init__ to avoid database connection
+                self.collection_name = "users"
+
+            def _ensure_connection(self):
+                # Override to prevent connection attempts
+                pass
+
             def get_collection(self):
                 # Return a mock collection that simulates duplicate username
                 mock_collection = Mock()
@@ -106,17 +123,15 @@ class TestUser:
                 }
                 return mock_collection
 
-        # Test the duplicate detection logic
-        test_user = TestUser()
-        result = test_user.create_user('testuser', 'test@example.com', 'password123')
+        # Test with our isolated user class
+        user_instance = IsolatedTestUser()
+        result = user_instance.create_user('testuser', 'test@example.com', 'password123')
 
-        # The assertions that should work regardless of environment
+        # Verify the expected behavior
         assert result is not None, "Result should not be None"
-        assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
-        assert 'success' in result, f"Result missing 'success' key: {result}"
-        assert result['success'] is False, f"Expected success=False but got {result}"
-        assert 'message' in result, f"Result missing 'message' key: {result}"
-        assert 'already exists' in result['message'], f"Expected 'already exists' in message: {result['message']}"
+        assert isinstance(result, dict), f"Expected dict, got {type(result)}: {result}"
+        assert result.get('success') is False, f"Expected success=False, got: {result}"
+        assert 'already exists' in result.get('message', ''), f"Expected 'already exists' in message: {result}"
 
     def test_create_user_insert_failure(self, mock_mongodb_globally):
         """Test user creation when insert fails"""

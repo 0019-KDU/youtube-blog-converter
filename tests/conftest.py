@@ -75,8 +75,22 @@ def mock_logging():
 
 
 @pytest.fixture(autouse=True)
-def mock_mongodb_globally():
+def mock_mongodb_globally(request):
     """Mock MongoDB connections globally for all tests with improved isolation"""
+    # Skip this fixture for specific tests that need complete isolation
+    if hasattr(request, 'node') and hasattr(request.node, 'name'):
+        # Skip for specific test names that are known to conflict with autouse fixtures
+        skip_tests = [
+            'test_create_user_duplicate_email',
+            'test_create_user_duplicate_username',
+            'test_create_user_duplicate_email_standalone',
+            'test_create_user_duplicate_username_standalone'
+        ]
+        if any(skip_test in request.node.name for skip_test in skip_tests):
+            # Return empty fixture for these tests
+            yield {}
+            return
+
     with patch('app.models.user.MongoClient') as mock_client, \
             patch('app.models.user.mongo_manager') as mock_manager, \
             patch('pymongo.MongoClient') as mock_pymongo_client:
