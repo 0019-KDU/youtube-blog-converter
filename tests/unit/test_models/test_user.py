@@ -79,21 +79,31 @@ class TestUser:
     def test_create_user_duplicate_email(self, isolated_mock_for_duplicate_tests):
         """Test user creation with duplicate email"""
         from app.models.user import User
-        
+
         # Configure the isolated mock collection to simulate existing user
         mock_collection = isolated_mock_for_duplicate_tests
+
+        # Reset mock completely to ensure clean state
+        mock_collection.reset_mock()
+
+        # Configure find_one to return existing user
         mock_collection.find_one.return_value = {
             '_id': ObjectId(),
-            'email': 'test@example.com', 
+            'email': 'test@example.com',
             'username': 'existing_user'
         }
 
         user = User()
         result = user.create_user('testuser', 'test@example.com', 'password123')
 
+        # More robust assertion with detailed error message
+        assert result is not None, "Result should not be None"
+        assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
+        assert 'success' in result, f"Result missing 'success' key: {result}"
         assert result['success'] is False, f"Expected success=False but got {result}"
-        assert 'already exists' in result['message']
-        
+        assert 'message' in result, f"Result missing 'message' key: {result}"
+        assert 'already exists' in result['message'], f"Expected 'already exists' in message: {result['message']}"
+
         # Verify the mock was called correctly
         mock_collection.find_one.assert_called_once_with(
             {'$or': [{'email': 'test@example.com'}, {'username': 'testuser'}]}

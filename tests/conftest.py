@@ -76,13 +76,15 @@ def mock_logging():
 
 @pytest.fixture(autouse=True)
 def mock_mongodb_globally():
-    """Mock MongoDB connections globally for all tests"""
+    """Mock MongoDB connections globally for all tests with improved isolation"""
     with patch('app.models.user.MongoClient') as mock_client, \
             patch('app.models.user.mongo_manager') as mock_manager, \
             patch('pymongo.MongoClient') as mock_pymongo_client:
 
-        # Configure mock collection
+        # Create a fresh mock collection for each test
         mock_collection = MagicMock()
+
+        # Set safe defaults that can be overridden per test
         mock_collection.find_one.return_value = None
         mock_collection.insert_one.return_value = Mock(inserted_id=ObjectId())
         mock_collection.update_one.return_value = Mock(modified_count=1)
@@ -110,11 +112,32 @@ def mock_mongodb_globally():
         mock_manager.client = mock_client_instance
         mock_manager.db = mock_db
 
+        # Reset all mocks before each test to ensure clean state
+        def reset_all_mocks():
+            mock_collection.reset_mock()
+            mock_db.reset_mock()
+            mock_client_instance.reset_mock()
+            mock_manager.reset_mock()
+            # Re-configure default returns after reset
+            mock_collection.find_one.return_value = None
+            mock_collection.insert_one.return_value = Mock(inserted_id=ObjectId())
+            mock_collection.update_one.return_value = Mock(modified_count=1)
+            mock_collection.delete_one.return_value = Mock(deleted_count=1)
+            mock_collection.find.return_value = Mock()
+            mock_collection.find.return_value.sort.return_value.limit.return_value.skip.return_value = []
+            mock_collection.count_documents.return_value = 0
+            mock_manager.is_connected.return_value = True
+            mock_manager.get_collection.return_value = mock_collection
+
+        # Reset at start of each test
+        reset_all_mocks()
+
         yield {
             'client': mock_client,
             'manager': mock_manager,
             'db': mock_db,
-            'collection': mock_collection
+            'collection': mock_collection,
+            'reset': reset_all_mocks
         }
 
 

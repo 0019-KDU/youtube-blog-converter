@@ -50,6 +50,9 @@ class TestBlogPost:
     @pytest.mark.unit
     def test_create_post_success(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
         """Test successful blog post creation"""
+        # Ensure clean mock state
+        mock_mongodb_globally['reset']()
+
         # Configure mock
         mock_collection = mock_mongodb_globally['collection']
         mock_result = Mock()
@@ -87,10 +90,16 @@ class TestBlogPost:
     @pytest.mark.unit
     def test_create_post_with_string_user_id(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
         """Test blog post creation with string user ID"""
-        # Configure mock
+        # Ensure clean mock state
+        mock_mongodb_globally['reset']()
+
+        # Configure mock with complete isolation
         mock_collection = mock_mongodb_globally['collection']
+
+        # Setup mock response
+        post_id = ObjectId()
         mock_result = Mock()
-        mock_result.inserted_id = ObjectId()
+        mock_result.inserted_id = post_id
         mock_collection.insert_one.return_value = mock_result
 
         # Test with string user_id
@@ -103,8 +112,17 @@ class TestBlogPost:
             video_id=sample_blog_post_data['video_id']
         )
 
-        assert result is not None
-        assert result['user_id'] == string_user_id
+        # More robust assertions with detailed error messages
+        assert result is not None, "Result should not be None"
+        assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
+        assert 'user_id' in result, f"Result missing 'user_id' key: {result}"
+        assert result['user_id'] == string_user_id, f"Expected user_id={string_user_id}, got {result.get('user_id')}"
+        assert '_id' in result, f"Result missing '_id' key: {result}"
+        assert 'title' in result, f"Result missing 'title' key: {result}"
+        assert 'content' in result, f"Result missing 'content' key: {result}"
+
+        # Verify insert was called once
+        mock_collection.insert_one.assert_called_once()
 
     @pytest.mark.unit
     def test_create_post_database_error(self, blog_post_model, sample_blog_post_data, mock_mongodb_globally):
