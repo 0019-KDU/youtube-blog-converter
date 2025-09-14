@@ -3,7 +3,20 @@ import logging
 import re
 
 from fpdf import FPDF
-from fpdf.enums import XPos, YPos
+
+try:
+    from fpdf.enums import XPos, YPos
+except ImportError:
+    # Fallback for different fpdf2 versions
+    try:
+        from fpdf import XPos, YPos
+    except ImportError:
+        # For older fpdf2 versions, use string constants
+        class XPos:
+            LMARGIN = "LMARGIN"
+
+        class YPos:
+            NEXT = "NEXT"
 
 logger = logging.getLogger(__name__)
 
