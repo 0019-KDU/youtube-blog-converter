@@ -280,6 +280,7 @@ jobs:
                 --cov-report=xml:coverage.xml \
                 --cov-report=html:htmlcov \
                 --cov-report=term-missing \
+                --junitxml=pytest-results.xml \
                 -v -x --tb=short --timeout=600
             env:
               MONGODB_URI: mongodb://localhost:27017/test_db
@@ -292,6 +293,7 @@ jobs:
               name: test-results
               path: |
                 coverage.xml
+                pytest-results.xml
                 htmlcov/
 
           - name: Upload coverage to Codecov
@@ -345,19 +347,34 @@ jobs:
         with:
           python-version: 3.11
 
-      - name: Install CycloneDX
-        run: |
-          pip install cyclonedx-bom
+      - name: Install CycloneDX Python tool
+        run: pip install cyclonedx-bom
 
-      - name: Generate SBOM
+      - name: Generate JSON SBOM from environment
+        id: generate-json-sbom
         run: |
-          # Generate JSON format SBOM (default format)
-          cyclonedx-py -o sbom.json -F json
-          
-          # Generate XML format SBOM  
-          cyclonedx-py -o sbom.xml -F xml
+          cyclonedx-py environment -o sbom.json --output-format json
+        env:
+          # Add any environment variables needed for your project
+          PYTHONPATH: ${{ github.workspace }}
 
-      - name: Upload SBOM
+      - name: Generate XML SBOM from environment
+        id: generate-xml-sbom
+        run: |
+          cyclonedx-py environment -o sbom.xml --output-format xml
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Validate SBOM files
+        run: |
+          echo "Validating SBOM files..."
+          ls -la sbom.*
+          echo "JSON SBOM content type:"
+          file sbom.json
+          echo "XML SBOM content type:"
+          file sbom.xml
+
+      - name: Upload SBOM artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sbom-reports
@@ -376,20 +393,20 @@ jobs:
               title: '❌ SBOM Generation Failed',
               body: 'Software Bill of Materials generation failed.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Branch: ${{ github.ref_name }}\n- Commit: ${{ github.sha }}',
               labels: ['bug', 'ci-failure', 'security']
-            });
+            })
 
       - name: Slack Notification on Failure
         if: ${{ failure() }}
         uses: act10ns/slack@v2.1.0
         with:
           status: ${{ job.status }}
-          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           message: |
             🚨 **SBOM Generation Failed** 🚨
-            
+
             **Branch:** ${{ github.ref_name }}
             **Commit:** ${{ github.sha }}
-            
+
             Check the logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
   sonarqube-scan:
@@ -416,8 +433,8 @@ jobs:
       - name: Download test coverage
         uses: actions/download-artifact@v4
         with:
-          pattern: test-results-*
-          merge-multiple: true
+          name: test-results
+          path: .
 
       - name: Install SonarQube scanner
         run: |
@@ -426,16 +443,47 @@ jobs:
           sudo mv sonar-scanner-5.0.1.3006-linux /opt/sonar-scanner
           sudo ln -s /opt/sonar-scanner/bin/sonar-scanner /usr/local/bin/sonar-scanner
 
+      - name: Verify coverage and test files exist
+        run: |
+          echo "=== Current directory contents ==="
+          ls -la
+          echo ""
+
+          if [ -f coverage.xml ]; then
+            echo "✅ Coverage file found"
+            echo "Coverage file size: $(stat -f%z coverage.xml 2>/dev/null || stat -c%s coverage.xml)"
+          else
+            echo "❌ Coverage file not found"
+            exit 1
+          fi
+
+          if [ -f pytest-results.xml ]; then
+            echo "✅ JUnit test results found"
+            echo "Test results size: $(stat -f%z pytest-results.xml 2>/dev/null || stat -c%s pytest-results.xml)"
+          else
+            echo "⚠️ JUnit test results not found"
+          fi
+
+          echo ""
+          echo "=== SonarQube project configuration ==="
+          cat sonar-project.properties
+
       - name: Run SonarQube analysis
         run: |
+          echo "=== Starting SonarQube Analysis ==="
+          echo "Project Key: ${{ env.SONAR_PROJECT_KEY }}"
+          echo "Project Name: ${{ env.SONAR_PROJECT_NAME }}"
+          echo "Host URL: ${{ env.SONAR_HOST_URL }}"
+          echo "Scanner version:"
+          sonar-scanner --version
+          echo ""
+
           sonar-scanner \
             -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }} \
             -Dsonar.projectName="${{ env.SONAR_PROJECT_NAME }}" \
-            -Dsonar.sources=app/ \
-            -Dsonar.tests=tests/ \
-            -Dsonar.python.coverage.reportPaths=coverage-*.xml \
             -Dsonar.host.url=${{ env.SONAR_HOST_URL }} \
-            -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+            -Dsonar.token=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.verbose=true
         continue-on-error: true
 
       - name: Create Detailed SonarQube PR Comment
