@@ -55,19 +55,59 @@ class TestUser:
         assert 'email' in result['user']
         assert 'password_hash' not in result['user']
 
-    @pytest.mark.skip(reason="Replaced by standalone test in test_user_duplicates_standalone.py - CI/CD autouse fixture interference")
     def test_create_user_duplicate_email(self):
-        """Test user creation with duplicate email - DISABLED due to CI/CD fixture interference"""
-        # This test has been moved to tests/unit/test_models/test_user_duplicates_standalone.py
-        # The autouse fixture in conftest.py causes interference in CI/CD environments
-        pass
+        """Test user creation with duplicate email - no longer uses problematic autouse fixture"""
+        # Since we removed the autouse fixture, we can use explicit mocking
+        from app.models.user import User
+        from unittest.mock import Mock, patch
+        from bson import ObjectId
 
-    @pytest.mark.skip(reason="Replaced by standalone test in test_user_duplicates_standalone.py - CI/CD autouse fixture interference")
+        # Use explicit patching instead of relying on autouse fixture
+        with patch.object(User, 'get_collection') as mock_get_collection:
+            mock_collection = Mock()
+            mock_get_collection.return_value = mock_collection
+
+            # Configure duplicate user scenario
+            mock_collection.find_one.return_value = {
+                '_id': ObjectId(),
+                'email': 'test@example.com',
+                'username': 'existing_user'
+            }
+
+            user = User()
+            result = user.create_user('testuser', 'test@example.com', 'password123')
+
+            assert result is not None
+            assert isinstance(result, dict)
+            assert result.get('success') is False
+            assert 'already exists' in result.get('message', '')
+
     def test_create_user_duplicate_username(self):
-        """Test user creation with duplicate username - DISABLED due to CI/CD fixture interference"""
-        # This test has been moved to tests/unit/test_models/test_user_duplicates_standalone.py
-        # The autouse fixture in conftest.py causes interference in CI/CD environments
-        pass
+        """Test user creation with duplicate username - no longer uses problematic autouse fixture"""
+        # Since we removed the autouse fixture, we can use explicit mocking
+        from app.models.user import User
+        from unittest.mock import Mock, patch
+        from bson import ObjectId
+
+        # Use explicit patching instead of relying on autouse fixture
+        with patch.object(User, 'get_collection') as mock_get_collection:
+            mock_collection = Mock()
+            mock_get_collection.return_value = mock_collection
+
+            # Configure duplicate username scenario
+            mock_collection.find_one.return_value = {
+                '_id': ObjectId(),
+                'username': 'testuser',
+                'email': 'existing@example.com'
+            }
+
+            user = User()
+            result = user.create_user('testuser', 'test@example.com', 'password123')
+
+            assert result is not None
+            assert isinstance(result, dict)
+            assert result.get('success') is False
+            assert 'already exists' in result.get('message', '')
 
     def test_create_user_insert_failure(self, mock_mongodb_globally):
         """Test user creation when insert fails"""

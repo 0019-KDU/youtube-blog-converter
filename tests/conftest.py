@@ -74,22 +74,11 @@ def mock_logging():
         yield mock_instance
 
 
-@pytest.fixture(autouse=True)
-def mock_mongodb_globally(request):
-    """Mock MongoDB connections globally for all tests with improved isolation"""
-    # Skip this fixture for specific tests that need complete isolation
-    if hasattr(request, 'node') and hasattr(request.node, 'name'):
-        # Skip for specific test names that are known to conflict with autouse fixtures
-        skip_tests = [
-            'test_create_user_duplicate_email',
-            'test_create_user_duplicate_username',
-            'test_create_user_duplicate_email_standalone',
-            'test_create_user_duplicate_username_standalone'
-        ]
-        if any(skip_test in request.node.name for skip_test in skip_tests):
-            # Return empty fixture for these tests
-            yield {}
-            return
+@pytest.fixture
+def mock_mongodb_globally():
+    """Mock MongoDB connections for tests that explicitly request it"""
+    # Changed from autouse=True to explicit fixture
+    # This eliminates the problematic global mocking that interferes with CI/CD
 
     with patch('app.models.user.MongoClient') as mock_client, \
             patch('app.models.user.mongo_manager') as mock_manager, \
