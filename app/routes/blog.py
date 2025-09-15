@@ -74,7 +74,8 @@ def generate_blog():
             language = request.form.get("language", "en")
 
         logger.info(
-            f"Blog generation started for user: {current_user['username']}, URL: {youtube_url}")
+            f"Blog generation started for user: {current_user['username']}, URL: {youtube_url}"
+        )
 
         if not youtube_url:
             logger.warning("Blog generation failed: Empty YouTube URL")
@@ -99,7 +100,8 @@ def generate_blog():
         video_id = extract_video_id(youtube_url)
         if not video_id:
             logger.warning(
-                f"Blog generation failed: Could not extract video ID from {youtube_url}")
+                f"Blog generation failed: Could not extract video ID from {youtube_url}"
+            )
             return jsonify(
                 {"success": False, "message": "Invalid YouTube URL"}), 400
 
@@ -114,19 +116,19 @@ def generate_blog():
             blog_content = generate_blog_from_youtube(youtube_url, language)
 
             logger.info(
-                f"Blog content generated successfully: {len(blog_content)} characters")
+                f"Blog content generated successfully: {len(blog_content)} characters"
+            )
 
         except Exception as gen_error:
             logger.error(
-                f"Blog generation failed: {
-                    str(gen_error)}",
-                exc_info=True)
+                f"Blog generation failed: {str(gen_error)}",
+                exc_info=True
+            )
             return (
                 jsonify(
                     {
                         "success": False,
-                        "message": f"Failed to generate blog: {
-                            str(gen_error)}",
+                        "message": f"Failed to generate blog: {str(gen_error)}",
                     }),
                 500,
             )
@@ -134,8 +136,8 @@ def generate_blog():
         # Check if generation was successful
         if not blog_content or len(blog_content) < 100:
             logger.error(
-                f"Blog generation failed: Content too short or empty ({
-                    len(blog_content) if blog_content else 0} chars)")
+                f"Blog generation failed: Content too short or empty ({len(blog_content) if blog_content else 0} chars)"
+            )
             return (
                 jsonify(
                     {
@@ -175,8 +177,8 @@ def generate_blog():
             logger.info(f"Blog post saved successfully: {blog_post['_id']}")
         except Exception as db_error:
             logger.error(
-                f"Database error creating blog post: {
-                    str(db_error)}", exc_info=True)
+                f"Database error creating blog post: {str(db_error)}", exc_info=True
+            )
             raise
 
         if not blog_post:
@@ -210,8 +212,8 @@ def generate_blog():
         session["blog_created"] = time.time()
 
         logger.info(
-            f"Blog generation completed successfully in {
-                generation_time:.1f}s")
+            f"Blog generation completed successfully in {generation_time:.1f}s"
+        )
 
         return jsonify(
             {
@@ -260,13 +262,12 @@ def dashboard():
         try:
             posts = blog_model.get_user_posts(current_user["_id"])
             logger.info(
-                f"Retrieved {
-                    len(posts)} posts for user {
-                    current_user['username']}")
+                f"Retrieved {len(posts)} posts for user {current_user['username']}"
+            )
         except Exception as db_error:
             logger.error(
-                f"Database error retrieving posts: {
-                    str(db_error)}", exc_info=True)
+                f"Database error retrieving posts: {str(db_error)}", exc_info=True
+            )
             posts = []
 
         return render_template(
@@ -304,8 +305,8 @@ def download_pdf():
 
         if not blog_data:
             logger.warning(
-                f"PDF download failed: No blog data found for user {
-                    current_user['username']}")
+                f"PDF download failed: No blog data found for user {current_user['username']}"
+            )
             return (
                 jsonify({"success": False, "message": "No blog data found or expired"}),
                 404,
@@ -319,8 +320,8 @@ def download_pdf():
         filename = f"{safe_title}_blog.pdf"
 
         logger.info(
-            f"PDF generation started for user {
-                current_user['username']}: {title}")
+            f"PDF generation started for user {current_user['username']}: {title}"
+        )
 
         # Generate PDF
         try:
@@ -363,15 +364,16 @@ def delete_post(post_id):
         current_user = AuthService.get_current_user()
         if not current_user:
             logger.warning(
-                f"Unauthorized post deletion attempt for post {post_id}")
+                f"Unauthorized post deletion attempt for post {post_id}"
+            )
             return (
                 jsonify({"success": False, "message": "Authentication required"}),
                 401,
             )
 
         logger.info(
-            f"Post deletion requested by user {
-                current_user['username']}: {post_id}")
+            f"Post deletion requested by user {current_user['username']}: {post_id}"
+        )
 
         blog_model = BlogPost()
         try:
@@ -408,23 +410,24 @@ def get_post(post_id):
         current_user = AuthService.get_current_user()
         if not current_user:
             logger.warning(
-                f"Unauthorized post access attempt for post {post_id}")
+                f"Unauthorized post access attempt for post {post_id}"
+            )
             return (
                 jsonify({"success": False, "message": "Authentication required"}),
                 401,
             )
 
         logger.info(
-            f"Post retrieval requested by user {
-                current_user['username']}: {post_id}")
+            f"Post retrieval requested by user {current_user['username']}: {post_id}"
+        )
 
         blog_model = BlogPost()
         try:
             post = blog_model.get_post_by_id(post_id, current_user["_id"])
         except Exception as db_error:
             logger.error(
-                f"Database error retrieving post: {
-                    str(db_error)}", exc_info=True)
+                f"Database error retrieving post: {str(db_error)}", exc_info=True
+            )
             raise
 
         if post:
@@ -437,8 +440,8 @@ def get_post(post_id):
 
     except Exception as e:
         logger.error(
-            f"Error retrieving post {post_id}: {
-                str(e)}", exc_info=True)
+            f"Error retrieving post {post_id}: {str(e)}", exc_info=True
+        )
         return jsonify({"success": False, "message": str(e)}), 500
     finally:
         if blog_model:
@@ -455,7 +458,8 @@ def download_post_pdf(post_id):
         current_user = AuthService.get_current_user()
         if not current_user:
             logger.warning(
-                f"Unauthorized PDF download attempt for post {post_id}")
+                f"Unauthorized PDF download attempt for post {post_id}"
+            )
             return redirect(url_for("auth.login"))
 
         logger.info(f"PDF download requested for post: {post_id}")
@@ -509,8 +513,8 @@ def download_post_pdf(post_id):
 
     except Exception as e:
         logger.error(
-            f"PDF generation failed for post {post_id}: {
-                str(e)}", exc_info=True)
+            f"PDF generation failed for post {post_id}: {str(e)}", exc_info=True
+        )
         return (
             jsonify({"success": False, "message": f"PDF generation failed: {str(e)}"}),
             500,

@@ -547,7 +547,7 @@ jobs:
           docker logs smoke-test || echo "No logs available"
 
           echo "🌐 Running health check..."
-          if curl -s http://localhost:5000/ > /dev/null; then
+          if curl -s http://localhost:5000/health > /dev/null; then
             echo "Health check passed ✅"
           else
             echo "⚠️ Health check failed, but continuing..."
