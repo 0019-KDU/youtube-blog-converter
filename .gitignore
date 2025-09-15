@@ -198,22 +198,6 @@ logs/
 *.pid.lock
 docker-compose.override.yml
 
-# ===================================
-# Terraform
-# ===================================
-*.tfstate
-*.tfstate.*
-*.tfstate.backup
-*.tfvars
-!terraform.tfvars.example
-.terraform/
-.terraform.lock.hcl
-terraform.tfplan
-tfplan
-tfplan.*
-backend.conf
-crash.log
-crash.*.log
 
 # ===================================
 # Databases (local only)

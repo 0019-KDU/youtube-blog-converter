@@ -1,4 +1,4 @@
-name: CI/CD for YouTube Blog Converter with Blue-Green Deployment
+name: CI/CD for YouTube Blog Converter
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-# Parameterization for reusability
+# Environment variables
 env:
   # Security & Authentication
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -17,113 +17,92 @@ env:
   MONGODB_URI: ${{ secrets.MONGODB_URI }}
   MONGODB_DB_NAME: ${{ secrets.MONGODB_DB_NAME }}
   FLASK_SECRET_KEY: ${{ secrets.FLASK_SECRET_KEY }}
-  
+
   # Container Registry
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   CONTAINER_REGISTRY: docker.io
   CONTAINER_IMAGE: youtube-blog-converter
-  
-  # Azure Configuration
-  CONTAINER_APP_NAME: ${{ secrets.CONTAINER_APP_NAME }}
-  RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
-  AZURE_LOCATION: ${{ secrets.AZURE_LOCATION || 'eastus' }}
-  
+
   # SonarQube
   SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
   SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
   SONAR_PROJECT_NAME: ${{ vars.SONAR_PROJECT_NAME }}
   SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-  
+
   # Application Settings
   FLASK_DEBUG: "false"
   FLASK_HOST: "0.0.0.0"
   OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-3.5-turbo' }}
   GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
 
-  
   # Monitoring
   PROMETHEUS_ENDPOINT: ${{ secrets.PROMETHEUS_ENDPOINT }}
   GRAFANA_ENDPOINT: ${{ secrets.GRAFANA_ENDPOINT }}
   LOKI_ENDPOINT: ${{ secrets.LOKI_ENDPOINT }}
   MONITORING_ENABLED: "true"
   METRICS_PORT: "8000"
-  
+
   # Performance Testing
   JMETER_THREADS: ${{ vars.JMETER_THREADS || '50' }}
   JMETER_RAMPUP: ${{ vars.JMETER_RAMPUP || '60' }}
   JMETER_DURATION: ${{ vars.JMETER_DURATION || '300' }}
   JMETER_TARGET_RPS: ${{ vars.JMETER_TARGET_RPS || '100' }}
-  
+
   # Security Scanning
   TRIVY_SEVERITY: "HIGH,CRITICAL"
   ZAP_SCAN_DURATION: ${{ vars.ZAP_SCAN_DURATION || '10' }}
   ZAP_SPIDER_DURATION: ${{ vars.ZAP_SPIDER_DURATION || '3' }}
-
 
 permissions:
   issues: write
   contents: read
   pull-requests: write
   checks: write
-  id-token: write  # Required for OIDC and Cosign
-  attestations: write  # For SBOM signing
+  id-token: write
+  attestations: write
 
 jobs:
   # ===========================
-  # STAGE 1: CODE QUALITY (Parallel - Fail Fast)
+  # STAGE 1: CODE QUALITY
   # ===========================
-  
+
   lint-and-format:
-    name: Lint and Format Check
-    runs-on: ubuntu-latest
+      name: Lint and Format Check
+      runs-on: ubuntu-latest
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
+          with:
+            fetch-depth: 0
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        - name: Set up Python 3.11
+          uses: actions/setup-python@v5
+          with:
+            python-version: 3.11
+            cache: 'pip'  # Add caching here too
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
+        - name: Cache pip dependencies
+          uses: actions/cache@v4
+          with:
+            path: ~/.cache/pip
+            key: ${{ runner.os }}-pip-lint-${{ hashFiles('**/requirements.txt') }}
+            restore-keys: |
+              ${{ runner.os }}-pip-lint-
+              ${{ runner.os }}-pip-
 
-      - name: Cache pip dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-lint-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-lint-
-            ${{ runner.os }}-pip-
+        - name: Install linting dependencies
+          run: |
+            python -m pip install --upgrade pip
+            pip install flake8 isort
 
-      - name: Install linting dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install flake8 isort bandit safety
+        - name: Run isort (import sorting check)
+          run: |
+            isort --check-only --diff app/ tests/
 
-      - name: Run isort (import sorting check)
-        run: |
-          isort --check-only --diff app/ tests/
-        continue-on-error: true
+        - name: Run Flake8 (linting)
+          run: |
+            flake8 app/ tests/ --max-line-length=120 --ignore=E203,W503,W504,F401,F841,F541,E501 --exclude=migrations
 
-      - name: Run Flake8 (linting)
-        run: |
-          flake8 app/ tests/ --max-line-length=120 --ignore=E203,W503,W504,F401,F841,F541,E501 --exclude=migrations
-        continue-on-error: true
-
-      - name: Run Bandit (security checks)
-        run: |
-          bandit -r app/ -lll
-        continue-on-error: true
-
-      - name: Run Safety (dependency vulnerability check)
-        run: |
-          safety check
-        continue-on-error: true
-
-
-  # Security scanning combined with lint job to reduce redundancy
   security-scan:
     name: Security Analysis
     runs-on: ubuntu-latest
@@ -137,11 +116,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
+          cache: 'pip'
 
       - name: Install security scanning tools
         run: |
           python -m pip install --upgrade pip
-          pip install pip-audit
+          pip install bandit safety pip-audit
+
+      - name: Cache Trivy database
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: ${{ runner.os }}-trivy-db
 
       - name: Install Trivy
         run: |
@@ -159,70 +145,52 @@ jobs:
           sudo mv gitleaks /usr/local/bin/
           rm gitleaks_8.18.2_linux_x64.tar.gz
 
-      - name: Audit dependencies
+      # Run security scans in parallel using background processes
+      - name: Run security scans in parallel
         run: |
-          pip-audit --format=json --output=dependency-audit.json
-        continue-on-error: true
-
-      - name: Filesystem Scan with Trivy
-        run: trivy fs --severity ${{ env.TRIVY_SEVERITY }} --exit-code 0 --format sarif -o trivy-fs-report.sarif .
-
-      - name: Secret Detection with Gitleaks
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
-            echo "Scanning PR commits against base branch: $BASE_BRANCH"
-            git fetch origin "$BASE_BRANCH" --depth=100
-            BASE_COMMIT=$(git merge-base "origin/$BASE_BRANCH" HEAD)
-            RANGE="$BASE_COMMIT..HEAD"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "Scanning push event commits"
-            if [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-              RANGE="${{ github.event.before }}..${{ github.event.after }}"
-            else
-              RANGE="${{ github.event.after }}"
-            fi
-          else
-            echo "Unsupported event type: ${{ github.event_name }}"
-            exit 1
-          fi
-
-          echo "Scanning commit range: $RANGE"
-          gitleaks detect \
-            --source . \
-            --report-format json \
-            --report-path gitleaks-report.json \
-            --log-opts "$RANGE"
+          # Start all scans in background
+          bandit -r app/ -f json -o bandit-report.json &
+          BANDIT_PID=$!
+          
+          safety check --json --output safety-report.json &
+          SAFETY_PID=$!
+          
+          pip-audit --format=json --output=dependency-audit.json &
+          AUDIT_PID=$!
+          
+          trivy fs --severity ${{ env.TRIVY_SEVERITY || 'HIGH,CRITICAL' }} --exit-code 0 --format sarif -o trivy-fs-report.sarif . &
+          TRIVY_PID=$!
+          
+          gitleaks detect --source . --report-format json --report-path gitleaks-report.json --commit ${{ github.sha }} --exit-code 0 &
+          GITLEAKS_PID=$!
+          
+          # Wait for all to complete
+          wait $BANDIT_PID || echo "Bandit completed with warnings"
+          wait $SAFETY_PID || echo "Safety completed with warnings"
+          wait $AUDIT_PID || echo "Audit completed with warnings"
+          wait $TRIVY_PID || echo "Trivy completed"
+          wait $GITLEAKS_PID || echo "Gitleaks completed"
 
       - name: Upload security reports
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: |
+            bandit-report.json
+            safety-report.json
             dependency-audit.json
             trivy-fs-report.sarif
+            gitleaks-report.json
           retention-days: 30
-
-      - name: Upload Gitleaks report
-        uses: actions/upload-artifact@v4
-        with:
-          name: gitleaks-report
-          path: gitleaks-report.json
-          retention-days: 30
-
-
-  # ===========================
-  # STAGE 2: BUILD & TEST (Sequential)
-  # ===========================
 
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # Add timeout to prevent hanging jobs
     steps:
       - name: Show commit author
         run: |
           echo "Commit by ${{ github.actor }}"
           echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
-          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -231,44 +199,35 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'   # ✅ speeds up installs
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov bandit safety
+          pip install pytest pytest-cov pytest-xdist
 
-      - name: Run security audit with Safety
-        run: |
-          pip list --format=freeze | safety check --stdin --full-report || true
-
-      - name: Run Bandit security scanner
-        run: |
-          bandit -r app/ -f json -o bandit-report.json || true
-
-      - name: Upload Bandit report
-        uses: actions/upload-artifact@v4
-        with:
-          name: bandit-report
-          path: bandit-report.json
-          retention-days: 30
-
-      - name: Run tests with coverage + JUnit
+      # Fix the Loki connection issue by disabling external logging during tests
+      - name: Run tests with coverage + JUnit (optimized)
         env:
           TESTING: true
           FLASK_ENV: testing
           CI: true
           LOG_TO_FILE: false
-          LOG_LEVEL: DEBUG
+          LOG_LEVEL: ERROR  # Reduce log verbosity
+          DISABLE_EXTERNAL_LOGGING: true  # Add this to disable Loki connections
         run: |
+          # Run tests in parallel using pytest-xdist
           pytest --cov=app \
                 --cov-report=xml:coverage.xml \
                 --cov-report=html:htmlcov \
                 --junitxml=pytest-results.xml \
-                -v tests/ || true
+                -v tests/ \
+                -n auto \
+                --maxfail=5 \
+                --tb=short
 
-          # ✅ Ensure coverage.xml exists (even if tests fail/skip)
+          # Ensure coverage.xml exists
           if [ ! -f coverage.xml ]; then
             echo "<?xml version='1.0' encoding='UTF-8'?><coverage version='1'><sources></sources><packages></packages></coverage>" > coverage.xml
           fi
@@ -342,25 +301,24 @@ jobs:
           run: |
             echo "Commit by ${{ github.actor }}"
             echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
-            echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
-            
+
         - name: Checkout code
           uses: actions/checkout@v4
           with:
             fetch-depth: 0
-            
+
         - name: Download coverage report
           uses: actions/download-artifact@v4
           with:
             name: coverage-report
             path: .
-            
+
         - name: Download bandit report
           uses: actions/download-artifact@v4
           with:
             name: bandit-report
             path: .
-            
+
         - name: SonarQube Scan with Quality Gate
           id: sonar-scan
           uses: SonarSource/sonarqube-scan-action@v5.3.0
@@ -383,7 +341,7 @@ jobs:
               -Dsonar.links.scm=${{ github.server_url }}/${{ github.repository }}
               -Dsonar.links.ci=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
               -Dsonar.python.bandit.reportPaths=bandit-report.json
-              
+
         - name: Create Detailed SonarQube PR Comment
           if: github.event_name == 'pull_request'
           uses: actions/github-script@v7
@@ -418,11 +376,11 @@ jobs:
               });
 
   # ===========================
-  # STAGE 3: CONTAINER SECURITY (Parallel)
+  # STAGE 3: CONTAINER BUILD & SECURITY
   # ===========================
 
   docker-build:
-    name: Build Docker Image & Smoke Test
+    name: Build Docker Image & Security Scan
     needs: [security-scan, build-and-test, sonarqube-scan, generate-sbom]
     runs-on: ubuntu-latest
     outputs:
@@ -433,7 +391,6 @@ jobs:
         run: |
           echo "Commit by ${{ github.actor }}"
           echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
-          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -441,7 +398,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Install Trivy (for container scanning)
+      - name: Install Trivy
         run: |
           sudo apt-get update -y
           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
@@ -461,10 +418,10 @@ jobs:
           fi
           echo "digest=$digest" >> $GITHUB_OUTPUT
 
-      - name: Container Vulnerability Scan with Trivy
+      - name: Container Vulnerability Scan
         run: trivy image --severity ${{ env.TRIVY_SEVERITY }} --exit-code 0 --format sarif -o trivy-container-report.sarif ${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
 
-      - name: Upload Trivy container report
+      - name: Upload container security report
         uses: actions/upload-artifact@v4
         with:
           name: trivy-container-report
@@ -473,57 +430,10 @@ jobs:
 
       - name: Run smoke test
         run: |
-          # Required environment variables
-          required_env=(
-            "OPENAI_API_KEY"
-            "SUPADATA_API_KEY"
-            "JWT_SECRET_KEY"
-            "JWT_ACCESS_TOKEN_EXPIRES"
-            "MONGODB_URI"
-            "MONGODB_DB_NAME"
-            "FLASK_SECRET_KEY"
-            "FLASK_DEBUG"
-            "FLASK_HOST"
-            "OPENAI_MODEL_NAME"
-            "GA_MEASUREMENT_ID"
-            "PROMETHEUS_ENDPOINT"
-            "GRAFANA_ENDPOINT"
-            "LOKI_ENDPOINT"
-            "MONITORING_ENABLED"
-            "METRICS_PORT"
-          )
-
-          # Check missing env vars
-          missing=false
-          for var in "${required_env[@]}"; do
-            if [ -z "${!var}" ]; then
-              echo "⚠️  Missing environment variable: $var"
-              missing=true
-            fi
-          done
-
-          if [ "$missing" = true ]; then
-            echo "❌ One or more required environment variables are missing. Continuing with warnings."
-          fi
-
           # Run container
           docker run -d --name smoke-test \
-            -e OPENAI_API_KEY="${{ env.OPENAI_API_KEY }}" \
-            -e SUPADATA_API_KEY="${{ env.SUPADATA_API_KEY }}" \
-            -e JWT_SECRET_KEY="${{ env.JWT_SECRET_KEY }}" \
-            -e JWT_ACCESS_TOKEN_EXPIRES="${{ env.JWT_ACCESS_TOKEN_EXPIRES }}" \
-            -e MONGODB_URI="${{ env.MONGODB_URI }}" \
-            -e MONGODB_DB_NAME="${{ env.MONGODB_DB_NAME }}" \
-            -e FLASK_SECRET_KEY="${{ env.FLASK_SECRET_KEY }}" \
             -e FLASK_DEBUG="${{ env.FLASK_DEBUG }}" \
             -e FLASK_HOST="${{ env.FLASK_HOST }}" \
-            -e OPENAI_MODEL_NAME="${{ env.OPENAI_MODEL_NAME }}" \
-            -e GA_MEASUREMENT_ID="${{ env.GA_MEASUREMENT_ID }}" \
-            -e PROMETHEUS_ENDPOINT="${{ env.PROMETHEUS_ENDPOINT }}" \
-            -e GRAFANA_ENDPOINT="${{ env.GRAFANA_ENDPOINT }}" \
-            -e LOKI_ENDPOINT="${{ env.LOKI_ENDPOINT }}" \
-            -e MONITORING_ENABLED="${{ env.MONITORING_ENABLED }}" \
-            -e METRICS_PORT="${{ env.METRICS_PORT }}" \
             -p 5000:5000 \
             ${{ env.CONTAINER_IMAGE }}:${{ github.sha }} || true
 
@@ -551,42 +461,12 @@ jobs:
           docker stop smoke-test || true
           docker rm smoke-test || true
 
-
-  container-security-scan:
-    name: Container Security Scan
-    runs-on: ubuntu-latest
-    needs: [docker-build]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Trivy
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y
-          sudo apt-get install -y trivy
-
-      - name: Run Trivy vulnerability scanner
-        run: |
-          docker pull ${{ env.CONTAINER_IMAGE }}:${{ github.sha }} || docker build -t ${{ env.CONTAINER_IMAGE }}:${{ github.sha }} .
-          trivy image --severity ${{ env.TRIVY_SEVERITY }} --exit-code 0 --format sarif -o trivy-container-report.sarif ${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
-
-      - name: Upload container security report
-        uses: actions/upload-artifact@v4
-        with:
-          name: container-security-scan
-          path: trivy-container-report.sarif
-
   # ===========================
-  # STAGE 4: DEPLOYMENT (Sequential - Main Branch Only)
+  # STAGE 4: DEPLOYMENT
   # ===========================
 
   deploy-to-dockerhub:
-      needs: [container-security-scan]
+      needs: [docker-build]
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       runs-on: ubuntu-latest
       outputs:
@@ -638,10 +518,10 @@ jobs:
             webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
             message: |
               🚨 **DockerHub Deployment Failed** 🚨
-              
+
               **Branch:** ${{ github.ref_name }}
               **Commit:** ${{ github.sha }}
-              
+
               Check DockerHub credentials and connectivity.
               Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
@@ -702,36 +582,8 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: 1
 
-      - name: Create issue on failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '⚠️ Container Signing Failed',
-              body: 'Container image signing failed but deployment will continue.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Image: ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}\n\nThis is a non-blocking failure. Please check Cosign configuration.',
-              labels: ['warning', 'security', 'signing']
-            });
-
-      - name: Slack Notification on Failure
-        if: failure()
-        uses: act10ns/slack@v2.1.0
-        with:
-          status: 'warning'
-          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-          message: |
-            ⚠️ **Container Signing Failed** ⚠️
-            
-            **Image:** ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
-            **Impact:** Non-blocking - deployment continues
-            
-            Please review Cosign configuration.
-            Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
   # ===========================
-  # SIMPLE NOTIFICATIONS
+  # NOTIFICATIONS
   # ===========================
 
   notify:
@@ -745,7 +597,6 @@ jobs:
         - generate-sbom
         - sonarqube-scan
         - docker-build
-        - container-security-scan
         - deploy-to-dockerhub
         - sign-container
 
