@@ -68,4 +68,4 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV FLASK_ENV=production
 
 # Use gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "--keep-alive", "2", "--max-requests", "1000", "--access-logfile", "-", "--error-logfile", "-", "run:create_application()"]
+CMD ["python", "-m", "flask", "run", "--host=0.0.0.0"]

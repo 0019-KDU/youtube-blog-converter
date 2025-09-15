@@ -268,8 +268,9 @@ def individual_components_test(youtube_url: str, language: str = "en") -> str:
             return _create_error_response(youtube_url, transcript_result)
 
         logger.info(
-            f"✅ Transcript extraction successful: {
-                len(transcript_result)} characters")
+            f"✅ Transcript extraction successful: {len(transcript_result)} characters"
+        )
+
 
         # Test Blog Generator Tool
         logger.info("Testing Blog Generator Tool...")
