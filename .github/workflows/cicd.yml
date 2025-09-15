@@ -101,37 +101,29 @@ jobs:
             python -m pip install --upgrade pip
             pip install flake8 isort bandit safety
 
-        - name: Run isort (import sorting check)  
+        - name: Run isort (import sorting check)
           run: |
-            isort --check-only --diff app/ tests/ || echo "⚠️ isort found issues"
+            isort --check-only --diff app/ tests/
+          continue-on-error: false
 
         - name: Run Flake8 (linting)
           run: |
-            flake8 app/ tests/ --max-line-length=120 --ignore=E203,W503,W504,F401,F841,F541,E501 --exclude=migrations || echo "⚠️ flake8 found issues"
+            flake8 app/ tests/ --max-line-length=120 --ignore=E203,W503,W504,F401,F841,F541,E501 --exclude=migrations
+          continue-on-error: false
 
         - name: Run Bandit (security checks)
           run: |
-            bandit -r app/ -lll || echo "⚠️ bandit found issues"
+            bandit -r app/ -lll
+          continue-on-error: false
 
         - name: Run Safety (dependency vulnerability check)
           run: |
-            safety check || echo "⚠️ safety check found issues"
+            safety check
+          continue-on-error: false
 
-        # Optional: Create GitHub issue when problems are found
-        - name: Create issue if warnings exist
-          if: always() # run even if previous steps had warnings
-          uses: actions/github-script@v7
-          with:
-            script: |
-              github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: '⚠️ Code Quality Warnings',
-                body: 'Some code quality checks reported warnings.\n\nCheck isort/flake8/bandit/safety results in the workflow logs.'
-              })
-
+  # Security scanning combined with lint job to reduce redundancy
   security-scan:
-    name: Static Security Analysis
+    name: Security Analysis
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -147,7 +139,7 @@ jobs:
       - name: Install security scanning tools
         run: |
           python -m pip install --upgrade pip
-          pip install bandit safety
+          pip install pip-audit
 
       - name: Install Trivy
         run: |
@@ -158,14 +150,9 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y trivy
 
-      - name: Run Bandit security scan
+      - name: Audit dependencies
         run: |
-          bandit -r app/ -f json -o bandit-report.json --severity-level medium --skip B101
-        continue-on-error: true
-
-      - name: Run Safety check (dependency vulnerabilities)
-        run: |
-          safety check --json --output safety-report.json
+          pip-audit --format=json --output=dependency-audit.json
         continue-on-error: true
 
       - name: Filesystem Scan with Trivy
@@ -176,161 +163,68 @@ jobs:
         with:
           name: security-reports
           path: |
-            bandit-report.json
-            safety-report.json
+            dependency-audit.json
             trivy-fs-report.sarif
           retention-days: 30
-
-      - name: Create issue on critical security findings
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '🔒 Critical Security Vulnerabilities Found',
-              body: 'Critical security vulnerabilities detected. Review security reports before deployment.\n\nWorkflow: ${{ github.workflow }}\nRun: ${{ github.run_number }}',
-              labels: ['security', 'critical']
-            })
-
-  dependency-check:
-    name: Dependency Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-
-      - name: Install pip-audit
-        run: |
-          python -m pip install --upgrade pip
-          pip install pip-audit
-
-      - name: Audit dependencies
-        run: |
-          pip-audit --format=json --output=dependency-audit.json
-        continue-on-error: true
-
-      - name: Upload dependency audit
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-audit
-          path: dependency-audit.json
 
   # ===========================
   # STAGE 2: BUILD & TEST (Sequential)
   # ===========================
 
   build-and-test:
-        name: Build and Test Application
-        runs-on: ubuntu-latest
-        needs: [lint-and-format, security-scan, dependency-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
 
-        services:
-          mongodb:
-            image: mongo:5.0
-            ports:
-              - 27017:27017
-            options: >-
-              --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
-              --health-interval 10s
-              --health-timeout 5s
-              --health-retries 5
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        steps:
-          - name: Checkout code
-            uses: actions/checkout@v4
-            with:
-              fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-          - name: Set up Python 3.12
-            uses: actions/setup-python@v4
-            with:
-              python-version: 3.12
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov bandit safety
+      
+      - name: Run security audit with safety
+        run: |
+          pip list --format=freeze | safety check --stdin --full-report || true
+      
+      - name: Run bandit security scanner
+        run: |
+          bandit -r src/ -f json -o bandit-report.json || true
+      
+      - name: Upload bandit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          retention-days: 30
 
-          - name: Cache dependencies
-            uses: actions/cache@v3
-            with:
-              path: ~/.cache/pip
-              key: ${{ runner.os }}-pip-3.12-${{ hashFiles('**/requirements.txt') }}
-              restore-keys: |
-                ${{ runner.os }}-pip-3.12-
-                ${{ runner.os }}-pip-
+      - name: Run tests with coverage
+        env:
+          TESTING: true
+          FLASK_ENV: testing
+          CI: true
+          LOG_TO_FILE: false
+          LOG_LEVEL: DEBUG
+        run: pytest --cov=src --cov-report=xml:coverage.xml -v tests/
+        
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 30
 
-          - name: Install dependencies
-            run: |
-              python -m pip install --upgrade pip
-              pip install -r requirements.txt
-
-          - name: Wait for MongoDB to be ready
-            run: |
-              sudo apt-get update && sudo apt-get install -y netcat-openbsd
-              timeout 30 bash -c 'until nc -z localhost 27017; do sleep 1; done'
-
-
-          - name: Run all tests
-            run: |
-              pytest tests/ \
-                --cov=app \
-                --cov-report=xml:coverage.xml \
-                --cov-report=html:htmlcov \
-                --cov-report=term-missing \
-                --junitxml=pytest-results.xml \
-                -v -x --tb=short --timeout=600
-            env:
-              MONGODB_URI: mongodb://localhost:27017/test_db
-              FLASK_ENV: testing
-              TESTING: true
-
-          - name: Upload test results
-            uses: actions/upload-artifact@v4
-            with:
-              name: test-results
-              path: |
-                coverage.xml
-                pytest-results.xml
-                htmlcov/
-
-          - name: Upload coverage to Codecov
-            uses: codecov/codecov-action@v4
-            with:
-              file: ./coverage.xml
-              flags: tests
-              name: codecov-3.12
-              fail_ci_if_error: false
-
-          - name: Create issue on failure
-            if: ${{ failure() }}
-            uses: actions/github-script@v7
-            with:
-              script: |
-                github.rest.issues.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  title: `❌ Build and Test Failed - Python 3.12`,
-                  body: `Build and test pipeline failed for Python 3.12.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Branch: ${{ github.ref_name }}\n- Commit: ${{ github.sha }}\n\nPlease check the logs and fix the issues.`,
-                  labels: ['bug', 'ci-failure']
-                });
-
-          - name: Slack Notification on Failure
-            if: ${{ failure() }}
-            uses: act10ns/slack@v2.1.0
-            with:
-              status: ${{ job.status }}
-              webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-              message: |
-                🚨 **Build and Test Failed** 🚨
-                
-                **Python Version:** 3.12
-                **Branch:** ${{ github.ref_name }}
-                **Commit:** ${{ github.sha }}
-                
-                Check the logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 
   generate-sbom:
@@ -382,32 +276,6 @@ jobs:
             sbom.json
             sbom.xml
 
-      - name: Create issue on failure
-        if: ${{ failure() }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '❌ SBOM Generation Failed',
-              body: 'Software Bill of Materials generation failed.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Branch: ${{ github.ref_name }}\n- Commit: ${{ github.sha }}',
-              labels: ['bug', 'ci-failure', 'security']
-            })
-
-      - name: Slack Notification on Failure
-        if: ${{ failure() }}
-        uses: act10ns/slack@v2.1.0
-        with:
-          status: ${{ job.status }}
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          message: |
-            🚨 **SBOM Generation Failed** 🚨
-
-            **Branch:** ${{ github.ref_name }}
-            **Commit:** ${{ github.sha }}
-
-            Check the logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
   sonarqube-scan:
     name: SonarQube Quality Analysis
@@ -522,33 +390,6 @@ jobs:
               body: comment
             });
 
-      - name: Create issue on failure
-        if: ${{ failure() }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '❌ SonarQube Analysis Failed',
-              body: 'SonarQube code quality analysis failed.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Branch: ${{ github.ref_name }}\n- Commit: ${{ github.sha }}\n\nPlease check SonarQube configuration and connectivity.',
-              labels: ['bug', 'ci-failure', 'code-quality']
-            });
-
-      - name: Slack Notification on Failure
-        if: ${{ failure() }}
-        uses: act10ns/slack@v2.1.0
-        with:
-          status: ${{ job.status }}
-          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-          message: |
-            🚨 **SonarQube Analysis Failed** 🚨
-            
-            **Branch:** ${{ github.ref_name }}
-            **Commit:** ${{ github.sha }}
-            
-            Check SonarQube connectivity and configuration.
-            Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
   # ===========================
   # STAGE 3: CONTAINER SECURITY (Parallel)
@@ -597,33 +438,6 @@ jobs:
           docker stop test-container
           docker rm test-container
 
-      - name: Create issue on failure
-        if: ${{ failure() }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '❌ Docker Build Failed',
-              body: 'Docker image build or container testing failed.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Branch: ${{ github.ref_name }}\n- Commit: ${{ github.sha }}\n\nPlease check Dockerfile and container configuration.',
-              labels: ['bug', 'ci-failure', 'docker']
-            });
-
-      - name: Slack Notification on Failure
-        if: ${{ failure() }}
-        uses: act10ns/slack@v2.1.0
-        with:
-          status: ${{ job.status }}
-          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-          message: |
-            🚨 **Docker Build Failed** 🚨
-            
-            **Branch:** ${{ github.ref_name }}
-            **Commit:** ${{ github.sha }}
-            
-            Check Dockerfile and container configuration.
-            Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 
 
@@ -794,17 +608,16 @@ jobs:
   
 
   # ===========================
-  # NOTIFICATIONS & REPORTING
+  # SIMPLE NOTIFICATIONS
   # ===========================
 
   notify:
       name: Pipeline Status Notification
       if: always()
       runs-on: ubuntu-latest
-      needs: 
+      needs:
         - lint-and-format
         - security-scan
-        - dependency-check
         - build-and-test
         - generate-sbom
         - sonarqube-scan
@@ -814,161 +627,16 @@ jobs:
         - sign-container
 
       steps:
-        - name: Determine Overall Pipeline Status
-          id: status
-          run: |
-            # Collect job statuses
-            LINT_STATUS="${{ needs.lint-and-format.result }}"
-            SECURITY_STATUS="${{ needs.security-scan.result }}"
-            DEPENDENCY_STATUS="${{ needs.dependency-check.result }}"
-            BUILD_STATUS="${{ needs.build-and-test.result }}"
-            SBOM_STATUS="${{ needs.generate-sbom.result }}"
-            SONAR_STATUS="${{ needs.sonarqube-scan.result }}"
-            DOCKER_BUILD_STATUS="${{ needs.docker-build-test.result }}"
-            CONTAINER_SECURITY_STATUS="${{ needs.container-security-scan.result }}"
-            DOCKERHUB_STATUS="${{ needs.deploy-to-dockerhub.result }}"
-            SIGNING_STATUS="${{ needs.sign-container.result }}"
-
-            echo "Job Status Summary:"
-            echo "- Lint & Format: $LINT_STATUS"
-            echo "- Security Scan: $SECURITY_STATUS"
-            echo "- Dependency Check: $DEPENDENCY_STATUS"
-            echo "- Build & Test: $BUILD_STATUS"
-            echo "- SBOM Generation: $SBOM_STATUS"
-            echo "- SonarQube: $SONAR_STATUS"
-            echo "- Docker Build: $DOCKER_BUILD_STATUS"
-            echo "- Container Security: $CONTAINER_SECURITY_STATUS"
-            echo "- DockerHub Deploy: $DOCKERHUB_STATUS"
-            echo "- Container Signing: $SIGNING_STATUS"
-            
-            # Determine overall status
-            FAILED_JOBS=""
-            SUCCESSFUL_JOBS=""
-            SKIPPED_JOBS=""
-            
-            # Check each job
-            for job_status in "$LINT_STATUS:Lint" "$SECURITY_STATUS:Security" "$DEPENDENCY_STATUS:Dependencies" "$BUILD_STATUS:Build" "$SBOM_STATUS:SBOM" "$SONAR_STATUS:SonarQube" "$DOCKER_BUILD_STATUS:DockerBuild" "$CONTAINER_SECURITY_STATUS:ContainerSecurity" "$DOCKERHUB_STATUS:DockerHub" "$SIGNING_STATUS:Signing" "$GREEN_DEPLOY_STATUS:GreenDeploy" "$ZAP_STATUS:SecurityScan" "$LOAD_TEST_STATUS:LoadTest" "$TRAFFIC_SWITCH_STATUS:TrafficSwitch"; do
-              STATUS=$(echo $job_status | cut -d':' -f1)
-              JOB_NAME=$(echo $job_status | cut -d':' -f2)
-              
-              case $STATUS in
-                "success")
-                  SUCCESSFUL_JOBS="$SUCCESSFUL_JOBS $JOB_NAME"
-                  ;;
-                "failure")
-                  FAILED_JOBS="$FAILED_JOBS $JOB_NAME"
-                  ;;
-                "skipped")
-                  SKIPPED_JOBS="$SKIPPED_JOBS $JOB_NAME"
-                  ;;
-              esac
-            done
-            
-            # Set outputs
-            echo "successful_jobs=$SUCCESSFUL_JOBS" >> $GITHUB_OUTPUT
-            echo "failed_jobs=$FAILED_JOBS" >> $GITHUB_OUTPUT
-            echo "skipped_jobs=$SKIPPED_JOBS" >> $GITHUB_OUTPUT
-            
-            # Check if rollback was executed
-            if [ "$ROLLBACK_STATUS" = "success" ]; then
-              echo "rollback_executed=true" >> $GITHUB_OUTPUT
-            else
-              echo "rollback_executed=false" >> $GITHUB_OUTPUT
-            fi
-            
-            # Determine pipeline outcome
-            if [ -n "$FAILED_JOBS" ]; then
-              if [ "$ROLLBACK_STATUS" = "success" ]; then
-                echo "pipeline_status=rolled_back" >> $GITHUB_OUTPUT
-              else
-                echo "pipeline_status=failed" >> $GITHUB_OUTPUT
-              fi
-            else
-              echo "pipeline_status=success" >> $GITHUB_OUTPUT
-            fi
-
-        - name: Send Success Details
-          if: steps.status.outputs.successful_jobs != ''
+        - name: Send Pipeline Status
           uses: act10ns/slack@v2.1.0
           with:
-            status: success
+            status: ${{ (contains(needs.*.result, 'failure') && 'failure') || 'success' }}
             webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
             message: |
-              ✅ **Successful Pipeline Jobs:**
-              ${{ steps.status.outputs.successful_jobs }}
+              **CI/CD Pipeline Complete**
 
-        - name: Send Failure Details  
-          if: steps.status.outputs.failed_jobs != ''
-          uses: act10ns/slack@v2.1.0
-          with:
-            status: failure
-            webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-            message: |
-              ❌ **Failed Pipeline Jobs:**
-              ${{ steps.status.outputs.failed_jobs }}
+              **Branch:** ${{ github.ref_name }}
+              **Commit:** ${{ github.sha }}
+              **Status:** ${{ (contains(needs.*.result, 'failure') && '❌ Failed') || '✅ Success' }}
 
-        - name: Send Skipped Details
-          if: steps.status.outputs.skipped_jobs != ''
-          uses: act10ns/slack@v2.1.0
-          with:
-            status: warning
-            webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-            message: |
-              ⏭️ **Skipped Pipeline Jobs:**
-              ${{ steps.status.outputs.skipped_jobs }}
-
-        - name: Send Rollback Details
-          if: steps.status.outputs.rollback_executed == 'true'
-          uses: act10ns/slack@v2.1.0
-          with:
-            status: warning
-            webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-            message: |
-              🔄 **Rollback Executed:**
-              Deployment failed and automatic rollback was triggered.
-
-  artifact-management:
-    name: Artifact Management
-    if: always()
-    runs-on: ubuntu-latest
-    needs:
-      - security-scan
-      - build-and-test
-      - generate-sbom
-      - container-security-scan
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        
-      - name: Create artifact summary
-        run: |
-          echo "📦 Pipeline Artifacts Summary"
-          echo "=========================="
-          find . -type f -name "*.json" -o -name "*.xml" -o -name "*.html" -o -name "*.sarif" | sort
-          
-          # Calculate total artifact size
-          TOTAL_SIZE=$(find . -type f -exec ls -l {} \; | awk '{sum += $5} END {print sum}')
-          TOTAL_SIZE_MB=$((TOTAL_SIZE / 1024 / 1024))
-          
-          echo "Total artifact size: ${TOTAL_SIZE_MB}MB"
-
-      - name: Slack Artifact Summary
-        if: always()
-        uses: act10ns/slack@v2.1.0
-        with:
-          status: 'custom'
-          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-          message: |
-            📦 **Pipeline Artifacts Ready**
-            
-            **Available Reports:**
-            - Security scan reports
-            - Test coverage reports  
-            - Container security scans
-            - OWASP ZAP security reports
-            - Load test results
-            - SBOM documents
-            
-            **Retention:** 30 days
-            **Access:** Workflow run ${{ github.run_number }}
+              **Details:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
