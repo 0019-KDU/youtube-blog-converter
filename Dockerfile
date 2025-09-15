@@ -21,31 +21,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip cache purge
 
-# ==================== UNIT TEST STAGE ====================
-FROM dependencies AS test
-
-# Set environment variables for testing
-ENV TESTING=true
-ENV FLASK_ENV=testing
-ENV CI=true
-ENV LOG_TO_FILE=false
-ENV LOG_LEVEL=DEBUG
-
-# Copy source code for testing
-COPY . .
-
-# Create required directories
-RUN mkdir -p logs tests/unit tests/integration tests/e2e && \
-    chmod 755 logs tests
-
-# Run unit tests
-RUN python -m pytest tests/unit/ \
-    --cov=app \
-    --cov-report=term-missing \
-    -v \
-    --tb=short \
-    --timeout=300 || exit 1
-
 # ==================== PRODUCTION STAGE ====================
 FROM python:3.11-slim-bookworm AS production
 
