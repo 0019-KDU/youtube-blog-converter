@@ -120,7 +120,7 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
             }
             
             setTimeout(() => {
-                window.location.href = data.redirect_url || '{{ url_for("dashboard") }}';
+                window.location.href = data.redirect_url || '{{ url_for("blog.dashboard") }}';
             }, 500);
         } else {
             const errorMsg = data.message || 'Login failed';

@@ -1,4 +1,5 @@
-FROM python:3.12-slim-bookworm
+# ==================== BASE STAGE ====================
+FROM python:3.11-slim-bookworm AS base
 
 WORKDIR /app
 
@@ -6,23 +7,40 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python dependencies
+# Upgrade pip for better caching
+RUN pip install --no-cache-dir --upgrade pip
+
+# ==================== DEPENDENCIES STAGE ====================
+FROM base AS dependencies
+
+# Copy and install Python dependencies (optimized caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
+RUN pip install --no-cache-dir -r requirements.txt && \
     pip cache purge
 
+# ==================== PRODUCTION STAGE ====================
+FROM python:3.11-slim-bookworm AS production
+
+WORKDIR /app
+
+# Install only runtime system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python dependencies from dependencies stage
+COPY --from=dependencies /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=dependencies /usr/local/bin /usr/local/bin
+
 # Copy application code
-COPY app.py .
-COPY src/ ./src/
-COPY auth/ ./auth/
+COPY app/ ./app/
 COPY templates/ ./templates/
 COPY static/ ./static/
-
-# Ensure Python can find modules
-RUN touch auth/__init__.py src/__init__.py
+COPY run.py .
 
 # Create directories for logs with proper permissions
 RUN mkdir -p /var/log/flask-app /app/.flask_session /app/logs && \
@@ -42,9 +60,12 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Expose port
 EXPOSE 5000 8000
 
-# Environment variables for logging
+# Environment variables
 ENV LOG_LEVEL=INFO
 ENV LOG_TO_FILE=true
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV FLASK_ENV=production
 
-CMD ["python", "app.py"]
+# Use gunicorn for production
+CMD ["python", "-m", "flask", "run", "--host=0.0.0.0"]

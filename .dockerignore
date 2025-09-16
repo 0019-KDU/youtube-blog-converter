@@ -1,12 +1,19 @@
 # =============================================================================
-# PYTHON PROJECT .GITIGNORE
+# DOCKER IGNORE FILE - YouTube Blog Converter
 # =============================================================================
 
-# Environment Variables (CRITICAL - NEVER COMMIT)
+# Environment Variables (include .env.example, exclude actual .env)
 .env
 .env.local
 .env.*.local
-*.env
+!.env.example
+
+# Git and Version Control
+.git/
+.gitignore
+.github/
+*.md
+!README.md
 
 # Virtual Environments
 venv/
@@ -16,7 +23,7 @@ ENV/
 env.bak/
 venv.bak/
 
-# Python Runtime
+# Python Runtime and Cache
 __pycache__/
 *.py[cod]
 *$py.class
@@ -40,7 +47,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Flask Specific
+# Flask Specific (development files)
 .flask_session/
 instance/
 
@@ -54,15 +61,18 @@ instance/
 *.tmp
 *.temp
 logs/
+*.json.log
 
-# Testing and Coverage
+# Testing and Coverage Files
 .pytest_cache/
 .coverage
-htmlcov/
+htmlcov*/
 .tox/
-coverage.xml
+coverage*.xml
 *.cover
 .hypothesis/
+test-results/
+.mypy_cache/
 
 # IDEs and Editors
 .vscode/
@@ -81,41 +91,93 @@ coverage.xml
 ehthumbs.db
 Thumbs.db
 
-# Docker
+# Docker Files
 Dockerfile.dev
 docker-compose.override.yml
+docker-compose.local.yml
 .dockerignore
 
-# Cache Directories
+# Node.js (if any frontend tools)
 .cache/
 .npm/
 node_modules/
+package-lock.json
+yarn.lock
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
 
-# Development Tools
+# Development Tools and Configuration
 .flake8
 .pre-commit-config.yaml
 requirements-dev.txt
+.bandit
+.pylintrc
+setup.cfg
+tox.ini
+.editorconfig
 
-# Documentation (if you want to exclude them)
-# README.md
-# docs/
+# Documentation Build
+docs/_build/
+site/
+
+# Monitoring and Config (exclude from production builds)
+monitoring/
+prometheus.yml
+grafana/
+
+# Large files and media
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.pdf
+*.zip
+*.tar.gz
+*.rar
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Local development scripts
+scripts/dev*
+scripts/local*
+dev-*
+local-*
 
 # =============================================================================
-# PROJECT SPECIFIC INCLUDES/EXCLUDES
+# STAGE-SPECIFIC EXCLUSIONS
 # =============================================================================
 
-# Include these important files (remove # to activate)
-# !app.py
-# !requirements.txt
-# !src/
-# !templates/
-# !static/
-# !auth/
-
-# Exclude test files (uncomment if you don't want tests in repo)
+# For production builds, exclude test files unless specifically needed
+# Uncomment these lines if you want minimal production images:
 # tests/
 # test_*.py
 # *_test.py
+# conftest.py
+# pytest.ini
+
+# =============================================================================
+# EXPLICIT INCLUDES (what we DO want in Docker builds)
+# =============================================================================
+# These are the files we want in our Docker image:
+# - app/ (application code)
+# - templates/ (Flask templates)
+# - static/ (static assets)
+# - run.py (application entry point)
+# - requirements.txt (dependencies)
+# - gunicorn.conf.py (will be created in Dockerfile)
+# - .env.example (for reference)
+
+# Override exclusions for essential files
+!app/
+!templates/
+!static/
+!run.py
+!requirements.txt
+!.env.example
+!Dockerfile
+!docker-compose.yml
+!Makefile

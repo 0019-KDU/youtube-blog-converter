@@ -139,7 +139,7 @@ document.getElementById('registerForm').addEventListener('submit', async functio
             }
             
             setTimeout(() => {
-                window.location.href = data.redirect_url || '{{ url_for("dashboard") }}';
+                window.location.href = data.redirect_url || '{{ url_for("blog.dashboard") }}';
             }, 500);
         } else {
             const errorMsg = data.message || 'Registration failed';

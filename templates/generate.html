@@ -288,7 +288,7 @@ function handleFormSubmit(e) {
     const token = localStorage.getItem('access_token');
     
     // Submit request
-    fetch('{{ url_for("generate_blog") }}', {
+    fetch('{{ url_for("blog.generate_blog") }}', {
         method: 'POST',
         headers: token ? {
             'Authorization': `Bearer ${token}`
@@ -543,7 +543,7 @@ function downloadCurrentBlog() {
     // Create a form and submit it to trigger download
     const form = document.createElement('form');
     form.method = 'GET';
-    form.action = '{{ url_for("download_pdf") }}';
+    form.action = '{{ url_for("blog.download_pdf") }}';
     form.style.display = 'none';
     document.body.appendChild(form);
     form.submit();
