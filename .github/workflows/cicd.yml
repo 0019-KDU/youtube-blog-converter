@@ -590,7 +590,7 @@ jobs:
       - name: Verify container signature
         if: env.SIGNING_FAILED != 'true'
         run: |
-          cosign verify --yes ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
+          cosign verify ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
         env:
           COSIGN_EXPERIMENTAL: 1
 
