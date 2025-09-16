@@ -1,7 +1,8 @@
-import pytest
-import json
-from unittest.mock import patch, MagicMock
 import io
+import json
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 class TestBlogRoutes:
     

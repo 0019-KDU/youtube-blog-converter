@@ -1,6 +1,7 @@
-import pytest
-from unittest.mock import patch, MagicMock
 import json
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 class TestIntegrationFlows:
     

@@ -1,7 +1,8 @@
-import os
-import pytest
-from unittest.mock import patch, MagicMock, call
 import logging
+import os
+from unittest.mock import MagicMock, call, patch
+
+import pytest
 
 class TestLogging:
     

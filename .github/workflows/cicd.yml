@@ -313,10 +313,10 @@ jobs:
             name: coverage-report
             path: .
 
-        - name: Download bandit report
+        - name: Download security reports
           uses: actions/download-artifact@v4
           with:
-            name: bandit-report
+            name: security-reports
             path: .
 
         - name: SonarQube Scan with Quality Gate
