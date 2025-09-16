@@ -590,7 +590,10 @@ jobs:
       - name: Verify container signature
         if: env.SIGNING_FAILED != 'true'
         run: |
-          cosign verify ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
         env:
           COSIGN_EXPERIMENTAL: 1
 
