@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+
 class TestLogging:
     
     @patch('app.monitoring.logging.LokiHandler')

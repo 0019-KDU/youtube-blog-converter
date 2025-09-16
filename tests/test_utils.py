@@ -2,12 +2,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 class TestValidators:
     
     def test_validate_youtube_url(self):
         """Test YouTube URL validation"""
         from app.utils.validators import validate_youtube_url
-        
+
         # Valid URLs
         assert validate_youtube_url('https://www.youtube.com/watch?v=test') is True
         assert validate_youtube_url('https://youtu.be/test') is True
@@ -22,7 +23,7 @@ class TestValidators:
     def test_extract_video_id(self):
         """Test video ID extraction"""
         from app.utils.validators import extract_video_id
-        
+
         # Valid video IDs
         assert extract_video_id('https://www.youtube.com/watch?v=dQw4w9WgXcQ') == 'dQw4w9WgXcQ'
         assert extract_video_id('https://youtu.be/dQw4w9WgXcQ') == 'dQw4w9WgXcQ'
@@ -58,8 +59,9 @@ class TestRateLimiter:
     
     def test_rate_limiter_cleanup(self, app):
         """Test rate limiter cleans old entries"""
-        from app.utils.rate_limiter import RateLimiter
         import time
+
+        from app.utils.rate_limiter import RateLimiter
         
         with app.test_request_context():
             limiter = RateLimiter(requests_per_minute=1)
@@ -94,7 +96,7 @@ class TestSecurity:
     
     def test_store_and_retrieve_large_data(self, app):
         """Test storing and retrieving large data"""
-        from app.utils.security import store_large_data, retrieve_large_data
+        from app.utils.security import retrieve_large_data, store_large_data
         
         with app.test_request_context():
             data = {'large': 'data', 'content': 'test' * 1000}
@@ -106,8 +108,9 @@ class TestSecurity:
     
     def test_cleanup_old_storage(self, app):
         """Test cleanup of old storage data"""
-        from app.utils.security import store_large_data, cleanup_old_storage
         import time
+
+        from app.utils.security import cleanup_old_storage, store_large_data
         
         with app.test_request_context():
             # Store data

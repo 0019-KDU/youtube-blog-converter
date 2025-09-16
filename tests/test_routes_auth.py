@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 class TestAuthRoutes:
     
     def test_register_get(self, client):

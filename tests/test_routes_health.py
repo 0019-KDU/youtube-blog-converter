@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 class TestHealthRoutes:
     
     @patch('app.routes.health.mongo_manager')

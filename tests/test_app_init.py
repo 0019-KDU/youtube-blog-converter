@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 class TestAppFactory:
     
     def test_create_app(self):

@@ -2,6 +2,7 @@ import os
 
 import pytest
 
+
 class TestConfiguration:
     
     def test_config_loading(self):

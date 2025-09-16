@@ -5,6 +5,7 @@ import pytest
 from bson import ObjectId
 from werkzeug.security import check_password_hash, generate_password_hash
 
+
 class TestMongoDBConnectionManager:
     
     @patch('app.models.user.MongoClient')

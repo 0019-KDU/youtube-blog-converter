@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 class TestIntegrationFlows:
     
     @patch('app.routes.auth.User')

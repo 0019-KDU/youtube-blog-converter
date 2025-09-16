@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 class TestEdgeCases:
     
     @patch('app.models.user.mongo_manager')

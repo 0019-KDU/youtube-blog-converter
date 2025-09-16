@@ -329,7 +329,7 @@ jobs:
             args: >
               -Dsonar.python.coverage.reportPaths=coverage.xml
               -Dsonar.python.version=3.12
-              -Dsonar.sources=src
+              -Dsonar.sources=app
               -Dsonar.tests=tests
               -Dsonar.test.inclusions=tests/**
               -Dsonar.exclusions=**/__pycache__/**,**/.pytest_cache/**,**/env/**

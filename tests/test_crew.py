@@ -2,13 +2,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 class TestCrewComponents:
     
     @patch('app.crew.agents.Agent')
     def test_create_agents(self, mock_agent):
         """Test agent creation"""
         from app.crew.agents import create_agents
-        
+
         # Mock agent instances
         mock_transcriber = MagicMock()
         mock_writer = MagicMock()

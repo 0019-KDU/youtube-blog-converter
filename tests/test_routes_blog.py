@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 class TestBlogRoutes:
     
     def test_index(self, client):
