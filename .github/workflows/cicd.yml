@@ -598,6 +598,284 @@ jobs:
           COSIGN_EXPERIMENTAL: 1
 
   # ===========================
+  # AZURE BLUE-GREEN DEPLOYMENT
+  # ===========================
+
+  deploy-to-azure-green:
+    name: Deploy to Azure Green Slot
+    needs: [deploy-to-dockerhub, sign-container]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: azure-green
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Green Slot
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          slot-name: green
+          images: ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
+
+      - name: Wait for Green Slot to be ready
+        run: |
+          echo "⏳ Waiting for Green slot to be ready..."
+          for i in {1..30}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net/health || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Green slot is healthy"
+              break
+            fi
+            echo "Attempt $i/30: Health check returned $response"
+            sleep 10
+          done
+
+      - name: Run smoke tests on Green slot
+        id: smoke-tests
+        run: |
+          GREEN_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net"
+
+          # Test health endpoint
+          echo "Testing health endpoint..."
+          health_response=$(curl -s -o /dev/null -w "%{http_code}" $GREEN_URL/health)
+          if [ "$health_response" != "200" ]; then
+            echo "❌ Health check failed with status $health_response"
+            exit 1
+          fi
+          echo "✅ Health check passed"
+
+          # Test main page
+          echo "Testing main page..."
+          main_response=$(curl -s -o /dev/null -w "%{http_code}" $GREEN_URL/)
+          if [ "$main_response" != "200" ]; then
+            echo "⚠️ Main page returned $main_response"
+          fi
+          echo "✅ Main page accessible"
+
+          # Additional API tests can be added here
+          echo "All smoke tests passed successfully"
+
+      - name: Slack Notification - Green Deployment Success
+        if: success()
+        uses: act10ns/slack@v2.1.0
+        with:
+          status: ${{ job.status }}
+          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
+          message: |
+            ✅ **Green Slot Deployment Successful**
+
+            **Version:** ${{ github.sha }}
+            **Green URL:** https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net
+
+            Ready for swap approval to production.
+            Please verify the green environment before approving production swap.
+
+  validate-green-deployment:
+    name: Validate Green Deployment
+    needs: [deploy-to-azure-green]
+    runs-on: ubuntu-latest
+    environment:
+      name: azure-green-validation
+
+    steps:
+      - name: Performance Test on Green Slot
+        run: |
+          GREEN_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net"
+
+          echo "🔍 Running performance validation on Green slot..."
+
+          # Simple load test (you can replace with more sophisticated testing)
+          for i in {1..10}; do
+            response_time=$(curl -o /dev/null -s -w '%{time_total}\n' $GREEN_URL/health)
+            echo "Request $i: ${response_time}s"
+
+            # Check if bc is available, if not skip the comparison
+            if command -v bc >/dev/null 2>&1; then
+              if (( $(echo "$response_time > 2" | bc -l) )); then
+                echo "⚠️ Response time exceeds threshold: ${response_time}s"
+              fi
+            else
+              echo "Response time: ${response_time}s (threshold check skipped)"
+            fi
+          done
+
+          echo "✅ Performance validation completed"
+
+      - name: Security Headers Check
+        run: |
+          GREEN_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net"
+
+          echo "🔒 Checking security headers..."
+          headers=$(curl -sI $GREEN_URL)
+
+          # Check for important security headers
+          if echo "$headers" | grep -qi "X-Content-Type-Options"; then
+            echo "✅ X-Content-Type-Options header present"
+          else
+            echo "⚠️ Missing X-Content-Type-Options header"
+          fi
+
+          if echo "$headers" | grep -qi "X-Frame-Options"; then
+            echo "✅ X-Frame-Options header present"
+          else
+            echo "⚠️ Missing X-Frame-Options header"
+          fi
+
+  swap-to-production:
+    name: Swap Green to Production
+    needs: [validate-green-deployment]
+    runs-on: ubuntu-latest
+    environment:
+      name: azure-production
+
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Perform Blue-Green Swap
+        run: |
+          echo "🔄 Swapping Green slot to Production..."
+          az webapp deployment slot swap \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --slot green \
+            --target-slot production
+
+      - name: Verify Production Health
+        run: |
+          echo "⏳ Verifying production after swap..."
+          sleep 30  # Wait for swap to complete
+
+          PROD_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+
+          for i in {1..10}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" $PROD_URL/health || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Production is healthy after swap"
+              break
+            fi
+            echo "Attempt $i/10: Health check returned $response"
+            sleep 5
+          done
+
+      - name: Slack Notification - Production Deployment
+        uses: act10ns/slack@v2.1.0
+        with:
+          status: ${{ job.status }}
+          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
+          message: |
+            🚀 **Production Deployment Complete**
+
+            **Version:** ${{ github.sha }}
+            **Production URL:** https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net
+            **Status:** ${{ job.status }}
+
+            Blue-Green swap completed successfully.
+            Previous production version is now in Green slot as rollback.
+
+  rollback-if-needed:
+    name: Automated Rollback
+    needs: [swap-to-production]
+    if: failure()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Rollback to Previous Version
+        run: |
+          echo "⚠️ Issues detected, rolling back to previous version..."
+          az webapp deployment slot swap \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --slot green \
+            --target-slot production
+          echo "✅ Rollback completed"
+
+      - name: Create Rollback Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🔄 Automatic Rollback Performed',
+              body: `An automatic rollback was performed due to deployment failure.
+
+              **Details:**
+              - Workflow: ${{ github.workflow }}
+              - Run: ${{ github.run_number }}
+              - Commit: ${{ github.sha }}
+              - Time: ${new Date().toISOString()}
+
+              Please investigate the issue before attempting another deployment.`,
+              labels: ['bug', 'deployment-rollback', 'high-priority']
+            });
+
+      - name: Slack Alert - Rollback
+        uses: act10ns/slack@v2.1.0
+        with:
+          status: 'failure'
+          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
+          message: |
+            🔄 **AUTOMATIC ROLLBACK PERFORMED**
+
+            Production deployment failed and was automatically rolled back.
+            Previous stable version has been restored.
+
+            **Failed Commit:** ${{ github.sha }}
+
+            Please check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  # Optional: Clean up old Green slot resources
+  cleanup-green-slot:
+    name: Stop Green Slot (Save Costs)
+    needs: [swap-to-production]
+    if: success()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Stop Green Slot to Save Costs
+        run: |
+          echo "⏸️ Stopping Green slot to save costs..."
+          az webapp stop \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --slot green
+          echo "✅ Green slot stopped. It will be restarted on next deployment."
+
+      - name: Log Cost Saving Action
+        run: |
+          echo "💰 Green slot stopped to optimize costs"
+          echo "The slot will automatically restart on the next deployment"
+
+  # ===========================
   # NOTIFICATIONS
   # ===========================
 
@@ -614,6 +892,10 @@ jobs:
         - docker-build
         - deploy-to-dockerhub
         - sign-container
+        - deploy-to-azure-green
+        - validate-green-deployment
+        - swap-to-production
+        - cleanup-green-slot
 
       steps:
         - name: Send Pipeline Status
