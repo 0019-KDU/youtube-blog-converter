@@ -282,8 +282,7 @@ def individual_components_test(youtube_url: str, language: str = "en") -> str:
             return _create_error_response(youtube_url, blog_result)
 
         logger.info(
-            f"✅ Blog generation successful: {
-                len(blog_result)} characters")
+            f"✅ Blog generation successful: {len(blog_result)} characters")
         return blog_result
 
     except Exception as e:

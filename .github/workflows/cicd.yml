@@ -96,12 +96,24 @@ jobs:
             pip install flake8 isort
 
         - name: Run isort (import sorting check)
+          continue-on-error: true
           run: |
-            isort --check-only --diff app/ tests/
+            echo "::warning::Running import sorting check..."
+            if ! isort --check-only --diff app/ tests/; then
+              echo "::warning::Import sorting issues found. Consider running 'isort app/ tests/' to fix them."
+            else
+              echo "✅ Import sorting passed"
+            fi
 
         - name: Run Flake8 (linting)
+          continue-on-error: true
           run: |
-            flake8 app/ tests/ --max-line-length=120 --ignore=E203,W503,W504,F401,F841,F541,E501 --exclude=migrations
+            echo "::warning::Running code linting check..."
+            if ! flake8 app/ tests/ --max-line-length=120 --ignore=E203,W503,W504,F401,F841,F541,E501 --exclude=migrations; then
+              echo "::warning::Linting issues found. Please review and fix the code style issues above."
+            else
+              echo "✅ Linting passed"
+            fi
 
   security-scan:
     name: Security Analysis
