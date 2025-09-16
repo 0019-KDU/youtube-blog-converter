@@ -289,8 +289,7 @@ def individual_components_test(youtube_url: str, language: str = "en") -> str:
         logger.error(f"❌ Component test failed: {str(e)}")
         return _create_error_response(
             youtube_url,
-            f"Component test failed: {
-                str(e)}")
+            f"Component test failed: {str(e)}")
 
 
 def _extract_video_id(url: str) -> str:
