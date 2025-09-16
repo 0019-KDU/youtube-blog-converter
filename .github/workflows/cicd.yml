@@ -579,7 +579,7 @@ jobs:
         run: |
           echo "📄 Attaching SBOM to signed container..."
           if [ -f ./sbom/sbom.json ]; then
-            cosign attest --predicate ./sbom/sbom.json ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
+            cosign attest --yes --predicate ./sbom/sbom.json ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
             echo "SBOM attached successfully"
           else
             echo "⚠️ SBOM file not found, skipping attestation"
@@ -590,7 +590,7 @@ jobs:
       - name: Verify container signature
         if: env.SIGNING_FAILED != 'true'
         run: |
-          cosign verify ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
+          cosign verify --yes ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
         env:
           COSIGN_EXPERIMENTAL: 1
 
