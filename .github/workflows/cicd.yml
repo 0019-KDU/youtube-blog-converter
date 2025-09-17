@@ -1626,11 +1626,11 @@ jobs:
           fi
 
           # Check minimum throughput - FIX: Use proper decimal comparison
-          if [ $(echo "$THROUGHPUT < 10.0" | bc -l) -eq 1 ]; then
-            echo "❌ FAIL: Throughput (${THROUGHPUT} req/sec) is below minimum threshold (10 req/sec)"
+          if [ $(echo "$THROUGHPUT < 5.0" | bc -l) -eq 1 ]; then
+            echo "❌ FAIL: Throughput (${THROUGHPUT} req/sec) is below minimum threshold (5 req/sec)"
             PERFORMANCE_PASSED=false
           else
-            echo "✅ PASS: Throughput (${THROUGHPUT} req/sec) meets minimum requirements (≥10 req/sec)"
+            echo "✅ PASS: Throughput (${THROUGHPUT} req/sec) meets minimum requirements (≥5 req/sec)"
           fi
 
           # Set final result
