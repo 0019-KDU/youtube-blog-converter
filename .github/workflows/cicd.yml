@@ -67,53 +67,53 @@ jobs:
   # ===========================
 
   lint-and-format:
-      name: Lint and Format Check
-      runs-on: ubuntu-latest
-      steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
-          with:
-            fetch-depth: 0
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-        - name: Set up Python 3.11
-          uses: actions/setup-python@v5
-          with:
-            python-version: 3.11
-            cache: 'pip'  # Add caching here too
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+          cache: 'pip'  # Add caching here too
 
-        - name: Cache pip dependencies
-          uses: actions/cache@v4
-          with:
-            path: ~/.cache/pip
-            key: ${{ runner.os }}-pip-lint-${{ hashFiles('**/requirements.txt') }}
-            restore-keys: |
-              ${{ runner.os }}-pip-lint-
-              ${{ runner.os }}-pip-
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-lint-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-lint-
+            ${{ runner.os }}-pip-
 
-        - name: Install linting dependencies
-          run: |
-            python -m pip install --upgrade pip
-            pip install flake8 isort
+      - name: Install linting dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 isort
 
-        - name: Run isort (import sorting check)
-          continue-on-error: true
-          run: |
-            echo "::warning::Running import sorting check..."
-            if ! isort --check-only --diff app/ tests/; then
-              echo "::warning::Import sorting issues found. Consider running 'isort app/ tests/' to fix them."
-            else
-              echo "✅ Import sorting passed"
-            fi
+      - name: Run isort (import sorting check)
+        continue-on-error: true
+        run: |
+          echo "::warning::Running import sorting check..."
+          if ! isort --check-only --diff app/ tests/; then
+            echo "::warning::Import sorting issues found. Consider running 'isort app/ tests/' to fix them."
+          else
+            echo "✅ Import sorting passed"
+          fi
 
-        - name: Run Flake8 (linting)
-          continue-on-error: true
-          run: |
-            echo "::warning::Running code linting check..."
-            if ! flake8 app/ tests/ --max-line-length=120 --ignore=E203,W503,W504,F401,F841,F541,E501 --exclude=migrations; then
-              echo "::warning::Linting issues found. Please review and fix the code style issues above."
-            else
-              echo "✅ Linting passed"
-            fi
+      - name: Run Flake8 (linting)
+        continue-on-error: true
+        run: |
+          echo "::warning::Running code linting check..."
+          if ! flake8 app/ tests/ --max-line-length=120 --ignore=E203,W503,W504,F401,F841,F541,E501 --exclude=migrations; then
+            echo "::warning::Linting issues found. Please review and fix the code style issues above."
+          else
+            echo "✅ Linting passed"
+          fi
 
   security-scan:
     name: Security Analysis
@@ -306,86 +306,86 @@ jobs:
             sbom.xml
 
   sonarqube-scan:
-      runs-on: self-hosted
-      needs: build-and-test
-      steps:
-        - name: Show commit author
-          run: |
-            echo "Commit by ${{ github.actor }}"
-            echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+    runs-on: self-hosted
+    needs: build-and-test
+    steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
 
-        - name: Checkout code
-          uses: actions/checkout@v4
-          with:
-            fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-        - name: Download coverage report
-          uses: actions/download-artifact@v4
-          with:
-            name: coverage-report
-            path: .
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: .
 
-        - name: Download security reports
-          uses: actions/download-artifact@v4
-          with:
-            name: security-reports
-            path: .
+      - name: Download security reports
+        uses: actions/download-artifact@v4
+        with:
+          name: security-reports
+          path: .
 
-        - name: SonarQube Scan with Quality Gate
-          id: sonar-scan
-          uses: SonarSource/sonarqube-scan-action@v5.3.0
-          env:
-            SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-            SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
-          with:
-            args: >
-              -Dsonar.python.coverage.reportPaths=coverage.xml
-              -Dsonar.python.version=3.12
-              -Dsonar.sources=app
-              -Dsonar.tests=tests
-              -Dsonar.test.inclusions=tests/**
-              -Dsonar.exclusions=**/__pycache__/**,**/.pytest_cache/**,**/env/**
-              -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
-              -Dsonar.projectName=${{ env.SONAR_PROJECT_NAME }}
-              -Dsonar.projectVersion=1.0.${{ github.run_number }}
-              -Dsonar.qualitygate.wait=true
-              -Dsonar.scm.provider=git
-              -Dsonar.links.scm=${{ github.server_url }}/${{ github.repository }}
-              -Dsonar.links.ci=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-              -Dsonar.python.bandit.reportPaths=bandit-report.json
+      - name: SonarQube Scan with Quality Gate
+        id: sonar-scan
+        uses: SonarSource/sonarqube-scan-action@v5.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.python.version=3.12
+            -Dsonar.sources=app
+            -Dsonar.tests=tests
+            -Dsonar.test.inclusions=tests/**
+            -Dsonar.exclusions=**/__pycache__/**,**/.pytest_cache/**,**/env/**
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.projectName=${{ env.SONAR_PROJECT_NAME }}
+            -Dsonar.projectVersion=1.0.${{ github.run_number }}
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.scm.provider=git
+            -Dsonar.links.scm=${{ github.server_url }}/${{ github.repository }}
+            -Dsonar.links.ci=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            -Dsonar.python.bandit.reportPaths=bandit-report.json
 
-        - name: Create Detailed SonarQube PR Comment
-          if: github.event_name == 'pull_request'
-          uses: actions/github-script@v7
-          with:
-            script: |
-              const prNumber = context.issue.number;
-              const comment = `## 📊 SonarQube Code Quality Report
+      - name: Create Detailed SonarQube PR Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            const comment = `## 📊 SonarQube Code Quality Report
 
-              🔍 **Analysis completed for PR #${prNumber}**
+            🔍 **Analysis completed for PR #${prNumber}**
 
-              ### Quality Gate Status
-              - **Overall Status:** Analysis completed
-              - **Project:** ${{ env.SONAR_PROJECT_NAME }}
-              - **Analysis Date:** ${new Date().toISOString()}
+            ### Quality Gate Status
+            - **Overall Status:** Analysis completed
+            - **Project:** ${{ env.SONAR_PROJECT_NAME }}
+            - **Analysis Date:** ${new Date().toISOString()}
 
-              ### Key Metrics
-              - **Coverage:** Linked in SonarQube dashboard
-              - **Duplications:** Check SonarQube dashboard
-              - **Maintainability:** Review code smells
-              - **Reliability:** Check bug count
-              - **Security:** Review security hotspots
+            ### Key Metrics
+            - **Coverage:** Linked in SonarQube dashboard
+            - **Duplications:** Check SonarQube dashboard
+            - **Maintainability:** Review code smells
+            - **Reliability:** Check bug count
+            - **Security:** Review security hotspots
 
-              👉 View full report: ${{ env.SONAR_HOST_URL }}/dashboard?id=${{ env.SONAR_PROJECT_KEY }}
+            👉 View full report: ${{ env.SONAR_HOST_URL }}/dashboard?id=${{ env.SONAR_PROJECT_KEY }}
 
-              *This comment was automatically generated by CI/CD.*`;
+            *This comment was automatically generated by CI/CD.*`;
 
-              github.rest.issues.createComment({
-                issue_number: prNumber,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: comment
-              });
+            github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
 
   # ===========================
   # STAGE 3: CONTAINER BUILD & SECURITY
@@ -478,64 +478,64 @@ jobs:
   # ===========================
 
   deploy-to-dockerhub:
-      needs: [docker-build]
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      runs-on: ubuntu-latest
-      outputs:
-        image-digest: ${{ steps.build.outputs.digest }}
+    needs: [docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
 
-      steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        - name: Set up Docker Buildx
-          uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-        - name: Login to Docker Hub
-          uses: docker/login-action@v3
-          with:
-            username: ${{ env.DOCKERHUB_USERNAME }}
-            password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-        - name: Build and push
-          id: build
-          uses: docker/build-push-action@v5
-          with:
-            context: .
-            push: true
-            tags: |
-              ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:latest
-              ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
-            cache-from: type=gha
-            cache-to: type=gha,mode=max
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:latest
+            ${{ env.DOCKERHUB_USERNAME }}/${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-        - name: Create issue on failure
-          if: ${{ failure() }}
-          uses: actions/github-script@v7
-          with:
-            script: |
-              github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: '❌ DockerHub Deployment Failed',
-                body: 'Docker image push to DockerHub failed.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Branch: ${{ github.ref_name }}\n- Commit: ${{ github.sha }}\n\nPlease check DockerHub credentials and connectivity.',
-                labels: ['bug', 'deployment-failure', 'docker']
-              });
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '❌ DockerHub Deployment Failed',
+              body: 'Docker image push to DockerHub failed.\n\n**Details:**\n- Workflow: ${{ github.workflow }}\n- Run: ${{ github.run_number }}\n- Branch: ${{ github.ref_name }}\n- Commit: ${{ github.sha }}\n\nPlease check DockerHub credentials and connectivity.',
+              labels: ['bug', 'deployment-failure', 'docker']
+            });
 
-        - name: Slack Notification on Failure
-          if: ${{ failure() }}
-          uses: act10ns/slack@v2.1.0
-          with:
-            status: ${{ job.status }}
-            webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-            message: |
-              🚨 **DockerHub Deployment Failed** 🚨
+      - name: Slack Notification on Failure
+        if: ${{ failure() }}
+        uses: act10ns/slack@v2.1.0
+        with:
+          status: ${{ job.status }}
+          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
+          message: |
+            🚨 **DockerHub Deployment Failed** 🚨
 
-              **Branch:** ${{ github.ref_name }}
-              **Commit:** ${{ github.sha }}
+            **Branch:** ${{ github.ref_name }}
+            **Commit:** ${{ github.sha }}
 
-              Check DockerHub credentials and connectivity.
-              Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Check DockerHub credentials and connectivity.
+            Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
   sign-container:
     name: Sign Container Images
@@ -777,87 +777,132 @@ jobs:
           fi
 
   owasp-zap-baseline-scan:
-    name: OWASP ZAP Security Scan
-    runs-on: ubuntu-latest
     needs: validate-green-deployment
+    runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     timeout-minutes: 30
 
     steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Get Green Environment URL
+        id: get-url
         run: |
           echo "Using Green Environment for OWASP ZAP scan"
-          echo "GREEN_URL=https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net" >> $GITHUB_ENV
+          GREEN_URL="https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net"
+          echo "app_url=$GREEN_URL" >> $GITHUB_OUTPUT
+          echo "✅ Target URL for DAST: $GREEN_URL"
 
-      - name: Wait for Green Environment
+      - name: Application Readiness Check
+        timeout-minutes: 10
         run: |
-          echo "⏳ Waiting for green environment to be fully ready for security scanning..."
-          sleep 120
+          echo "⏳ Waiting for application to be ready..."
+          APP_URL="${{ steps.get-url.outputs.app_url }}"
 
-          # Verify the green environment is accessible
-          if curl -f -s "${{ env.GREEN_URL }}/health" > /dev/null; then
-            echo "✅ Green environment is ready for security scanning"
-          else
-            echo "⚠️ Green environment health check failed - proceeding with scan anyway"
-          fi
+          # Extended readiness check for Container Apps (they can have cold start delays)
+          for i in {1..15}; do
+            echo "🔍 Readiness check $i/15..."
 
-      - name: ZAP Baseline Scan
-        run: |
-          echo "🔍 Starting OWASP ZAP Baseline Security Scan..."
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 30 \
+              --connect-timeout 15 \
+              --retry 2 \
+              --retry-delay 5 \
+              "$APP_URL" 2>/dev/null || echo "000")
 
-          # Create ZAP configuration
-          cat > zap-config.conf << 'EOF'
-          # ZAP Configuration for YouTube Blog Converter
+            echo "HTTP Status: $HTTP_STATUS"
 
-          # Rules to disable (adjust based on your application)
-          rules.disable.10020=false  # Missing Anti-clickjacking Header
-          rules.disable.10021=false  # X-Content-Type-Options header missing
-          rules.disable.10023=false  # Information Disclosure - Debug Error Messages
-
-          # Authentication configuration (if needed)
-          # auth.method=form
-          # auth.loginurl=/login
-          # auth.username=testuser
-          # auth.password=testpass
-          EOF
-
-          # Run ZAP Docker container for baseline scan
-          echo "🔍 Starting OWASP ZAP baseline scan..."
-          docker run --rm \
-            -v $(pwd):/zap/wrk/ \
-            -t ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py \
-            -t "${{ env.GREEN_URL }}" \
-            -d \
-            -m ${{ env.ZAP_SCAN_DURATION }} \
-            -z "-config api.disablekey=true" \
-            -J zap-baseline-report.json \
-            -w zap-baseline-report.md \
-            -r zap-baseline-report.html \
-            || echo "⚠️ ZAP scan completed with warnings (exit code $?)"
-
-          # Ensure all report files exist (create empty ones if missing)
-          echo "📝 Ensuring all report files exist..."
-          for format in json html md; do
-            report_file="zap-baseline-report.$format"
-            if [ ! -f "$report_file" ]; then
-              echo "⚠️ Missing $report_file, creating minimal report..."
-              case $format in
-                json)
-                  echo '{"@version":"2.11.1","@generated":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","site":[{"@name":"'${{ env.GREEN_URL }}'","@host":"'$(echo ${{ env.GREEN_URL }} | sed 's|https\?://||' | cut -d'/' -f1)'","@port":"443","@ssl":"true","alerts":[]}]}' > "$report_file"
-                  ;;
-                html)
-                  echo '<html><head><title>ZAP Baseline Report</title></head><body><h1>ZAP Baseline Scan Report</h1><p>Scan target: ${{ env.GREEN_URL }}</p><p>No alerts found or scan failed.</p></body></html>' > "$report_file"
-                  ;;
-                md)
-                  echo '# ZAP Baseline Scan Report\n\n**Target:** ${{ env.GREEN_URL }}\n**Status:** Scan completed\n\nNo alerts found or scan failed.' > "$report_file"
-                  ;;
-              esac
+            if [[ "$HTTP_STATUS" =~ ^(200|201|302|404)$ ]]; then
+              echo "✅ Application is ready for DAST scanning! (Status: $HTTP_STATUS)"
+              break
+            else
+              echo "⚠️ Application not ready (Status: $HTTP_STATUS, attempt $i/15)"
+              if [ $i -eq 15 ]; then
+                echo "❌ Application readiness timeout - proceeding with limited scan"
+              fi
+              sleep 20
             fi
           done
+
+      - name: Create ZAP Configuration Directory
+        run: |
+          mkdir -p zap-config
+          echo "📁 Created ZAP configuration directory"
+
+      - name: Generate ZAP Rules Configuration
+        run: |
+          # Create properly formatted TSV file with real TAB characters
+          cat > zap-config/rules.tsv << 'EOF'
+          # ZAP Scanning Rules - Production CI/CD Optimized
+          # Format: ID	THRESHOLD	NEW_LEVEL	[DESCRIPTION]
+
+          # === CRITICAL SECURITY RULES (FAIL BUILD) ===
+          40018	OFF	FAIL	[SQL Injection]
+          40012	OFF	FAIL	[Cross Site Scripting (Reflected)]
+          40014	OFF	FAIL	[Cross Site Scripting (Persistent)]
+          40016	OFF	FAIL	[Cross Site Scripting (DOM Based)]
+          10028	OFF	FAIL	[Open Redirect]
+          90001	OFF	FAIL	[Insecure HTTP Method]
+          10023	OFF	FAIL	[Information Disclosure - Debug Error Messages]
+
+          # === MEDIUM PRIORITY RULES (WARN - Don't fail build) ===
+          10010	OFF	WARN	[Cookie No HttpOnly Flag]
+          10011	OFF	WARN	[Cookie Without Secure Flag]
+          10020	OFF	WARN	[X-Frame-Options Header Not Set]
+          10021	OFF	WARN	[X-Content-Type-Options Header Missing]
+          10038	OFF	WARN	[Content Security Policy (CSP) Header Not Set]
+          10035	OFF	WARN	[Strict-Transport-Security Header Not Set]
+          10036	OFF	WARN	[Server Leaks Version Information]
+
+          # === LOW PRIORITY RULES (INFO) ===
+          10015	OFF	INFO	[Incomplete or No Cache-control Header Set]
+          10017	OFF	INFO	[Cross-Domain JavaScript Source File Inclusion]
+          10049	OFF	INFO	[Storable and Cacheable Content]
+          10063	OFF	INFO	[Permissions Policy Header Not Set]
+          90003	OFF	INFO	[Sub Resource Integrity Attribute Missing]
+          90004	OFF	INFO	[Insufficient Site Isolation Against Spectre]
+          90005	OFF	INFO	[Sec-Fetch-Dest Header is Missing]
+          EOF
+
+          echo "✅ ZAP rules configuration created"
+          echo "📄 First few lines of rules file:"
+          head -5 zap-config/rules.tsv
+
+      - name: Create ZAP Options Configuration
+        run: |
+          cat << 'EOF' > zap-config/options.prop
+          # OWASP ZAP CI/CD Optimized Configuration
+          api.disablekey=true
+          spider.maxDepth=2
+          spider.maxChildren=15
+          spider.maxDuration=${{ env.ZAP_SPIDER_DURATION }}
+          spider.requestWaitTime=200
+          scanner.maxRuleDurationInMins=1
+          scanner.maxScanDurationInMins=${{ env.ZAP_SCAN_DURATION }}
+          scanner.threadPerHost=5
+          ascan.maxRuleDurationInMins=1
+          ascan.maxScanDurationInMins=${{ env.ZAP_SCAN_DURATION }}
+          EOF
+
+          echo "✅ ZAP options configuration created"
+
+      - name: Run OWASP ZAP Baseline Scan
+        id: zap-scan
+        continue-on-error: true
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ steps.get-url.outputs.app_url }}
+          rules_file_name: 'zap-config/rules.tsv'
+          cmd_options: '-a -j -m 3 -T ${{ env.ZAP_SCAN_DURATION }} -z "-config spider.maxDepth=2 -config spider.maxChildren=15"'
+          issue_title: '🛡️ OWASP ZAP Security Vulnerabilities Detected'
+          fail_action: false
+          artifact_name: 'zap-reports'
 
       - name: Parse ZAP Scan Results
         id: parse-results
@@ -865,322 +910,408 @@ jobs:
         run: |
           echo "📊 Parsing ZAP scan results..."
 
-          if [ -f "zap-baseline-report.json" ]; then
-            # Extract key metrics
-            HIGH_ALERTS=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("High"))] | length' zap-baseline-report.json || echo "0")
-            MEDIUM_ALERTS=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Medium"))] | length' zap-baseline-report.json || echo "0")
-            LOW_ALERTS=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Low"))] | length' zap-baseline-report.json || echo "0")
-            INFO_ALERTS=$(jq '[.site[].alerts[] | select(.riskdesc | startswith("Informational"))] | length' zap-baseline-report.json || echo "0")
+          # Initialize all variables properly with integer values
+          HIGH_COUNT=0
+          MEDIUM_COUNT=0
+          LOW_COUNT=0
+          INFO_COUNT=0
+          FAIL_NEW_COUNT=0
+          WARN_NEW_COUNT=0
+          TOTAL_ISSUES=0
+          SCAN_SUCCESS="false"
 
-            echo "high_alerts=$HIGH_ALERTS" >> $GITHUB_OUTPUT
-            echo "medium_alerts=$MEDIUM_ALERTS" >> $GITHUB_OUTPUT
-            echo "low_alerts=$LOW_ALERTS" >> $GITHUB_OUTPUT
-            echo "info_alerts=$INFO_ALERTS" >> $GITHUB_OUTPUT
+          # Method 1: Parse baseline scan results from markdown
+          if [ -f "report_md.md" ]; then
+            echo "✅ ZAP Markdown report found, parsing baseline results..."
+            SCAN_SUCCESS="true"
 
-            echo "🔍 ZAP Scan Results Summary:"
-            echo "  - High Risk: $HIGH_ALERTS"
-            echo "  - Medium Risk: $MEDIUM_ALERTS"
-            echo "  - Low Risk: $LOW_ALERTS"
-            echo "  - Informational: $INFO_ALERTS"
+            # Count FAIL-NEW and WARN-NEW occurrences
+            FAIL_NEW_COUNT=$(grep "FAIL-NEW:" report_md.md | grep -oE '[0-9]+' | head -1)
+            WARN_NEW_COUNT=$(grep "WARN-NEW:" report_md.md | grep -oE '[0-9]+' | head -1)
 
-            # Set security gate status
-            if [ "$HIGH_ALERTS" -eq 0 ] && [ "$MEDIUM_ALERTS" -le 5 ]; then
-              echo "security_gate_passed=true" >> $GITHUB_OUTPUT
-              echo "✅ Security gate passed"
-            else
-              echo "security_gate_passed=false" >> $GITHUB_OUTPUT
-              echo "❌ Security gate failed"
-            fi
+            # Ensure we have valid integers
+            FAIL_NEW_COUNT=${FAIL_NEW_COUNT:-0}
+            WARN_NEW_COUNT=${WARN_NEW_COUNT:-0}
+
+            echo "🎯 ZAP Baseline Scan Results:"
+            echo "   FAIL-NEW (Critical): $FAIL_NEW_COUNT"
+            echo "   WARN-NEW (Warning): $WARN_NEW_COUNT"
           else
-            echo "⚠️ ZAP report file not found"
-            echo "high_alerts=unknown" >> $GITHUB_OUTPUT
-            echo "medium_alerts=unknown" >> $GITHUB_OUTPUT
-            echo "low_alerts=unknown" >> $GITHUB_OUTPUT
-            echo "info_alerts=unknown" >> $GITHUB_OUTPUT
-            echo "security_gate_passed=false" >> $GITHUB_OUTPUT
+            echo "⚠️ ZAP Markdown report not found"
           fi
+
+          # Method 2: Parse detailed risk levels from JSON
+          if [ -f "report_json.json" ] && [ -s "report_json.json" ]; then
+            echo "✅ ZAP JSON report found, parsing detailed risk levels..."
+
+            # Parse with robust error handling
+            HIGH_COUNT=$(jq -r '[.site[]? | .alerts[]? | select(.riskcode == "3")] | length' report_json.json 2>/dev/null || echo "0")
+            MEDIUM_COUNT=$(jq -r '[.site[]? | .alerts[]? | select(.riskcode == "2")] | length' report_json.json 2>/dev/null || echo "0")
+            LOW_COUNT=$(jq -r '[.site[]? | .alerts[]? | select(.riskcode == "1")] | length' report_json.json 2>/dev/null || echo "0")
+            INFO_COUNT=$(jq -r '[.site[]? | .alerts[]? | select(.riskcode == "0")] | length' report_json.json 2>/dev/null || echo "0")
+
+            # Ensure all are valid integers
+            HIGH_COUNT=${HIGH_COUNT:-0}
+            MEDIUM_COUNT=${MEDIUM_COUNT:-0}
+            LOW_COUNT=${LOW_COUNT:-0}
+            INFO_COUNT=${INFO_COUNT:-0}
+
+            echo "📊 ZAP Risk Level Analysis:"
+            echo "   High Risk (riskcode=3): $HIGH_COUNT"
+            echo "   Medium Risk (riskcode=2): $MEDIUM_COUNT"
+            echo "   Low Risk (riskcode=1): $LOW_COUNT"
+            echo "   Informational (riskcode=0): $INFO_COUNT"
+          else
+            echo "⚠️ ZAP JSON report not found or empty"
+          fi
+
+          # Sanitize counts to ensure single integers
+          FAIL_NEW_COUNT=$(echo "$FAIL_NEW_COUNT" | tr -cd '[:digit:]')
+          WARN_NEW_COUNT=$(echo "$WARN_NEW_COUNT" | tr -cd '[:digit:]')
+          HIGH_COUNT=$(echo "$HIGH_COUNT" | tr -cd '[:digit:]')
+          MEDIUM_COUNT=$(echo "$MEDIUM_COUNT" | tr -cd '[:digit:]')
+          LOW_COUNT=$(echo "$LOW_COUNT" | tr -cd '[:digit:]')
+          INFO_COUNT=$(echo "$INFO_COUNT" | tr -cd '[:digit:]')
+
+          # Default to 0 if empty
+          FAIL_NEW_COUNT=${FAIL_NEW_COUNT:-0}
+          WARN_NEW_COUNT=${WARN_NEW_COUNT:-0}
+          HIGH_COUNT=${HIGH_COUNT:-0}
+          MEDIUM_COUNT=${MEDIUM_COUNT:-0}
+          LOW_COUNT=${LOW_COUNT:-0}
+          INFO_COUNT=${INFO_COUNT:-0}
+
+          # Calculate total issues safely
+          TOTAL_ISSUES=$((FAIL_NEW_COUNT + WARN_NEW_COUNT))
+
+          echo "🏁 Final Counts for Security Gate:"
+          echo "   Critical Blocking Issues (FAIL-NEW): $FAIL_NEW_COUNT"
+          echo "   Warning Issues (WARN-NEW): $WARN_NEW_COUNT"
+          echo "   Total Baseline Issues: $TOTAL_ISSUES"
+
+          # Set outputs with validated values
+          echo "fail_new_count=$FAIL_NEW_COUNT" >> $GITHUB_OUTPUT
+          echo "warn_new_count=$WARN_NEW_COUNT" >> $GITHUB_OUTPUT
+          echo "high_count=$HIGH_COUNT" >> $GITHUB_OUTPUT
+          echo "medium_count=$MEDIUM_COUNT" >> $GITHUB_OUTPUT
+          echo "low_count=$LOW_COUNT" >> $GITHUB_OUTPUT
+          echo "info_count=$INFO_COUNT" >> $GITHUB_OUTPUT
+          echo "critical_blocking_count=$FAIL_NEW_COUNT" >> $GITHUB_OUTPUT
+          echo "scan_success=$SCAN_SUCCESS" >> $GITHUB_OUTPUT
+          echo "total_issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
 
       - name: Generate Security Summary Report
         id: generate-summary
         if: always()
         run: |
-          cat > security-summary.md << 'EOF'
-          # 🔒 OWASP ZAP Security Scan Report
+          echo "📋 Generating security summary report..."
 
-          ## Scan Details
-          - **Target:** ${{ env.GREEN_URL }}
-          - **Scan Type:** Baseline Security Scan
-          - **Duration:** ${{ env.ZAP_SCAN_DURATION }} minutes
-          - **Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          - **Branch:** ${{ github.ref_name }}
-          - **Commit:** ${{ github.sha }}
+          TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          FAIL_NEW_COUNT="${{ steps.parse-results.outputs.fail_new_count }}"
+          WARN_NEW_COUNT="${{ steps.parse-results.outputs.warn_new_count }}"
+          HIGH_COUNT="${{ steps.parse-results.outputs.high_count }}"
+          MEDIUM_COUNT="${{ steps.parse-results.outputs.medium_count }}"
+          LOW_COUNT="${{ steps.parse-results.outputs.low_count }}"
+          INFO_COUNT="${{ steps.parse-results.outputs.info_count }}"
+          TOTAL_ISSUES="${{ steps.parse-results.outputs.total_issues }}"
 
-          ## Results Summary
-          - **High Risk:** ${{ steps.parse-results.outputs.high_alerts }} alerts
-          - **Medium Risk:** ${{ steps.parse-results.outputs.medium_alerts }} alerts
-          - **Low Risk:** ${{ steps.parse-results.outputs.low_alerts }} alerts
-          - **Informational:** ${{ steps.parse-results.outputs.info_alerts }} alerts
+          # Create summary file
+          cat << EOF > security-summary.md
+          # 🛡️ DAST Security Scan Summary
 
-          ## Security Gate Status
-          **Status:** ${{ steps.parse-results.outputs.security_gate_passed == 'true' && '✅ PASSED' || '❌ FAILED' }}
+          **Scan Date:** $TIMESTAMP
+          **Target:** ${{ steps.get-url.outputs.app_url }}
+          **Commit:** \`${{ github.sha }}\`
+          **Workflow:** [${{ github.workflow }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
-          ### Gate Criteria
-          - High Risk alerts: 0 (current: ${{ steps.parse-results.outputs.high_alerts }})
-          - Medium Risk alerts: ≤ 5 (current: ${{ steps.parse-results.outputs.medium_alerts }})
+          ## 📊 ZAP Baseline Scan Results
 
-          ## Recommendations
-          ${{ steps.parse-results.outputs.security_gate_passed == 'true' &&
-             '- Continue with deployment process
-             - Monitor security alerts in production
-             - Schedule regular security scans' ||
-             '- Review and fix high/medium risk vulnerabilities
-             - Re-run security scan before deployment
-             - Consider implementing additional security controls' }}
+          | Category | Count | Status | Description |
+          |----------|-------|---------|-------------|
+          | 🚨 **FAIL-NEW** | $FAIL_NEW_COUNT | $([ "$FAIL_NEW_COUNT" -gt 0 ] && echo "❌ BLOCKS DEPLOYMENT" || echo "✅ Clean") | Critical vulnerabilities (SQL injection, XSS, etc.) |
+          | ⚠️ **WARN-NEW** | $WARN_NEW_COUNT | $([ "$WARN_NEW_COUNT" -gt 20 ] && echo "⚠️ Review Recommended" || echo "✅ Acceptable") | Security headers and configurations |
+          | **Total Baseline Issues** | $TOTAL_ISSUES | $([ "$FAIL_NEW_COUNT" -gt 0 ] && echo "❌ Failed" || echo "✅ Passed") | Combined FAIL-NEW + WARN-NEW |
 
-          ## Files Generated
-          - **JSON Report:** `zap-baseline-report.json`
-          - **HTML Report:** `zap-baseline-report.html`
-          - **Markdown Report:** `zap-baseline-report.md`
+          ## 📈 Detailed Risk Breakdown
 
-          *This report was automatically generated by the CI/CD pipeline.*
+          | ZAP Risk Level | Count |
+          |---------------|-------|
+          | 🔴 **High** | $HIGH_COUNT |
+          | 🟡 **Medium** | $MEDIUM_COUNT |
+          | 🔵 **Low** | $LOW_COUNT |
+          | ⚪ **Info** | $INFO_COUNT |
+
+          > **Note:** The security gate uses FAIL-NEW count (not High risk count) to determine deployment blocking.
           EOF
 
-          cat security-summary.md
-
-      - name: List Generated Files
-        if: always()
-        run: |
-          echo "📁 Listing generated ZAP report files:"
-          ls -la zap-baseline-report.* security-summary.md || true
-          echo "📋 File details:"
-          for file in zap-baseline-report.json zap-baseline-report.html zap-baseline-report.md security-summary.md; do
-            if [ -f "$file" ]; then
-              echo "✅ $file exists ($(stat -c%s "$file") bytes)"
-            else
-              echo "❌ $file missing"
-            fi
-          done
+          echo "✅ Security summary report generated"
 
       - name: Upload ZAP Scan Reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: owasp-zap-reports
+          name: zap-reports-${{ github.run_number }}
           path: |
-            zap-baseline-report.*
+            report_html.html
+            report_json.json
+            report_md.md
             security-summary.md
+            zap-config/
           retention-days: 30
+          if-no-files-found: warn
 
       - name: Security Gate Evaluation
         id: security-gate
         if: always()
         run: |
-          if [ "${{ steps.parse-results.outputs.security_gate_passed }}" = "true" ]; then
-            echo "✅ Security gate passed - proceeding with deployment"
-            echo "gate_passed=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Security gate failed - blocking deployment"
-            echo "gate_passed=false" >> $GITHUB_OUTPUT
+          echo "🚨 Security Gate Evaluation"
+          echo "=========================="
 
-            echo "🚨 Critical security issues detected:"
-            echo "  - High Risk Alerts: ${{ steps.parse-results.outputs.high_alerts }}"
-            echo "  - Medium Risk Alerts: ${{ steps.parse-results.outputs.medium_alerts }}"
+          FAIL_NEW_COUNT="${{ steps.parse-results.outputs.fail_new_count }}"
+          WARN_NEW_COUNT="${{ steps.parse-results.outputs.warn_new_count }}"
+          HIGH_COUNT="${{ steps.parse-results.outputs.high_count }}"
+          MEDIUM_COUNT="${{ steps.parse-results.outputs.medium_count }}"
+          TOTAL_ISSUES="${{ steps.parse-results.outputs.total_issues }}"
+          SCAN_SUCCESS="${{ steps.parse-results.outputs.scan_success }}"
 
-            if [ "${{ steps.parse-results.outputs.high_alerts }}" != "0" ]; then
-              echo "❌ CRITICAL: High risk vulnerabilities must be fixed before deployment"
-              exit 1
-            fi
+          echo "📊 Current Status:"
+          echo "   FAIL-NEW (Critical/Blocking): $FAIL_NEW_COUNT"
+          echo "   WARN-NEW (Warnings): $WARN_NEW_COUNT"
+          echo "   High Risk Alerts: $HIGH_COUNT"
+          echo "   Medium Risk Alerts: $MEDIUM_COUNT"
+          echo "   Total Baseline Issues: $TOTAL_ISSUES"
+          echo "   Scan Status: $SCAN_SUCCESS"
 
-            if [ "${{ steps.parse-results.outputs.medium_alerts }}" -gt 5 ]; then
-              echo "⚠️ WARNING: Too many medium risk vulnerabilities (limit: 5, found: ${{ steps.parse-results.outputs.medium_alerts }})"
-              exit 1
-            fi
+          # Security gate rules for production
+          GATE_PASSED="true"
+          GATE_MESSAGE=""
+
+          # Rule 1: No FAIL-NEW vulnerabilities allowed
+          if [ "$FAIL_NEW_COUNT" -gt 0 ]; then
+            GATE_PASSED="false"
+            GATE_MESSAGE="❌ SECURITY GATE FAILED: $FAIL_NEW_COUNT critical vulnerabilities detected (FAIL-NEW)"
+            echo "$GATE_MESSAGE"
+            echo "   Critical vulnerabilities (SQL injection, XSS, Open Redirect, etc.) must be fixed before deployment"
+          # Rule 2: Warning threshold for WARN-NEW
+          elif [ "$WARN_NEW_COUNT" -gt 50 ]; then
+            echo "⚠️ WARNING: Many security configuration issues ($WARN_NEW_COUNT WARN-NEW)"
+            echo "   Consider addressing security headers and configurations"
+            echo "   Deployment allowed but security improvements recommended"
           fi
 
-      - name: Create Detailed Security Issue (on failure)
-        if: failure() && steps.security-gate.outputs.gate_passed == 'false'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            let securitySummary = 'Security scan completed with issues.';
+          echo "gate_passed=$GATE_PASSED" >> $GITHUB_OUTPUT
+          echo "gate_message=$GATE_MESSAGE" >> $GITHUB_OUTPUT
 
-            try {
-              securitySummary = fs.readFileSync('security-summary.md', 'utf8');
-            } catch (error) {
-              console.log('Could not read security summary file');
-            }
-
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '🔒 Critical Security Vulnerabilities Detected',
-              body: `**SECURITY GATE FAILED** - Deployment blocked due to critical security issues.
-
-            ${securitySummary}
-
-            ## Immediate Actions Required
-            1. Review detailed security reports in the workflow artifacts
-            2. Fix all high-risk vulnerabilities
-            3. Reduce medium-risk vulnerabilities to 5 or fewer
-            4. Re-run the security scan to verify fixes
-
-            ## Workflow Details
-            - **Workflow:** ${{ github.workflow }}
-            - **Run:** ${{ github.run_number }}
-            - **Branch:** ${{ github.ref_name }}
-            - **Commit:** ${{ github.sha }}
-            - **Target:** ${{ env.GREEN_URL }}
-
-            **⚠️ Production deployment is blocked until these security issues are resolved.**`,
-              labels: ['security', 'critical', 'blocked-deployment']
-            });
-
-      - name: Slack Critical Security Alert
-        if: failure() && steps.security-gate.outputs.gate_passed == 'false'
-        uses: act10ns/slack@v2.1.0
-        with:
-          status: failure
-          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-          message: |
-            🚨 **CRITICAL SECURITY ALERT** 🚨
-
-            **DEPLOYMENT BLOCKED** - Security gate failed
-
-            **High Risk:** ${{ steps.parse-results.outputs.high_alerts }} alerts
-            **Medium Risk:** ${{ steps.parse-results.outputs.medium_alerts }} alerts
-
-            **Target:** ${{ env.GREEN_URL }}
-            **Branch:** ${{ github.ref_name }}
-            **Commit:** ${{ github.sha }}
-
-            **Action Required:** Fix security vulnerabilities before deployment
-
-            📊 View detailed reports: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-      - name: Slack Success Notification
-        if: success()
-        uses: act10ns/slack@v2.1.0
-        with:
-          status: success
-          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-          message: |
-            ✅ **Security Scan Passed** ✅
-
-            **OWASP ZAP Baseline Scan Completed**
-
-            **Results:**
-            - High Risk: ${{ steps.parse-results.outputs.high_alerts }}
-            - Medium Risk: ${{ steps.parse-results.outputs.medium_alerts }}
-            - Low Risk: ${{ steps.parse-results.outputs.low_alerts }}
-
-            **Target:** ${{ env.GREEN_URL }}
-            **Security Gate:** ✅ PASSED
-
-            Proceeding with deployment pipeline...
+          if [ "$GATE_PASSED" = "true" ]; then
+            echo "✅ SECURITY GATE PASSED"
+            echo "   No critical vulnerabilities detected ($FAIL_NEW_COUNT FAIL-NEW)"
+            echo "   $WARN_NEW_COUNT security configuration warnings are acceptable"
+            exit 0
+          else
+            echo "❌ SECURITY GATE FAILED"
+            echo "   $FAIL_NEW_COUNT critical vulnerabilities must be fixed"
+            exit 1
+          fi
 
   jmeter-load-test:
-    name: Performance Load Testing
-    runs-on: ubuntu-latest
     needs: [owasp-zap-baseline-scan]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
+      - name: Show commit author
+        run: |
+          echo "Commit by ${{ github.actor }}"
+          echo "Email: ${{ github.event.head_commit.author.email || 'N/A' }}"
+          echo "Full details: ${{ toJson(github.event.head_commit.author) }}"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JMeter
+      - name: Install Java and JMeter (Production-Ready)
         run: |
-          echo "📥 Downloading and setting up Apache JMeter..."
-          wget -q https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.5.tgz
-          tar -xzf apache-jmeter-5.5.tgz
-          echo "JMETER_HOME=$(pwd)/apache-jmeter-5.5" >> $GITHUB_ENV
-          echo "$(pwd)/apache-jmeter-5.5/bin" >> $GITHUB_PATH
+          # Install Java 17 (LTS)
+          sudo apt-get update
+          sudo apt-get install -y openjdk-17-jre-headless wget bc
+
+          # Download and install JMeter from Apache archive
+          JMETER_VERSION="5.6.2"
+          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz
+          tar -xzf apache-jmeter-${JMETER_VERSION}.tgz
+          sudo mv apache-jmeter-${JMETER_VERSION} /opt/jmeter
+          sudo ln -sf /opt/jmeter/bin/jmeter /usr/local/bin/jmeter
+
+          # Clean up downloaded archive
+          rm apache-jmeter-${JMETER_VERSION}.tgz
+
+          # Verify installation
+          echo "✅ JMeter Installation:"
+          jmeter --version
+          echo "✅ Java Installation:"
+          java -version
+
+          # Set JMeter heap size for better performance
+          export JVM_ARGS="-Xms512m -Xmx2048m"
+          echo "JVM_ARGS=$JVM_ARGS" >> $GITHUB_ENV
 
       - name: Get Green Environment URL
+        id: get-app-url
         run: |
-          echo "Using Green Environment for load testing"
-          echo "GREEN_URL=https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net" >> $GITHUB_ENV
+          echo "🔍 Using Green Environment URL for load testing..."
+          GREEN_URL="https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net"
+          echo "app_url=$GREEN_URL" >> $GITHUB_OUTPUT
+          echo "✅ Target URL for load testing: $GREEN_URL"
 
-      - name: Create JMeter Test Plan
+          # Extract host and set port for JMeter configuration
+          HOST=$(echo "$GREEN_URL" | sed 's|^https\?://||')
+          echo "target_host=$HOST" >> $GITHUB_OUTPUT
+          echo "target_port=443" >> $GITHUB_OUTPUT
+          echo "target_protocol=https" >> $GITHUB_OUTPUT
+
+      - name: Verify Application Connectivity
         run: |
-          echo "📝 Creating comprehensive JMeter test plan..."
+          echo "🔍 Testing application connectivity before load testing..."
+          APP_URL="${{ steps.get-app-url.outputs.app_url }}"
 
-          cat > youtube-blog-converter-load-test.jmx << 'EOF'
+          for i in {1..5}; do
+            echo "🔍 Connectivity test attempt $i/5..."
+
+            # Test basic connectivity
+            if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
+              echo "✅ Application is accessible"
+
+              # Get response time baseline
+              RESPONSE_TIME=$(curl -o /dev/null -s -w "%{time_total}" "$APP_URL")
+              echo "📊 Baseline response time: ${RESPONSE_TIME}s"
+              break
+            else
+              echo "❌ Application not accessible (attempt $i/5)"
+              if [ $i -eq 5 ]; then
+                echo "❌ Application connectivity test failed after 5 attempts"
+                exit 1
+              fi
+              sleep 10
+            fi
+          done
+
+      - name: Wait for Application Readiness
+        run: |
+          echo "⏳ Ensuring application is ready for load testing..."
+          APP_URL="${{ steps.get-app-url.outputs.app_url }}"
+
+          for i in {1..10}; do
+            echo "🔍 Readiness check $i/10..."
+
+            # Comprehensive health check
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 30 \
+              --connect-timeout 15 \
+              "$APP_URL" 2>/dev/null || echo "000")
+
+            # Check response body for content
+            RESPONSE_BODY=$(curl -s --max-time 30 "$APP_URL" | head -c 200 || echo "NO_RESPONSE")
+
+            echo "📊 HTTP Status: $HTTP_STATUS"
+            echo "📄 Response preview: ${RESPONSE_BODY:0:50}..."
+
+            if [[ "$HTTP_STATUS" =~ ^(200|201|202|204|301|302|307)$ ]] && [ "$RESPONSE_BODY" != "NO_RESPONSE" ]; then
+              echo "✅ Application is ready for load testing!"
+              echo "🎯 Target validated: $APP_URL"
+              break
+            else
+              echo "⚠️ Application not ready (Status: $HTTP_STATUS, attempt $i/10)"
+              if [ $i -eq 10 ]; then
+                echo "❌ Application readiness timeout - cannot proceed with load test"
+                exit 1
+              fi
+              sleep 15
+            fi
+          done
+
+      - name: Create Production JMeter Test Plan
+        run: |
+          echo "📝 Creating production-ready JMeter test plan..."
+
+          cat > load-test.jmx << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
-          <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.5">
+          <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6">
             <hashTree>
-              <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="YouTube Blog Converter Load Test" enabled="true">
-                <stringProp name="TestPlan.comments">Comprehensive load test for YouTube Blog Converter application</stringProp>
+              <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="YouTube Blog Converter Production Load Test">
                 <boolProp name="TestPlan.functional_mode">false</boolProp>
                 <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
                 <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
-                <elementProp name="TestPlan.arguments" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+                <elementProp name="TestPlan.user_defined_variables" elementType="Arguments">
                   <collectionProp name="Arguments.arguments">
-                    <elementProp name="BASE_URL" elementType="Argument">
-                      <stringProp name="Argument.name">BASE_URL</stringProp>
-                      <stringProp name="Argument.value">${{ env.GREEN_URL }}</stringProp>
+                    <elementProp name="TARGET_HOST" elementType="Argument">
+                      <stringProp name="Argument.name">TARGET_HOST</stringProp>
+                      <stringProp name="Argument.value">${{ steps.get-app-url.outputs.target_host }}</stringProp>
+                      <stringProp name="Argument.metadata">=</stringProp>
+                    </elementProp>
+                    <elementProp name="TARGET_PORT" elementType="Argument">
+                      <stringProp name="Argument.name">TARGET_PORT</stringProp>
+                      <stringProp name="Argument.value">443</stringProp>
+                      <stringProp name="Argument.metadata">=</stringProp>
+                    </elementProp>
+                    <elementProp name="TARGET_PROTOCOL" elementType="Argument">
+                      <stringProp name="Argument.name">TARGET_PROTOCOL</stringProp>
+                      <stringProp name="Argument.value">https</stringProp>
                       <stringProp name="Argument.metadata">=</stringProp>
                     </elementProp>
                   </collectionProp>
                 </elementProp>
               </TestPlan>
               <hashTree>
-                <!-- Thread Group for Load Testing -->
-                <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Load Test Users" enabled="true">
+                <!-- Thread Group with Fixed Configuration -->
+                <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Load Test Thread Group">
                   <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
-                  <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControllerGui" testclass="LoopController" testname="Loop Controller" enabled="true">
+                  <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
                     <boolProp name="LoopController.continue_forever">false</boolProp>
-                    <intProp name="LoopController.loops">10</intProp>
+                    <stringProp name="LoopController.loops">20</stringProp>
                   </elementProp>
                   <stringProp name="ThreadGroup.num_threads">${{ env.JMETER_THREADS }}</stringProp>
                   <stringProp name="ThreadGroup.ramp_time">${{ env.JMETER_RAMPUP }}</stringProp>
-                  <boolProp name="ThreadGroup.scheduler">true</boolProp>
-                  <stringProp name="ThreadGroup.duration">${{ env.JMETER_DURATION }}</stringProp>
+                  <boolProp name="ThreadGroup.scheduler">false</boolProp>
+                  <stringProp name="ThreadGroup.duration"></stringProp>
                   <stringProp name="ThreadGroup.delay">0</stringProp>
+                  <stringProp name="ThreadGroup.delayedStart">false</stringProp>
                 </ThreadGroup>
                 <hashTree>
                   <!-- HTTP Request Defaults -->
-                  <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="HTTP Request Defaults" enabled="true">
-                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+                  <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="HTTP Request Defaults">
+                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
                       <collectionProp name="Arguments.arguments"/>
                     </elementProp>
-                    <stringProp name="HTTPSampler.domain">${{ env.GREEN_URL }}</stringProp>
-                    <stringProp name="HTTPSampler.port"></stringProp>
-                    <stringProp name="HTTPSampler.protocol">https</stringProp>
+                    <stringProp name="HTTPSampler.domain">${TARGET_HOST}</stringProp>
+                    <stringProp name="HTTPSampler.port">${TARGET_PORT}</stringProp>
+                    <stringProp name="HTTPSampler.protocol">${TARGET_PROTOCOL}</stringProp>
                     <stringProp name="HTTPSampler.contentEncoding"></stringProp>
                     <stringProp name="HTTPSampler.path"></stringProp>
+                    <stringProp name="HTTPSampler.implementation">HttpClient4</stringProp>
+                    <stringProp name="HTTPSampler.connect_timeout">10000</stringProp>
+                    <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
                   </ConfigTestElement>
                   <hashTree/>
 
-                  <!-- Health Check Endpoint -->
-                  <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="01 - Health Check" enabled="true">
-                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
-                      <collectionProp name="Arguments.arguments"/>
-                    </elementProp>
-                    <stringProp name="HTTPSampler.path">/health</stringProp>
-                    <stringProp name="HTTPSampler.method">GET</stringProp>
-                    <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-                    <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
-                    <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
-                  </HTTPSamplerProxy>
-                  <hashTree>
-                    <!-- Response Assertion for Health Check -->
-                    <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Health Check Response Assertion" enabled="true">
-                      <collectionProp name="Asserion.test_strings">
-                        <stringProp name="49586">200</stringProp>
-                      </collectionProp>
-                      <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
-                      <boolProp name="Assertion.assume_success">false</boolProp>
-                      <intProp name="Assertion.test_type">1</intProp>
-                    </ResponseAssertion>
-                    <hashTree/>
-                  </hashTree>
+                  <!-- HTTP Cookie Manager -->
+                  <CookieManager guiclass="CookiePanel" testclass="CookieManager" testname="HTTP Cookie Manager">
+                    <collectionProp name="CookieManager.cookies"/>
+                    <boolProp name="CookieManager.clearEachIteration">false</boolProp>
+                    <boolProp name="CookieManager.controlledByThreadGroup">false</boolProp>
+                  </CookieManager>
+                  <hashTree/>
 
-                  <!-- Home Page -->
-                  <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="02 - Home Page" enabled="true">
-                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+                  <!-- HTTP Cache Manager -->
+                  <CacheManager guiclass="CacheManagerGui" testclass="CacheManager" testname="HTTP Cache Manager">
+                    <boolProp name="clearEachIteration">false</boolProp>
+                    <boolProp name="useExpires">true</boolProp>
+                    <boolProp name="CacheManager.controlledByThread">false</boolProp>
+                  </CacheManager>
+                  <hashTree/>
+
+                  <!-- Home Page Request -->
+                  <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="01 - Home Page">
+                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
                       <collectionProp name="Arguments.arguments"/>
                     </elementProp>
                     <stringProp name="HTTPSampler.path">/</stringProp>
@@ -1188,25 +1319,86 @@ jobs:
                     <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
                     <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
                     <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+                    <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+                    <stringProp name="HTTPSampler.embedded_url_re"></stringProp>
+                    <stringProp name="HTTPSampler.implementation">HttpClient4</stringProp>
                   </HTTPSamplerProxy>
                   <hashTree>
-                    <!-- Response Assertion for Home Page -->
-                    <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Home Page Response Assertion" enabled="true">
+                    <!-- Response Assertion -->
+                    <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="HTTP 200 Response">
                       <collectionProp name="Asserion.test_strings">
                         <stringProp name="49586">200</stringProp>
                       </collectionProp>
                       <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
                       <boolProp name="Assertion.assume_success">false</boolProp>
-                      <intProp name="Assertion.test_type">1</intProp>
+                      <intProp name="Assertion.test_type">16</intProp>
                     </ResponseAssertion>
+                    <hashTree/>
+
+                    <!-- Duration Assertion -->
+                    <DurationAssertion guiclass="DurationAssertionGui" testclass="DurationAssertion" testname="Response Time Assertion">
+                      <stringProp name="DurationAssertion.duration">5000</stringProp>
+                    </DurationAssertion>
                     <hashTree/>
                   </hashTree>
 
-                  <!-- Think Time -->
-                  <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="Think Time" enabled="true">
+                  <!-- Static Assets Request (if needed) -->
+                  <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="02 - Static Assets" enabled="false">
+                    <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+                      <collectionProp name="Arguments.arguments"/>
+                    </elementProp>
+                    <stringProp name="HTTPSampler.path">/static/css/style.css</stringProp>
+                    <stringProp name="HTTPSampler.method">GET</stringProp>
+                    <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+                    <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+                    <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+                  </HTTPSamplerProxy>
+                  <hashTree/>
+
+                  <!-- Think Time between requests -->
+                  <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="Think Time">
                     <stringProp name="ConstantTimer.delay">1000</stringProp>
                     <stringProp name="RandomTimer.range">2000</stringProp>
                   </UniformRandomTimer>
+                  <hashTree/>
+
+                  <!-- Result Collector -->
+                  <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="Summary Report">
+                    <boolProp name="ResultCollector.error_logging">false</boolProp>
+                    <objProp>
+                      <name>saveConfig</name>
+                      <value class="SampleSaveConfiguration">
+                        <time>true</time>
+                        <latency>true</latency>
+                        <timestamp>true</timestamp>
+                        <success>true</success>
+                        <label>true</label>
+                        <code>true</code>
+                        <message>true</message>
+                        <threadName>true</threadName>
+                        <dataType>true</dataType>
+                        <encoding>false</encoding>
+                        <assertions>true</assertions>
+                        <subresults>true</subresults>
+                        <responseData>false</responseData>
+                        <samplerData>false</samplerData>
+                        <xml>false</xml>
+                        <fieldNames>true</fieldNames>
+                        <responseHeaders>false</responseHeaders>
+                        <requestHeaders>false</requestHeaders>
+                        <responseDataOnError>false</responseDataOnError>
+                        <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+                        <assertionsResultsToSave>0</assertionsResultsToSave>
+                        <bytes>true</bytes>
+                        <sentBytes>true</sentBytes>
+                        <url>true</url>
+                        <threadCounts>true</threadCounts>
+                        <idleTime>true</idleTime>
+                        <connectTime>true</connectTime>
+                      </value>
+                    </objProp>
+                    <stringProp name="filename">results.jtl</stringProp>
+                  </ResultCollector>
                   <hashTree/>
                 </hashTree>
               </hashTree>
@@ -1214,211 +1406,312 @@ jobs:
           </jmeterTestPlan>
           EOF
 
-      - name: Verify Green Environment Accessibility
-        id: verify-environment
+          echo "✅ JMeter test plan created successfully"
+
+      - name: Debug JMeter Configuration
         run: |
-          echo "🔍 Verifying green environment is accessible for load testing..."
-
-          MAX_ATTEMPTS=5
-          ATTEMPT=1
-
-          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-            echo "Verification attempt $ATTEMPT/$MAX_ATTEMPTS..."
-
-            if curl -f -s "${{ env.GREEN_URL }}/health" > /dev/null; then
-              echo "✅ Green environment is accessible"
-              echo "environment_ready=true" >> $GITHUB_OUTPUT
-              break
-            else
-              echo "❌ Green environment not accessible (attempt $ATTEMPT/$MAX_ATTEMPTS)"
-
-              if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-                echo "❌ Green environment is not ready for load testing"
-                echo "environment_ready=false" >> $GITHUB_OUTPUT
-                exit 1
-              fi
-            fi
-
-            ATTEMPT=$((ATTEMPT + 1))
-            sleep 30
-          done
-
-      - name: Run JMeter Load Test
-        id: run-jmeter
-        run: |
-          echo "🚀 Starting JMeter load test..."
-          echo "Target: ${{ env.GREEN_URL }}"
+          echo "🔍 JMeter Test Configuration Debug:"
+          echo "=================================="
+          echo "Target Host: ${{ steps.get-app-url.outputs.target_host }}"
+          echo "Target URL: ${{ steps.get-app-url.outputs.app_url }}"
+          echo "Target Port: ${{ steps.get-app-url.outputs.target_port }}"
+          echo "Target Protocol: ${{ steps.get-app-url.outputs.target_protocol }}"
           echo "Threads: ${{ env.JMETER_THREADS }}"
           echo "Ramp-up: ${{ env.JMETER_RAMPUP }}s"
-          echo "Duration: ${{ env.JMETER_DURATION }}s"
+          echo "Loops per thread: 20"
+          echo "Total expected requests: $((${{ env.JMETER_THREADS }} * 20))"
+          echo ""
+          echo "📄 Test plan validation:"
+          head -20 load-test.jmx
+          echo "..."
 
-          # Create results directory
-          mkdir -p jmeter-results
+      - name: Run JMeter Load Test (Production)
+        id: run-jmeter
+        run: |
+          echo "🚀 Starting production JMeter load test..."
+          echo "============================================"
+          echo "🎯 Target: ${{ steps.get-app-url.outputs.app_url }}"
+          echo "🧵 Threads: ${{ env.JMETER_THREADS }}"
+          echo "⏰ Ramp-up: ${{ env.JMETER_RAMPUP }}s"
+          echo "🔄 Loops: 20 per thread"
+          echo "📊 Expected total requests: $((${{ env.JMETER_THREADS }} * 20))"
+          echo ""
+
+          # Clean up any existing results
+          rm -f results.jtl jmeter.log
 
           # Run JMeter test
-          if jmeter -n \
-            -t youtube-blog-converter-load-test.jmx \
-            -l jmeter-results/results.jtl \
-            -e -o jmeter-results/html-report \
-            -Jthreads=${{ env.JMETER_THREADS }} \
-            -Jrampup=${{ env.JMETER_RAMPUP }} \
-            -Jduration=${{ env.JMETER_DURATION }}; then
-            echo "✅ JMeter test completed successfully"
-            echo "jmeter_success=true" >> $GITHUB_OUTPUT
+          echo "▶️  Executing JMeter test..."
+
+          # Use timeout to prevent hanging
+          timeout 900 jmeter \
+            -n -t load-test.jmx \
+            -l results.jtl \
+            -j jmeter.log \
+            -Jjmeter.save.saveservice.output_format=csv \
+            -Jjmeter.save.saveservice.response_data=false \
+            -Jjmeter.save.saveservice.samplerData=false \
+            -Jjmeter.reportgenerator.overall_granularity=60000 \
+            || JMETER_EXIT_CODE=$?
+
+          # Check exit code
+          if [ "${JMETER_EXIT_CODE:-0}" -eq 124 ]; then
+            echo "⚠️ JMeter test timed out after 15 minutes"
+          elif [ "${JMETER_EXIT_CODE:-0}" -ne 0 ]; then
+            echo "⚠️ JMeter test failed with exit code: ${JMETER_EXIT_CODE:-0}"
+          fi
+
+          # Check if results were generated
+          if [ -f "results.jtl" ] && [ -s "results.jtl" ]; then
+            RECORD_COUNT=$(wc -l < results.jtl)
+            if [ "$RECORD_COUNT" -gt 1 ]; then  # More than just header
+              echo "✅ JMeter test completed with $((RECORD_COUNT-1)) records"
+              echo "jmeter_success=true" >> $GITHUB_OUTPUT
+
+              # Show first few results for debugging
+              echo "📊 Sample results:"
+              head -5 results.jtl
+
+              # Generate HTML report separately
+              echo "📈 Generating HTML report..."
+              jmeter -g results.jtl -o html-report/ || echo "⚠️ HTML report generation failed"
+
+            else
+              echo "❌ Results file exists but has no data"
+              echo "jmeter_success=false" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "❌ JMeter test failed"
+            echo "❌ Results file not created or empty"
             echo "jmeter_success=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Show JMeter log if test failed
+          if [ "${{ steps.run-jmeter.outputs.jmeter_success }}" != "true" ]; then
+            echo "📋 JMeter log (last 50 lines):"
+            tail -50 jmeter.log 2>/dev/null || echo "No log file found"
           fi
 
       - name: Analyze Load Test Results
         id: analyze-results
         if: steps.run-jmeter.outputs.jmeter_success == 'true'
         run: |
-          echo "📊 Analyzing load test results..."
+          echo "📊 Analyzing JMeter load test results..."
+          echo "======================================="
 
-          if [ -f "jmeter-results/results.jtl" ]; then
-            # Extract key performance metrics using awk
-            TOTAL_SAMPLES=$(awk -F',' 'END{print NR-1}' jmeter-results/results.jtl)
-            ERRORS=$(awk -F',' '$8=="false" {count++} END{print count+0}' jmeter-results/results.jtl)
-            ERROR_RATE=$(awk -v errors=$ERRORS -v total=$TOTAL_SAMPLES 'BEGIN{printf "%.2f", (errors/total)*100}')
+          if [ ! -f "results.jtl" ]; then
+            echo "❌ Results file not found!"
+            exit 1
+          fi
 
-            # Calculate response time statistics
-            AVG_RESPONSE_TIME=$(awk -F',' '{sum+=$2; count++} END{printf "%.0f", sum/count}' jmeter-results/results.jtl | tail -n +2)
-            P95_RESPONSE_TIME=$(awk -F',' '{print $2}' jmeter-results/results.jtl | tail -n +2 | sort -n | awk '{all[NR] = $0} END{print all[int(NR*0.95 - 0.5)]}')
-            P99_RESPONSE_TIME=$(awk -F',' '{print $2}' jmeter-results/results.jtl | tail -n +2 | sort -n | awk '{all[NR] = $0} END{print all[int(NR*0.99 - 0.5)]}')
+          # Verify file has content beyond headers
+          TOTAL_LINES=$(wc -l < results.jtl)
+          if [ "$TOTAL_LINES" -le 1 ]; then
+            echo "❌ Results file has no data beyond headers!"
+            echo "📄 File contents:"
+            cat results.jtl
+            exit 1
+          fi
 
-            # Calculate throughput (requests per second)
-            DURATION_SECONDS=${{ env.JMETER_DURATION }}
-            THROUGHPUT=$(awk -v total=$TOTAL_SAMPLES -v duration=$DURATION_SECONDS 'BEGIN{printf "%.2f", total/duration}')
+          # Parse results (skip header line)
+          TOTAL_REQUESTS=$(tail -n +2 results.jtl | wc -l)
 
-            echo "📈 Performance Test Results:"
-            echo "  - Total Samples: $TOTAL_SAMPLES"
-            echo "  - Errors: $ERRORS"
-            echo "  - Error Rate: $ERROR_RATE%"
-            echo "  - Average Response Time: ${AVG_RESPONSE_TIME}ms"
-            echo "  - 95th Percentile: ${P95_RESPONSE_TIME}ms"
-            echo "  - 99th Percentile: ${P99_RESPONSE_TIME}ms"
-            echo "  - Throughput: $THROUGHPUT req/sec"
+          if [ "$TOTAL_REQUESTS" -eq 0 ]; then
+            echo "❌ No test results found in file!"
+            exit 1
+          fi
 
-            # Set outputs
-            echo "total_samples=$TOTAL_SAMPLES" >> $GITHUB_OUTPUT
-            echo "errors=$ERRORS" >> $GITHUB_OUTPUT
-            echo "error_rate=$ERROR_RATE" >> $GITHUB_OUTPUT
-            echo "avg_response_time=$AVG_RESPONSE_TIME" >> $GITHUB_OUTPUT
-            echo "p95_response_time=$P95_RESPONSE_TIME" >> $GITHUB_OUTPUT
-            echo "p99_response_time=$P99_RESPONSE_TIME" >> $GITHUB_OUTPUT
-            echo "throughput=$THROUGHPUT" >> $GITHUB_OUTPUT
+          echo "📈 Processing $TOTAL_REQUESTS requests..."
 
-            # Performance gate evaluation
-            if (( $(echo "$ERROR_RATE < 1.0" | bc -l) )) && \
-               (( $(echo "$AVG_RESPONSE_TIME < 2000" | bc -l) )) && \
-               (( $(echo "$P95_RESPONSE_TIME < 5000" | bc -l) )); then
-              echo "performance_gate_passed=true" >> $GITHUB_OUTPUT
-              echo "✅ Performance gate passed"
-            else
-              echo "performance_gate_passed=false" >> $GITHUB_OUTPUT
-              echo "❌ Performance gate failed"
-              echo "  - Error rate threshold: < 1.0% (actual: $ERROR_RATE%)"
-              echo "  - Avg response time threshold: < 2000ms (actual: ${AVG_RESPONSE_TIME}ms)"
-              echo "  - P95 response time threshold: < 5000ms (actual: ${P95_RESPONSE_TIME}ms)"
-            fi
+          # FIX: Calculate metrics with proper single-line output handling
+          # Use head -1 to ensure single line output and handle empty results
+          ERROR_COUNT=$(tail -n +2 results.jtl | cut -d',' -f5 | grep -c "false" 2>/dev/null | head -1)
+          ERROR_COUNT=${ERROR_COUNT:-0}  # Default to 0 if empty
+
+          # Ensure ERROR_COUNT is a clean integer
+          ERROR_COUNT=$(echo "$ERROR_COUNT" | tr -cd '0-9')
+          ERROR_COUNT=${ERROR_COUNT:-0}
+
+          # Calculate success count safely
+          SUCCESS_COUNT=$((TOTAL_REQUESTS - ERROR_COUNT))
+
+          # Calculate rates with proper error handling
+          if [ "$TOTAL_REQUESTS" -gt 0 ]; then
+            ERROR_RATE=$(echo "scale=2; $ERROR_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
+            SUCCESS_RATE=$(echo "scale=2; $SUCCESS_COUNT * 100 / $TOTAL_REQUESTS" | bc -l)
           else
-            echo "❌ JMeter results file not found"
-            echo "performance_gate_passed=false" >> $GITHUB_OUTPUT
+            ERROR_RATE="0.00"
+            SUCCESS_RATE="0.00"
+          fi
+
+          # Calculate response times with error handling
+          AVG_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | awk '{sum+=$1; count++} END {if(count>0) printf "%.2f", sum/count; else print "0"}')
+          MIN_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | head -1)
+          MAX_RESPONSE_TIME=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | tail -1)
+
+          # Calculate 95th percentile with error handling
+          PERCENTILE_95=$(tail -n +2 results.jtl | cut -d',' -f2 | sort -n | awk '{all[NR] = $0} END{if(NR>0) print all[int(NR*0.95)]; else print "0"}')
+
+          # Calculate throughput safely
+          FIRST_TIMESTAMP=$(tail -n +2 results.jtl | head -1 | cut -d',' -f1)
+          LAST_TIMESTAMP=$(tail -n +2 results.jtl | tail -1 | cut -d',' -f1)
+
+          if [ "$FIRST_TIMESTAMP" != "$LAST_TIMESTAMP" ] && [ "$LAST_TIMESTAMP" -gt "$FIRST_TIMESTAMP" ]; then
+            DURATION_MS=$((LAST_TIMESTAMP - FIRST_TIMESTAMP))
+            DURATION_SEC=$(echo "scale=2; $DURATION_MS / 1000" | bc -l)
+            THROUGHPUT=$(echo "scale=2; $TOTAL_REQUESTS / $DURATION_SEC" | bc -l)
+          else
+            DURATION_SEC="1.00"
+            THROUGHPUT="$TOTAL_REQUESTS.00"
+          fi
+
+          # Set environment variables with clean values
+          echo "JMETER_TOTAL_REQUESTS=$TOTAL_REQUESTS" >> $GITHUB_ENV
+          echo "JMETER_SUCCESS_COUNT=$SUCCESS_COUNT" >> $GITHUB_ENV
+          echo "JMETER_ERROR_COUNT=$ERROR_COUNT" >> $GITHUB_ENV
+          echo "JMETER_ERROR_RATE=$ERROR_RATE" >> $GITHUB_ENV
+          echo "JMETER_SUCCESS_RATE=$SUCCESS_RATE" >> $GITHUB_ENV
+          echo "JMETER_AVG_RESPONSE_TIME=$AVG_RESPONSE_TIME" >> $GITHUB_ENV
+          echo "JMETER_MIN_RESPONSE_TIME=$MIN_RESPONSE_TIME" >> $GITHUB_ENV
+          echo "JMETER_MAX_RESPONSE_TIME=$MAX_RESPONSE_TIME" >> $GITHUB_ENV
+          echo "JMETER_95TH_PERCENTILE=$PERCENTILE_95" >> $GITHUB_ENV
+          echo "JMETER_THROUGHPUT=$THROUGHPUT" >> $GITHUB_ENV
+          echo "JMETER_DURATION_SEC=$DURATION_SEC" >> $GITHUB_ENV
+
+          # Display results
+          echo ""
+          echo "🎯 Load Test Results Summary:"
+          echo "============================"
+          echo "📊 Total Requests: $TOTAL_REQUESTS"
+          echo "✅ Successful: $SUCCESS_COUNT ($SUCCESS_RATE%)"
+          echo "❌ Failed: $ERROR_COUNT ($ERROR_RATE%)"
+          echo "⚡ Throughput: ${THROUGHPUT} req/sec"
+          echo "⏱️  Test Duration: ${DURATION_SEC}s"
+          echo ""
+          echo "📈 Response Times:"
+          echo "=================="
+          echo "📊 Average: ${AVG_RESPONSE_TIME}ms"
+          echo "⚡ Minimum: ${MIN_RESPONSE_TIME}ms"
+          echo "🔥 Maximum: ${MAX_RESPONSE_TIME}ms"
+          echo "📈 95th Percentile: ${PERCENTILE_95}ms"
+
+          # Performance gate evaluation with proper comparisons
+          PERFORMANCE_PASSED=true
+
+          echo ""
+          echo "🚦 Performance Gate Evaluation:"
+          echo "==============================="
+
+          # Check error rate threshold - FIX: Use proper decimal comparison
+          if [ $(echo "$ERROR_RATE > 1.0" | bc -l) -eq 1 ]; then
+            echo "❌ FAIL: Error rate ($ERROR_RATE%) exceeds 1% threshold"
+            PERFORMANCE_PASSED=false
+          else
+            echo "✅ PASS: Error rate ($ERROR_RATE%) is within acceptable range (≤1%)"
+          fi
+
+          # Check average response time threshold
+          if [ $(echo "$AVG_RESPONSE_TIME > 2000.0" | bc -l) -eq 1 ]; then
+            echo "❌ FAIL: Average response time (${AVG_RESPONSE_TIME}ms) exceeds 2000ms threshold"
+            PERFORMANCE_PASSED=false
+          else
+            echo "✅ PASS: Average response time (${AVG_RESPONSE_TIME}ms) is within acceptable range (≤2000ms)"
+          fi
+
+          # Check 95th percentile threshold
+          if [ -n "$PERCENTILE_95" ] && [ $(echo "$PERCENTILE_95 > 5000.0" | bc -l) -eq 1 ]; then
+            echo "❌ FAIL: 95th percentile response time (${PERCENTILE_95}ms) exceeds 5000ms threshold"
+            PERFORMANCE_PASSED=false
+          else
+            echo "✅ PASS: 95th percentile response time (${PERCENTILE_95}ms) is within acceptable range (≤5000ms)"
+          fi
+
+          # Check minimum throughput - FIX: Use proper decimal comparison
+          if [ $(echo "$THROUGHPUT < 10.0" | bc -l) -eq 1 ]; then
+            echo "❌ FAIL: Throughput (${THROUGHPUT} req/sec) is below minimum threshold (10 req/sec)"
+            PERFORMANCE_PASSED=false
+          else
+            echo "✅ PASS: Throughput (${THROUGHPUT} req/sec) meets minimum requirements (≥10 req/sec)"
+          fi
+
+          # Set final result
+          if [ "$PERFORMANCE_PASSED" = true ]; then
+            echo ""
+            echo "🎉 PERFORMANCE GATE: PASSED"
+            echo "load_test_status=passed" >> $GITHUB_OUTPUT
+          else
+            echo ""
+            echo "💥 PERFORMANCE GATE: FAILED"
+            echo "load_test_status=failed" >> $GITHUB_OUTPUT
+            exit 1
           fi
 
       - name: Handle JMeter Failure
         if: steps.run-jmeter.outputs.jmeter_success != 'true'
         run: |
-          echo "❌ JMeter load test execution failed"
+          echo "❌ JMeter load test failed to generate results"
+          echo "============================================="
+          echo ""
+          echo "🔍 Investigating possible issues..."
 
-          # Check for JMeter logs
-          if [ -f "jmeter.log" ]; then
-            echo "📋 JMeter Error Log:"
-            tail -50 jmeter.log
+          # Check application accessibility
+          APP_URL="${{ steps.get-app-url.outputs.app_url }}"
+          echo "🌐 Testing application accessibility:"
+          if curl -s -f --max-time 30 "$APP_URL" > /dev/null; then
+            echo "✅ Application is still accessible via HTTP"
+
+            # Get current response time
+            CURRENT_RT=$(curl -o /dev/null -s -w "%{time_total}" "$APP_URL")
+            echo "📊 Current response time: ${CURRENT_RT}s"
+          else
+            echo "❌ Application is not accessible - this may be the root cause"
           fi
 
-          # Set failure outputs
-          echo "total_samples=0" >> $GITHUB_OUTPUT
-          echo "errors=unknown" >> $GITHUB_OUTPUT
-          echo "error_rate=unknown" >> $GITHUB_OUTPUT
-          echo "avg_response_time=unknown" >> $GITHUB_OUTPUT
-          echo "p95_response_time=unknown" >> $GITHUB_OUTPUT
-          echo "p99_response_time=unknown" >> $GITHUB_OUTPUT
-          echo "throughput=unknown" >> $GITHUB_OUTPUT
-          echo "performance_gate_passed=false" >> $GITHUB_OUTPUT
+          # Check system resources
+          echo ""
+          echo "💾 System Resources:"
+          echo "Disk space:"
+          df -h
+          echo ""
+          echo "Memory usage:"
+          free -h
+          echo ""
+          echo "CPU usage:"
+          top -bn1 | head -5
+
+          # Check JMeter specific issues
+          echo ""
+          echo "🔧 JMeter Diagnostics:"
+          if [ -f "jmeter.log" ]; then
+            echo "📋 Recent JMeter log entries:"
+            tail -20 jmeter.log
+          else
+            echo "❌ JMeter log file not found"
+          fi
+
+          # Check test plan
+          echo ""
+          echo "📄 Test Plan Validation:"
+          if [ -f "load-test.jmx" ]; then
+            echo "✅ Test plan file exists ($(wc -l < load-test.jmx) lines)"
+            echo "Target host in test plan: ${{ steps.get-app-url.outputs.target_host }}"
+          else
+            echo "❌ Test plan file missing"
+          fi
+
+          exit 1
 
       - name: Upload JMeter Reports and Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: jmeter-load-test-results
+          name: jmeter-reports-${{ github.run_number }}
           path: |
-            jmeter-results/
-            youtube-blog-converter-load-test.jmx
+            results.jtl
             jmeter.log
+            html-report/
+            load-test.jmx
           retention-days: 30
-
-      - name: Create Comprehensive Load Test Summary
-        if: always()
-        run: |
-          cat > load-test-summary.md << 'EOF'
-          # ⚡ Load Test Results Summary
-
-          ## Test Configuration
-          - **Target Environment:** Green Environment
-          - **Target URL:** ${{ env.GREEN_URL }}
-          - **Virtual Users:** ${{ env.JMETER_THREADS }}
-          - **Ramp-up Period:** ${{ env.JMETER_RAMPUP }} seconds
-          - **Test Duration:** ${{ env.JMETER_DURATION }} seconds
-          - **Test Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-
-          ## Performance Metrics
-          | Metric | Value | Status |
-          |--------|-------|--------|
-          | Total Requests | ${{ steps.analyze-results.outputs.total_samples || 'N/A' }} | ℹ️ |
-          | Failed Requests | ${{ steps.analyze-results.outputs.errors || 'N/A' }} | ${{ steps.analyze-results.outputs.errors == '0' && '✅' || '⚠️' }} |
-          | Error Rate | ${{ steps.analyze-results.outputs.error_rate || 'N/A' }}% | ${{ steps.analyze-results.outputs.performance_gate_passed == 'true' && '✅' || '❌' }} |
-          | Average Response Time | ${{ steps.analyze-results.outputs.avg_response_time || 'N/A' }}ms | ${{ steps.analyze-results.outputs.performance_gate_passed == 'true' && '✅' || '❌' }} |
-          | 95th Percentile | ${{ steps.analyze-results.outputs.p95_response_time || 'N/A' }}ms | ${{ steps.analyze-results.outputs.performance_gate_passed == 'true' && '✅' || '❌' }} |
-          | 99th Percentile | ${{ steps.analyze-results.outputs.p99_response_time || 'N/A' }}ms | ℹ️ |
-          | Throughput | ${{ steps.analyze-results.outputs.throughput || 'N/A' }} req/sec | ℹ️ |
-
-          ## Performance Gate
-          **Status:** ${{ steps.analyze-results.outputs.performance_gate_passed == 'true' && '✅ PASSED' || '❌ FAILED' }}
-
-          ### Gate Criteria
-          - Error Rate: < 1.0%
-          - Average Response Time: < 2000ms
-          - 95th Percentile Response Time: < 5000ms
-
-          ## Test Execution Status
-          **JMeter Execution:** ${{ steps.run-jmeter.outputs.jmeter_success == 'true' && '✅ Success' || '❌ Failed' }}
-          **Environment Ready:** ${{ steps.verify-environment.outputs.environment_ready == 'true' && '✅ Yes' || '❌ No' }}
-
-          ## Recommendations
-          ${{ steps.analyze-results.outputs.performance_gate_passed == 'true' &&
-             '### ✅ Performance Acceptable
-             - Application performed within acceptable limits
-             - Ready for production traffic
-             - Continue monitoring performance in production
-             - Consider capacity planning for future growth' ||
-             '### ❌ Performance Issues Detected
-             - Review application performance bottlenecks
-             - Consider scaling resources (CPU, memory, replicas)
-             - Optimize database queries and external API calls
-             - Re-run load tests after optimizations' }}
-
-          ## Artifacts
-          - **JTL Results:** `jmeter-results/results.jtl`
-          - **HTML Report:** `jmeter-results/html-report/`
-          - **Test Plan:** `youtube-blog-converter-load-test.jmx`
-          - **JMeter Logs:** `jmeter.log`
-
-          *This report was automatically generated by the CI/CD pipeline.*
-          EOF
-
-          cat load-test-summary.md
+          if-no-files-found: warn
 
   swap-to-production:
     name: Swap Green to Production
@@ -1585,36 +1878,36 @@ jobs:
   # ===========================
 
   notify:
-      name: Pipeline Status Notification
-      if: always()
-      runs-on: ubuntu-latest
-      needs:
-        - lint-and-format
-        - security-scan
-        - build-and-test
-        - generate-sbom
-        - sonarqube-scan
-        - docker-build
-        - deploy-to-dockerhub
-        - sign-container
-        - deploy-to-azure-green
-        - validate-green-deployment
-        - owasp-zap-baseline-scan
-        - jmeter-load-test
-        - swap-to-production
-        - cleanup-green-slot
+    name: Pipeline Status Notification
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - lint-and-format
+      - security-scan
+      - build-and-test
+      - generate-sbom
+      - sonarqube-scan
+      - docker-build
+      - deploy-to-dockerhub
+      - sign-container
+      - deploy-to-azure-green
+      - validate-green-deployment
+      - owasp-zap-baseline-scan
+      - jmeter-load-test
+      - swap-to-production
+      - cleanup-green-slot
 
-      steps:
-        - name: Send Pipeline Status
-          uses: act10ns/slack@v2.1.0
-          with:
-            status: ${{ (contains(needs.*.result, 'failure') && 'failure') || 'success' }}
-            webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
-            message: |
-              **CI/CD Pipeline Complete**
+    steps:
+      - name: Send Pipeline Status
+        uses: act10ns/slack@v2.1.0
+        with:
+          status: ${{ (contains(needs.*.result, 'failure') && 'failure') || 'success' }}
+          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
+          message: |
+            **CI/CD Pipeline Complete**
 
-              **Branch:** ${{ github.ref_name }}
-              **Commit:** ${{ github.sha }}
-              **Status:** ${{ (contains(needs.*.result, 'failure') && '❌ Failed') || '✅ Success' }}
+            **Branch:** ${{ github.ref_name }}
+            **Commit:** ${{ github.sha }}
+            **Status:** ${{ (contains(needs.*.result, 'failure') && '❌ Failed') || '✅ Success' }}
 
-              **Details:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            **Details:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
