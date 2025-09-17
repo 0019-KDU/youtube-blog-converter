@@ -325,20 +325,21 @@ jobs:
 
       - name: SonarQube Scan
         if: steps.check-token.outputs.skip_scan == 'false'
-        uses: sonarqube-quality-gate-action@master
+        uses: sonarqube/sonarqube-scanner-action@v2.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
         with:
-          projectKey: ${{ vars.SONAR_PROJECT_KEY }}
-          projectName: ${{ vars.SONAR_PROJECT_NAME }}
-          projectVersion: ${{ github.sha }}
-          sources: "app/"
-          tests: "tests/"
-          exclusions: "**/migrations/**,**/venv/**,**/__pycache__/**"
-          sourceEncoding: "UTF-8"
-          python.coverage.reportPaths: "coverage.xml"
-          sonar.python.bandit.reportPaths: "bandit-report.json"
+          args: >
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.projectName=${{ vars.SONAR_PROJECT_NAME }}
+            -Dsonar.projectVersion=${{ github.sha }}
+            -Dsonar.sources=app/
+            -Dsonar.tests=tests/
+            -Dsonar.exclusions=**/migrations/**,**/venv/**,**/__pycache__/**
+            -Dsonar.sourceEncoding=UTF-8
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.python.bandit.reportPaths=bandit-report.json
 
   docker-build:
     runs-on: ubuntu-latest
