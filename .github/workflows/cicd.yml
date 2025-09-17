@@ -636,7 +636,7 @@ jobs:
         run: |
           echo "⏳ Waiting for Green slot to be ready..."
           for i in {1..30}; do
-            response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net/health || echo "000")
+            response=$(curl -s -o /dev/null -w "%{http_code}" https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net/health || echo "000")
             if [ "$response" = "200" ]; then
               echo "✅ Green slot is healthy"
               break
