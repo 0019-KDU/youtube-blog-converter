@@ -1150,8 +1150,34 @@ jobs:
             echo "📦 JMeter not found in cache, downloading..."
             JMETER_VERSION="5.6.2"
 
-            # Use faster mirror and parallel download
-            wget -q --progress=dot:giga https://dlcdn.apache.org/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz
+            # Try multiple mirrors with fallback
+            MIRRORS=(
+              "https://dlcdn.apache.org/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz"
+              "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz"
+              "https://downloads.apache.org/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz"
+            )
+
+            for MIRROR in "${MIRRORS[@]}"; do
+              echo "🔄 Trying mirror: $MIRROR"
+              if wget --timeout=60 --tries=3 --progress=dot:giga "$MIRROR"; then
+                echo "✅ Download successful from: $MIRROR"
+                break
+              else
+                echo "❌ Failed to download from: $MIRROR"
+                rm -f "apache-jmeter-${JMETER_VERSION}.tgz" 2>/dev/null || true
+              fi
+            done
+
+            # Check if download was successful
+            if [ ! -f "apache-jmeter-${JMETER_VERSION}.tgz" ]; then
+              echo "❌ All mirrors failed, trying curl as fallback..."
+              curl -L -o "apache-jmeter-${JMETER_VERSION}.tgz" "https://dlcdn.apache.org/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz"
+            fi
+
+            if [ ! -f "apache-jmeter-${JMETER_VERSION}.tgz" ]; then
+              echo "❌ Failed to download JMeter from all sources"
+              exit 1
+            fi
 
             echo "📂 Extracting JMeter..."
             tar -xzf apache-jmeter-${JMETER_VERSION}.tgz
