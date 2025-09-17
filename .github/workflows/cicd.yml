@@ -607,19 +607,24 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
-      name: azure-green
+      name: azure-green  # Must match the federated credential environment name
+      url: https://yt-agent-green.azurewebsites.net
+    
+    # Add explicit permissions for this job
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Login to Azure
+      - name: Login to Azure with OIDC
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
       - name: Deploy to Green Slot
         uses: azure/webapps-deploy@v3
         with:
