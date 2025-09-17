@@ -625,6 +625,46 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure Green Slot is Started
+        run: |
+          echo "🔄 Ensuring Green slot is started before deployment..."
+
+          # Check current status of green slot
+          GREEN_STATUS=$(az webapp show \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --slot green \
+            --query "state" \
+            --output tsv 2>/dev/null || echo "Unknown")
+
+          echo "Current Green slot status: $GREEN_STATUS"
+
+          if [ "$GREEN_STATUS" = "Stopped" ]; then
+            echo "⚡ Green slot is stopped - starting it now..."
+            az webapp start \
+              --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+              --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+              --slot green
+
+            echo "⏳ Waiting for Green slot to start..."
+            sleep 30
+
+            # Verify it started
+            NEW_STATUS=$(az webapp show \
+              --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+              --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+              --slot green \
+              --query "state" \
+              --output tsv)
+
+            echo "✅ Green slot status after start: $NEW_STATUS"
+          elif [ "$GREEN_STATUS" = "Running" ]; then
+            echo "✅ Green slot is already running"
+          else
+            echo "ℹ️ Green slot status: $GREEN_STATUS - proceeding with deployment"
+          fi
+
       - name: Deploy to Green Slot
         uses: azure/webapps-deploy@v3
         with:
@@ -1478,17 +1518,33 @@ jobs:
 
       - name: Stop Green Slot to Save Costs
         run: |
-          echo "⏸️ Stopping Green slot to save costs..."
+          echo "⏸️ Stopping Green slot to save costs after successful deployment..."
+          echo "ℹ️ Note: Green slot will be automatically restarted on next deployment"
+
           az webapp stop \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
             --name ${{ secrets.AZURE_WEBAPP_NAME }} \
             --slot green
-          echo "✅ Green slot stopped. It will be restarted on next deployment."
+
+          echo "✅ Green slot stopped successfully"
+          echo "💡 Cost optimization: Green slot is now stopped to reduce Azure costs"
+          echo "🔄 Next deployment will automatically restart the Green slot before deploying"
 
       - name: Log Cost Saving Action
         run: |
-          echo "💰 Green slot stopped to optimize costs"
-          echo "The slot will automatically restart on the next deployment"
+          echo "💰 Cost Optimization Summary:"
+          echo "  - Green slot has been stopped to save Azure compute costs"
+          echo "  - Estimated cost savings: ~50% of green slot compute charges"
+          echo "  - Next deployment will automatically restart the green slot"
+          echo "  - No manual intervention required for future deployments"
+          echo ""
+          echo "📋 Deployment Cycle:"
+          echo "  1. Code push → Pipeline starts"
+          echo "  2. Green slot automatically restarted (if stopped)"
+          echo "  3. New version deployed to Green slot"
+          echo "  4. Testing (Security + Performance) on Green slot"
+          echo "  5. Blue-Green swap to Production"
+          echo "  6. Green slot stopped again to save costs"
 
   # ===========================
   # NOTIFICATIONS
