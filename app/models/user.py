@@ -171,6 +171,11 @@ class MongoDBConnectionManager:
     def is_connected(self):
         """Check if MongoDB is connected"""
         try:
+            # If no client, attempt to connect first
+            if self.client is None:
+                self._connect()
+
+            # Now test the connection
             if self.client:
                 self.client.admin.command("ping")
                 return True
