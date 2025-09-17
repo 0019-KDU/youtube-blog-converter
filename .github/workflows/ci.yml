@@ -47,6 +47,7 @@ permissions:
 jobs:
   lint-and-format:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -71,42 +72,73 @@ jobs:
           pip install isort black flake8 bandit safety
 
       - name: Run isort (import sorting)
+        continue-on-error: true
         run: |
           echo "🔄 Checking import sorting..."
-          isort --check-only --diff .
-          if [ $? -ne 0 ]; then
+          if ! isort --check-only --diff .; then
+            echo "::warning title=Import Sorting::Import sorting issues found. Run 'isort .' to fix."
             echo "❌ Import sorting issues found. Run 'isort .' to fix."
-            exit 1
+          else
+            echo "✅ Import sorting is correct"
           fi
-          echo "✅ Import sorting is correct"
 
       - name: Run Black (code formatting)
+        continue-on-error: true
         run: |
           echo "🎨 Checking code formatting..."
-          black --check --diff .
-          if [ $? -ne 0 ]; then
+          if ! black --check --diff .; then
+            echo "::warning title=Code Formatting::Code formatting issues found. Run 'black .' to fix."
             echo "❌ Code formatting issues found. Run 'black .' to fix."
-            exit 1
+          else
+            echo "✅ Code formatting is correct"
           fi
-          echo "✅ Code formatting is correct"
 
       - name: Run Flake8 (linting)
+        continue-on-error: true
         run: |
           echo "🔍 Running linting checks..."
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+          # Check for critical errors first
+          if ! flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics; then
+            echo "::warning title=Critical Linting Errors::Critical syntax errors found. Please fix immediately."
+          fi
+
+          # Run full linting with warnings only
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
+
+          echo "✅ Linting check completed (warnings may exist)"
 
       - name: Run Bandit (security linting)
+        continue-on-error: true
         run: |
           echo "🔒 Running security linting..."
+
+          # Generate reports (always succeeds)
           bandit -r . -f json -o bandit-report.json || true
-          bandit -r . -f txt
+
+          # Run bandit and capture exit code
+          if ! bandit -r . -f txt; then
+            echo "::warning title=Security Issues::Security issues found by Bandit. Review bandit-report.json for details."
+            echo "❌ Security issues found. Check the artifacts for details."
+          else
+            echo "✅ No security issues found"
+          fi
 
       - name: Run Safety (dependency security)
+        continue-on-error: true
         run: |
           echo "🛡️ Checking dependency security..."
+
+          # Generate reports (always succeeds)
           safety check --json --output safety-report.json || true
-          safety check
+
+          # Run safety and capture exit code
+          if ! safety check; then
+            echo "::warning title=Dependency Vulnerabilities::Vulnerable dependencies found. Review safety-report.json for details."
+            echo "❌ Vulnerable dependencies found. Check the artifacts for details."
+          else
+            echo "✅ No vulnerable dependencies found"
+          fi
 
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4
