@@ -608,7 +608,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: azure-green  # Must match the federated credential environment name
-      url: https://yt-agent-green.azurewebsites.net
+      url: https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net
     
     # Add explicit permissions for this job
     permissions:
@@ -648,7 +648,7 @@ jobs:
       - name: Run smoke tests on Green slot
         id: smoke-tests
         run: |
-          GREEN_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net"
+          GREEN_URL="https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net"
 
           # Test health endpoint
           echo "Testing health endpoint..."
@@ -680,7 +680,7 @@ jobs:
             ✅ **Green Slot Deployment Successful**
 
             **Version:** ${{ github.sha }}
-            **Green URL:** https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net
+            **Green URL:** https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net
 
             Ready for swap approval to production.
             Please verify the green environment before approving production swap.
@@ -695,7 +695,7 @@ jobs:
     steps:
       - name: Performance Test on Green Slot
         run: |
-          GREEN_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net"
+          GREEN_URL="https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net"
 
           echo "🔍 Running performance validation on Green slot..."
 
@@ -718,7 +718,7 @@ jobs:
 
       - name: Security Headers Check
         run: |
-          GREEN_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}-green.azurewebsites.net"
+          GREEN_URL="https://yt-agent-green-gta9gtdcfkh5cha6.centralus-01.azurewebsites.net"
 
           echo "🔒 Checking security headers..."
           headers=$(curl -sI $GREEN_URL)
@@ -765,7 +765,7 @@ jobs:
           echo "⏳ Verifying production after swap..."
           sleep 30  # Wait for swap to complete
 
-          PROD_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          PROD_URL="https://yt-agent-h5hjdchdf0byh7fc.centralus-01.azurewebsites.net"
 
           for i in {1..10}; do
             response=$(curl -s -o /dev/null -w "%{http_code}" $PROD_URL/health || echo "000")
@@ -786,7 +786,7 @@ jobs:
             🚀 **Production Deployment Complete**
 
             **Version:** ${{ github.sha }}
-            **Production URL:** https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net
+            **Production URL:** https://yt-agent-h5hjdchdf0byh7fc.centralus-01.azurewebsites.net
             **Status:** ${{ job.status }}
 
             Blue-Green swap completed successfully.
