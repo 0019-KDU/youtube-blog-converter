@@ -1921,6 +1921,94 @@ jobs:
           echo "  6. Green slot stopped again to save costs"
 
   # ===========================
+  # POST-PRODUCTION VALIDATION
+  # ===========================
+
+  production-health-verification:
+    name: Production Health Verification
+    needs: [cleanup-green-slot]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Comprehensive Production Health Check
+        run: |
+          PROD_URL="https://yt-agent-h5hjdchdf0byh7fc.centralus-01.azurewebsites.net"
+
+          echo "🏥 Comprehensive Production Health Verification"
+          echo "=============================================="
+
+          # 1. Basic HTTP Health Check
+          echo "1️⃣ Basic HTTP Health Check..."
+          for i in {1..5}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" $PROD_URL/health || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Health endpoint responding (attempt $i)"
+              break
+            else
+              echo "⚠️ Health check failed: $response (attempt $i/5)"
+              if [ $i -eq 5 ]; then exit 1; fi
+              sleep 10
+            fi
+          done
+
+          # 2. Application-specific endpoints
+          echo "2️⃣ Testing Core Application Endpoints..."
+
+          # Test main page
+          main_status=$(curl -s -o /dev/null -w "%{http_code}" $PROD_URL/ || echo "000")
+          echo "📄 Main page: $main_status"
+
+          # Test API endpoints if available
+          api_status=$(curl -s -o /dev/null -w "%{http_code}" $PROD_URL/api/health || echo "404")
+          echo "🔌 API health: $api_status"
+
+          # 3. Performance baseline check
+          echo "3️⃣ Performance Baseline Check..."
+          response_time=$(curl -o /dev/null -s -w "%{time_total}" $PROD_URL/health)
+          echo "⏱️ Response time: ${response_time}s"
+
+          # Fail if response time > 5 seconds
+          if (( $(echo "$response_time > 5.0" | bc -l) )); then
+            echo "❌ Production response time too slow: ${response_time}s"
+            exit 1
+          fi
+
+  production-smoke-tests:
+    name: Production Smoke Tests
+    needs: [production-health-verification]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Run Production Smoke Tests
+        env:
+          PROD_URL: "https://yt-agent-h5hjdchdf0byh7fc.centralus-01.azurewebsites.net"
+        run: |
+          echo "💨 Production Smoke Tests"
+          echo "========================"
+
+          echo "1️⃣ Testing static assets loading..."
+          css_status=$(curl -s -o /dev/null -w "%{http_code}" $PROD_URL/static/css/style.css || echo "404")
+          js_status=$(curl -s -o /dev/null -w "%{http_code}" $PROD_URL/static/js/main.js || echo "404")
+          echo "📄 CSS: $css_status, JS: $js_status"
+
+          echo "2️⃣ Testing core functionality..."
+          # Test your main form endpoint
+          form_status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "test=true" \
+            $PROD_URL/ || echo "405")
+          echo "📝 Form handling: $form_status"
+
+          echo "3️⃣ Testing error handling..."
+          error_status=$(curl -s -o /dev/null -w "%{http_code}" $PROD_URL/nonexistent-page || echo "000")
+          echo "🚫 404 handling: $error_status"
+
+          echo "✅ All smoke tests completed"
+
+  # ===========================
   # NOTIFICATIONS
   # ===========================
 
@@ -1943,6 +2031,8 @@ jobs:
       - jmeter-load-test
       - swap-to-production
       - cleanup-green-slot
+      - production-health-verification
+      - production-smoke-tests
 
     steps:
       - name: Send Pipeline Status
