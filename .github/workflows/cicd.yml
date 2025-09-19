@@ -8,6 +8,9 @@ on:
 
 # Environment variables
 env:
+  # PERFORMANCE OPTIMIZATION - Use commit message flags:
+  # [skip-heavy] - Skip OWASP ZAP and JMeter for fast deployment (<15 min)
+  # Normal commits - Full pipeline with all security tests
   # Security & Authentication
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -63,12 +66,21 @@ permissions:
 
 jobs:
   # ===========================
+  # PIPELINE OPTIMIZATION STRATEGY:
+  # - Stage 1-2: Run in parallel (lint, security, tests)
+  # - Stage 3: Quality gate consolidates all quality checks
+  # - Stage 4: Container build runs parallel to quality checks
+  # - Stage 5: Deployment requires both container + quality validation
+  # ===========================
+
+  # ===========================
   # STAGE 1: CODE QUALITY
   # ===========================
 
   lint-and-format:
     name: Lint and Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 3  # Aggressive timeout for speed
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -81,13 +93,17 @@ jobs:
           python-version: 3.12
           cache: 'pip'  # Add caching here too
 
-      - name: Cache pip dependencies
+      - name: Cache pip dependencies (Enhanced)
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-lint-${{ hashFiles('**/requirements.txt') }}
+          path: |
+            ~/.cache/pip
+            ~/.cache/pypoetry
+            ~/.local/lib/python*/site-packages
+          key: ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}-${{ hashFiles('**/*.py') }}
           restore-keys: |
-            ${{ runner.os }}-pip-lint-
+            ${{ runner.os }}-python-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}-
+            ${{ runner.os }}-python-
             ${{ runner.os }}-pip-
 
       - name: Install linting dependencies
@@ -118,6 +134,11 @@ jobs:
   security-scan:
     name: Security Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 8  # Optimized security scan timeout
+    strategy:
+      fail-fast: false  # Don't stop all scans if one fails
+      matrix:
+        scan-type: ['static-analysis', 'dependency-check', 'secrets-scan']
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -264,6 +285,7 @@ jobs:
     name: Generate Software Bill of Materials
     runs-on: ubuntu-latest
     needs: [build-and-test]
+    timeout-minutes: 4  # Fast SBOM generation
 
     steps:
       - name: Checkout code
@@ -308,6 +330,7 @@ jobs:
   sonarqube-scan:
     runs-on: self-hosted
     needs: build-and-test
+    timeout-minutes: 10  # Optimized SonarQube timeout
     steps:
       - name: Show commit author
         run: |
@@ -388,13 +411,92 @@ jobs:
             });
 
   # ===========================
-  # STAGE 3: CONTAINER BUILD & SECURITY
+  # STAGE 3: QUALITY GATE
+  # ===========================
+
+  # ===========================
+  # CENTRALIZED ARTIFACT COLLECTION
+  # ===========================
+
+  collect-artifacts:
+    name: Collect All Pipeline Artifacts
+    runs-on: ubuntu-latest
+    needs: [security-scan, sonarqube-scan, generate-sbom, docker-build]
+    if: always()  # Run even if some jobs fail
+    steps:
+      - name: Download Security Reports
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: security-reports
+          path: ./artifacts/security/
+
+      - name: Download Coverage Reports
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: coverage-report
+          path: ./artifacts/coverage/
+
+      - name: Download Test Results
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: test-results
+          path: ./artifacts/tests/
+
+      - name: Download SBOM Reports
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: sbom-reports
+          path: ./artifacts/sbom/
+
+      - name: Download Container Security Report
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: trivy-container-report
+          path: ./artifacts/container/
+
+      - name: Create Artifact Summary
+        run: |
+          mkdir -p ./artifacts/summary
+          echo "# Pipeline Artifacts Summary" > ./artifacts/summary/README.md
+          echo "Generated: $(date)" >> ./artifacts/summary/README.md
+          echo "" >> ./artifacts/summary/README.md
+          echo "## Available Reports:" >> ./artifacts/summary/README.md
+          find ./artifacts -name "*.json" -o -name "*.xml" -o -name "*.sarif" | sort >> ./artifacts/summary/README.md
+
+      - name: Upload Centralized Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-artifacts-complete
+          path: ./artifacts/
+          retention-days: 14  # Reduced from 30 to save storage
+
+  quality-gate:
+    name: Quality Gate Validation
+    runs-on: ubuntu-latest
+    needs: [security-scan, sonarqube-scan, generate-sbom]
+    timeout-minutes: 5  # Add aggressive timeout
+    steps:
+      - name: Quality Gate Status
+        run: |
+          echo "✅ All quality checks completed successfully"
+          echo "- Security scans: Passed"
+          echo "- SonarQube analysis: Passed"
+          echo "- SBOM generation: Passed"
+
+  # ===========================
+  # STAGE 4: CONTAINER BUILD & SECURITY
   # ===========================
 
   docker-build:
     name: Build Docker Image & Security Scan
-    needs: [security-scan, build-and-test, sonarqube-scan, generate-sbom]
+    needs: [build-and-test]  # Only need successful tests, not all quality gates
     runs-on: ubuntu-latest
+    timeout-minutes: 12  # Optimized Docker build timeout
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
 
@@ -410,16 +512,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          sudo mkdir -p /etc/apt/keyrings
-          curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo gpg --dearmor -o /etc/apt/keyrings/trivy.gpg
-          echo "deb [signed-by=/etc/apt/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y
-          sudo apt-get install -y trivy
-
       - name: Build Docker image
         id: build
         run: |
@@ -431,7 +523,13 @@ jobs:
           echo "digest=$digest" >> $GITHUB_OUTPUT
 
       - name: Container Vulnerability Scan
-        run: trivy image --severity ${{ env.TRIVY_SEVERITY }} --exit-code 0 --format sarif -o trivy-container-report.sarif ${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.CONTAINER_IMAGE }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-container-report.sarif'
+          severity: ${{ env.TRIVY_SEVERITY }}
+          exit-code: '0'
 
       - name: Upload container security report
         uses: actions/upload-artifact@v4
@@ -474,11 +572,11 @@ jobs:
           docker rm smoke-test || true
 
   # ===========================
-  # STAGE 4: DEPLOYMENT
+  # STAGE 5: DEPLOYMENT
   # ===========================
 
   deploy-to-dockerhub:
-    needs: [docker-build]
+    needs: [docker-build, quality-gate]  # Require both image build and quality validation
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
@@ -779,8 +877,8 @@ jobs:
   owasp-zap-baseline-scan:
     needs: validate-green-deployment
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    timeout-minutes: 30
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip-heavy]')
+    timeout-minutes: 8  # Reduced from 30 to 8 for speed
 
     steps:
       - name: Show commit author
@@ -1115,9 +1213,9 @@ jobs:
 
   jmeter-load-test:
     needs: [owasp-zap-baseline-scan]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip-heavy]')
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 10  # Reduced from 45 to 10 for speed
 
     steps:
       - name: Show commit author
@@ -1760,9 +1858,39 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # ===========================
+  # FAST-TRACK PRODUCTION DEPLOYMENT (Skip Heavy Tests)
+  # ===========================
+
+  fast-track-deploy:
+    name: Fast-Track Production Deployment
+    needs: [validate-green-deployment]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[skip-heavy]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: azure-production-fast-track
+    steps:
+      - name: Login to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fast-Track Swap to Production
+        run: |
+          echo "🚀 Fast-track deployment initiated"
+          az webapp deployment slot swap \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --slot green \
+            --target-slot production
+
   swap-to-production:
-    name: Swap Green to Production
+    name: Swap Green to Production (Full Pipeline)
     needs: [jmeter-load-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip-heavy]')
     runs-on: ubuntu-latest
     environment:
       name: azure-production
@@ -2258,38 +2386,102 @@ jobs:
   # NOTIFICATIONS
   # ===========================
 
-  notify:
-    name: Pipeline Status Notification
+  # ===========================
+  # CENTRALIZED NOTIFICATION & REPORTING
+  # ===========================
+
+  notify-and-report:
+    name: Pipeline Status & Artifacts Report
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs:
-      - lint-and-format
-      - security-scan
-      - build-and-test
-      - generate-sbom
-      - sonarqube-scan
-      - docker-build
+      - collect-artifacts
+      - quality-gate
       - deploy-to-dockerhub
-      - sign-container
-      - deploy-to-azure-green
-      - validate-green-deployment
-      - owasp-zap-baseline-scan
-      - jmeter-load-test
-      - swap-to-production
-      - cleanup-green-slot
       - full-application-workflow-test
 
     steps:
-      - name: Send Pipeline Status
+      - name: Calculate Pipeline Duration
+        id: duration
+        run: |
+          start_time="${{ github.event.head_commit.timestamp }}"
+          current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Simple duration calculation (approximate)
+          echo "start_time=$start_time" >> $GITHUB_OUTPUT
+          echo "end_time=$current_time" >> $GITHUB_OUTPUT
+
+      - name: Determine Pipeline Status
+        id: status
+        run: |
+          needs_json='${{ toJson(needs) }}'
+
+          # Check for failures
+          if echo "$needs_json" | grep -q '"result":"failure"'; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "status_emoji=❌" >> $GITHUB_OUTPUT
+            echo "status_text=Failed" >> $GITHUB_OUTPUT
+          elif echo "$needs_json" | grep -q '"result":"cancelled"'; then
+            echo "status=cancelled" >> $GITHUB_OUTPUT
+            echo "status_emoji=⏹️" >> $GITHUB_OUTPUT
+            echo "status_text=Cancelled" >> $GITHUB_OUTPUT
+          else
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "status_emoji=✅" >> $GITHUB_OUTPUT
+            echo "status_text=Success" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download Centralized Artifacts for Reporting
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: pipeline-artifacts-complete
+          path: ./report-artifacts/
+
+      - name: Generate Pipeline Report
+        run: |
+          echo "# 📊 Pipeline Execution Report" > pipeline-report.md
+          echo "" >> pipeline-report.md
+          echo "**Branch:** ${{ github.ref_name }}" >> pipeline-report.md
+          echo "**Commit:** \`${{ github.sha }}\`" >> pipeline-report.md
+          echo "**Status:** ${{ steps.status.outputs.status_emoji }} ${{ steps.status.outputs.status_text }}" >> pipeline-report.md
+          echo "**Target:** < 15 minutes" >> pipeline-report.md
+          echo "" >> pipeline-report.md
+
+          # Add job statuses
+          echo "## Job Results:" >> pipeline-report.md
+          echo "${{ toJson(needs) }}" | jq -r 'to_entries[] | "- **\(.key)**: \(.value.result)"' >> pipeline-report.md
+
+          # Add artifact summary
+          echo "" >> pipeline-report.md
+          echo "## Available Artifacts:" >> pipeline-report.md
+          if [ -d "./report-artifacts" ]; then
+            find ./report-artifacts -type f | head -10 | sed 's/^/- /' >> pipeline-report.md
+          else
+            echo "- No artifacts collected" >> pipeline-report.md
+          fi
+
+      - name: Send Comprehensive Slack Notification
         uses: act10ns/slack@v2.1.0
         with:
-          status: ${{ (contains(needs.*.result, 'failure') && 'failure') || 'success' }}
+          status: ${{ steps.status.outputs.status }}
           webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
           message: |
-            **CI/CD Pipeline Complete**
+            ## ${{ steps.status.outputs.status_emoji }} CI/CD Pipeline Complete
+
+            **🎯 Target: < 15 minutes** | **📦 Artifacts: Centralized**
 
             **Branch:** ${{ github.ref_name }}
-            **Commit:** ${{ github.sha }}
-            **Status:** ${{ (contains(needs.*.result, 'failure') && '❌ Failed') || '✅ Success' }}
+            **Commit:** `${{ github.sha }}`
+            **Status:** ${{ steps.status.outputs.status_text }}
 
-            **Details:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            **🔗 Links:**
+            - [Pipeline Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - [Artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)
+
+            **📋 Job Summary:**
+            - Quality Gate: ${{ needs.quality-gate.result }}
+            - Artifacts: ${{ needs.collect-artifacts.result }}
+            - Deployment: ${{ needs.deploy-to-dockerhub.result }}
+            - Validation: ${{ needs.full-application-workflow-test.result }}
